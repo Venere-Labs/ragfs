@@ -40,10 +40,7 @@ pub enum InodeKind {
     /// Similar file lookup
     SimilarLookup { source_path: PathBuf },
     /// Real file/directory passthrough
-    Real {
-        path: PathBuf,
-        underlying_ino: u64,
-    },
+    Real { path: PathBuf, underlying_ino: u64 },
 }
 
 /// Entry in the inode table.
@@ -75,6 +72,7 @@ pub struct InodeTable {
 
 impl InodeTable {
     /// Create a new inode table with virtual inodes initialized.
+    #[must_use]
     pub fn new() -> Self {
         let mut table = Self {
             inodes: HashMap::new(),
@@ -178,6 +176,7 @@ impl InodeTable {
     }
 
     /// Get an inode entry.
+    #[must_use]
     pub fn get(&self, ino: u64) -> Option<&InodeEntry> {
         self.inodes.get(&ino)
     }
@@ -223,7 +222,9 @@ impl InodeTable {
             ino,
             InodeEntry {
                 ino,
-                kind: InodeKind::QueryResult { query: query.clone() },
+                kind: InodeKind::QueryResult {
+                    query: query.clone(),
+                },
                 parent,
                 lookup_count: 0,
             },
@@ -249,11 +250,13 @@ impl InodeTable {
     }
 
     /// Check if inode is virtual (part of .ragfs).
+    #[must_use]
     pub fn is_virtual(&self, ino: u64) -> bool {
         ino < FIRST_REAL_INO
     }
 
     /// Get inode by path (for real files).
+    #[must_use]
     pub fn get_by_path(&self, path: &PathBuf) -> Option<u64> {
         self.path_to_ino.get(path).copied()
     }
@@ -301,14 +304,14 @@ mod tests {
     #[test]
     fn test_inode_kind_root() {
         let kind = InodeKind::Root;
-        let debug_str = format!("{:?}", kind);
+        let debug_str = format!("{kind:?}");
         assert!(debug_str.contains("Root"));
     }
 
     #[test]
     fn test_inode_kind_ragfs_dir() {
         let kind = InodeKind::RagfsDir;
-        let debug_str = format!("{:?}", kind);
+        let debug_str = format!("{kind:?}");
         assert!(debug_str.contains("RagfsDir"));
     }
 
@@ -317,7 +320,7 @@ mod tests {
         let kind = InodeKind::QueryResult {
             query: "test query".to_string(),
         };
-        let debug_str = format!("{:?}", kind);
+        let debug_str = format!("{kind:?}");
         assert!(debug_str.contains("QueryResult"));
         assert!(debug_str.contains("test query"));
     }
@@ -327,7 +330,7 @@ mod tests {
         let kind = InodeKind::SearchResult {
             query: "find files".to_string(),
         };
-        let debug_str = format!("{:?}", kind);
+        let debug_str = format!("{kind:?}");
         assert!(debug_str.contains("SearchResult"));
     }
 
@@ -337,7 +340,7 @@ mod tests {
             path: PathBuf::from("/test/file.txt"),
             underlying_ino: 12345,
         };
-        let debug_str = format!("{:?}", kind);
+        let debug_str = format!("{kind:?}");
         assert!(debug_str.contains("Real"));
         assert!(debug_str.contains("file.txt"));
     }
@@ -347,7 +350,7 @@ mod tests {
         let kind = InodeKind::SimilarLookup {
             source_path: PathBuf::from("/source/doc.pdf"),
         };
-        let debug_str = format!("{:?}", kind);
+        let debug_str = format!("{kind:?}");
         assert!(debug_str.contains("SimilarLookup"));
     }
 
@@ -387,7 +390,7 @@ mod tests {
             parent: 2,
             lookup_count: 3,
         };
-        let debug_str = format!("{:?}", entry);
+        let debug_str = format!("{entry:?}");
         assert!(debug_str.contains("42"));
         assert!(debug_str.contains("IndexStatus"));
     }
@@ -454,7 +457,9 @@ mod tests {
         assert!(matches!(config.kind, InodeKind::Config));
 
         // Reindex
-        let reindex = table.get(REINDEX_FILE_INO).expect("ReindexFile should exist");
+        let reindex = table
+            .get(REINDEX_FILE_INO)
+            .expect("ReindexFile should exist");
         assert!(matches!(reindex.kind, InodeKind::Reindex));
 
         // SimilarDir

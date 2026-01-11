@@ -1,7 +1,9 @@
 //! Text content extractor.
 
 use async_trait::async_trait;
-use ragfs_core::{ContentElement, ContentExtractor, ContentMetadataInfo, ExtractError, ExtractedContent};
+use ragfs_core::{
+    ContentElement, ContentExtractor, ContentMetadataInfo, ExtractError, ExtractedContent,
+};
 use std::path::Path;
 use tokio::fs;
 
@@ -10,6 +12,7 @@ pub struct TextExtractor;
 
 impl TextExtractor {
     /// Create a new text extractor.
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -51,13 +54,69 @@ impl ContentExtractor for TextExtractor {
 
     fn can_extract_by_extension(&self, path: &Path) -> bool {
         let extensions = [
-            "txt", "md", "markdown", "rs", "py", "java", "js", "ts", "tsx", "jsx",
-            "go", "c", "cpp", "cc", "h", "hpp", "json", "xml", "html", "htm",
-            "css", "scss", "sass", "toml", "yaml", "yml", "sh", "bash", "zsh",
-            "fish", "sql", "rb", "php", "swift", "kt", "kts", "scala", "clj",
-            "ex", "exs", "erl", "hs", "ml", "mli", "fs", "fsx", "lua", "vim",
-            "el", "lisp", "scm", "rkt", "asm", "s", "dockerfile", "makefile",
-            "cmake", "gradle", "sbt", "cabal", "nix", "tf", "hcl",
+            "txt",
+            "md",
+            "markdown",
+            "rs",
+            "py",
+            "java",
+            "js",
+            "ts",
+            "tsx",
+            "jsx",
+            "go",
+            "c",
+            "cpp",
+            "cc",
+            "h",
+            "hpp",
+            "json",
+            "xml",
+            "html",
+            "htm",
+            "css",
+            "scss",
+            "sass",
+            "toml",
+            "yaml",
+            "yml",
+            "sh",
+            "bash",
+            "zsh",
+            "fish",
+            "sql",
+            "rb",
+            "php",
+            "swift",
+            "kt",
+            "kts",
+            "scala",
+            "clj",
+            "ex",
+            "exs",
+            "erl",
+            "hs",
+            "ml",
+            "mli",
+            "fs",
+            "fsx",
+            "lua",
+            "vim",
+            "el",
+            "lisp",
+            "scm",
+            "rkt",
+            "asm",
+            "s",
+            "dockerfile",
+            "makefile",
+            "cmake",
+            "gradle",
+            "sbt",
+            "cabal",
+            "nix",
+            "tf",
+            "hcl",
         ];
 
         path.extension()
@@ -72,7 +131,7 @@ impl ContentExtractor for TextExtractor {
         let language = path
             .extension()
             .and_then(|ext| ext.to_str())
-            .map(|ext| ext.to_lowercase());
+            .map(str::to_lowercase);
 
         // Build elements (simple paragraph-based for now)
         let elements = content
@@ -110,7 +169,7 @@ mod tests {
 
     #[test]
     fn test_default_implementation() {
-        let extractor = TextExtractor::default();
+        let extractor = TextExtractor;
         assert!(!extractor.supported_types().is_empty());
     }
 

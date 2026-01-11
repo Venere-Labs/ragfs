@@ -4,7 +4,7 @@ use fuser::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, ReplyOpen,
     ReplyWrite, Request,
 };
-use libc::{ENOENT, ENOSYS, EIO};
+use libc::{EIO, ENOENT, ENOSYS};
 use ragfs_core::{Embedder, VectorStore};
 use ragfs_query::QueryExecutor;
 use std::collections::HashMap;
@@ -15,11 +15,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Handle;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, info, warn};
 
-use crate::inode::{InodeKind, InodeTable, RAGFS_DIR_INO, ROOT_INO,
-    INDEX_FILE_INO, CONFIG_FILE_INO, REINDEX_FILE_INO, QUERY_DIR_INO, SEARCH_DIR_INO, SIMILAR_DIR_INO};
+use crate::inode::{
+    CONFIG_FILE_INO, INDEX_FILE_INO, InodeKind, InodeTable, QUERY_DIR_INO, RAGFS_DIR_INO,
+    REINDEX_FILE_INO, ROOT_INO, SEARCH_DIR_INO, SIMILAR_DIR_INO,
+};
 
 const TTL: Duration = Duration::from_secs(1);
 const BLOCK_SIZE: u64 = 512;
@@ -44,6 +46,7 @@ pub struct RagFs {
 
 impl RagFs {
     /// Create a new RAGFS filesystem (basic, for passthrough only).
+    #[must_use]
     pub fn new(source: PathBuf) -> Self {
         Self {
             source,
@@ -67,7 +70,7 @@ impl RagFs {
         let query_executor = Arc::new(QueryExecutor::new(
             store.clone(),
             embedder,
-            10, // default limit
+            10,    // default limit
             false, // hybrid search
         ));
 
@@ -83,6 +86,7 @@ impl RagFs {
     }
 
     /// Get the source directory.
+    #[must_use]
     pub fn source(&self) -> &PathBuf {
         &self.source
     }
@@ -107,7 +111,7 @@ impl RagFs {
         Some(FileAttr {
             ino,
             size: metadata.len(),
-            blocks: (metadata.len() + BLOCK_SIZE - 1) / BLOCK_SIZE,
+            blocks: metadata.len().div_ceil(BLOCK_SIZE),
             atime,
             mtime,
             ctime,
@@ -132,7 +136,7 @@ impl RagFs {
         FileAttr {
             ino,
             size,
-            blocks: (size + BLOCK_SIZE - 1) / BLOCK_SIZE,
+            blocks: size.div_ceil(BLOCK_SIZE),
             atime: now,
             mtime: now,
             ctime: now,
@@ -156,9 +160,7 @@ impl RagFs {
     fn get_index_status(&self) -> Vec<u8> {
         if let Some(ref store) = self.store {
             let store = store.clone();
-            let result = self.runtime.block_on(async {
-                store.stats().await
-            });
+            let result = self.runtime.block_on(async { store.stats().await });
 
             match result {
                 Ok(stats) => {
@@ -169,14 +171,18 @@ impl RagFs {
                         "index_size_bytes": stats.index_size_bytes,
                         "last_updated": stats.last_updated.map(|t| t.to_rfc3339()),
                     });
-                    serde_json::to_string_pretty(&json).unwrap_or_default().into_bytes()
+                    serde_json::to_string_pretty(&json)
+                        .unwrap_or_default()
+                        .into_bytes()
                 }
                 Err(e) => {
                     let json = serde_json::json!({
                         "status": "error",
                         "error": e.to_string(),
                     });
-                    serde_json::to_string_pretty(&json).unwrap_or_default().into_bytes()
+                    serde_json::to_string_pretty(&json)
+                        .unwrap_or_default()
+                        .into_bytes()
                 }
             }
         } else {
@@ -184,7 +190,9 @@ impl RagFs {
                 "status": "not_initialized",
                 "message": "No store configured",
             });
-            serde_json::to_string_pretty(&json).unwrap_or_default().into_bytes()
+            serde_json::to_string_pretty(&json)
+                .unwrap_or_default()
+                .into_bytes()
         }
     }
 
@@ -194,41 +202,50 @@ impl RagFs {
             let executor = executor.clone();
             let query_str = query.to_string();
             let query_for_result = query_str.clone();
-            let result = self.runtime.block_on(async move {
-                executor.execute(&query_str).await
-            });
+            let result = self
+                .runtime
+                .block_on(async move { executor.execute(&query_str).await });
 
             match result {
                 Ok(results) => {
-                    let json_results: Vec<_> = results.iter().map(|r| {
-                        serde_json::json!({
-                            "file": r.file_path.to_string_lossy(),
-                            "score": r.score,
-                            "content": truncate(&r.content, 500),
-                            "byte_range": [r.byte_range.start, r.byte_range.end],
-                            "line_range": r.line_range.as_ref().map(|lr| [lr.start, lr.end]),
+                    let json_results: Vec<_> = results
+                        .iter()
+                        .map(|r| {
+                            serde_json::json!({
+                                "file": r.file_path.to_string_lossy(),
+                                "score": r.score,
+                                "content": truncate(&r.content, 500),
+                                "byte_range": [r.byte_range.start, r.byte_range.end],
+                                "line_range": r.line_range.as_ref().map(|lr| [lr.start, lr.end]),
+                            })
                         })
-                    }).collect();
+                        .collect();
 
                     let json = serde_json::json!({
                         "query": query_for_result,
                         "results": json_results,
                     });
-                    serde_json::to_string_pretty(&json).unwrap_or_default().into_bytes()
+                    serde_json::to_string_pretty(&json)
+                        .unwrap_or_default()
+                        .into_bytes()
                 }
                 Err(e) => {
                     let json = serde_json::json!({
                         "query": query_for_result,
                         "error": e.to_string(),
                     });
-                    serde_json::to_string_pretty(&json).unwrap_or_default().into_bytes()
+                    serde_json::to_string_pretty(&json)
+                        .unwrap_or_default()
+                        .into_bytes()
                 }
             }
         } else {
             let json = serde_json::json!({
                 "error": "Query executor not configured",
             });
-            serde_json::to_string_pretty(&json).unwrap_or_default().into_bytes()
+            serde_json::to_string_pretty(&json)
+                .unwrap_or_default()
+                .into_bytes()
         }
     }
 
@@ -239,7 +256,9 @@ impl RagFs {
             "store_configured": self.store.is_some(),
             "query_executor_configured": self.query_executor.is_some(),
         });
-        serde_json::to_string_pretty(&json).unwrap_or_default().into_bytes()
+        serde_json::to_string_pretty(&json)
+            .unwrap_or_default()
+            .into_bytes()
     }
 }
 
@@ -272,12 +291,11 @@ impl Filesystem for RagFs {
             // Try to find real file/directory in source
             let real_path = self.source.join(&*name_str);
             if real_path.exists() {
-                let metadata = match fs::metadata(&real_path) {
-                    Ok(m) => m,
-                    Err(_) => {
-                        reply.error(ENOENT);
-                        return;
-                    }
+                let metadata = if let Ok(m) = fs::metadata(&real_path) {
+                    m
+                } else {
+                    reply.error(ENOENT);
+                    return;
                 };
 
                 let mut inodes = self.runtime.block_on(self.inodes.write());
@@ -306,7 +324,8 @@ impl Filesystem for RagFs {
                 }
                 ".index" => {
                     let content = self.get_index_status();
-                    let attr = self.make_attr(INDEX_FILE_INO, FileType::RegularFile, content.len() as u64);
+                    let attr =
+                        self.make_attr(INDEX_FILE_INO, FileType::RegularFile, content.len() as u64);
                     let mut cache = self.runtime.block_on(self.content_cache.write());
                     cache.insert(INDEX_FILE_INO, content);
                     reply.entry(&TTL, &attr, 0);
@@ -314,7 +333,11 @@ impl Filesystem for RagFs {
                 }
                 ".config" => {
                     let content = self.get_config();
-                    let attr = self.make_attr(CONFIG_FILE_INO, FileType::RegularFile, content.len() as u64);
+                    let attr = self.make_attr(
+                        CONFIG_FILE_INO,
+                        FileType::RegularFile,
+                        content.len() as u64,
+                    );
                     let mut cache = self.runtime.block_on(self.content_cache.write());
                     cache.insert(CONFIG_FILE_INO, content);
                     reply.entry(&TTL, &attr, 0);
@@ -353,27 +376,26 @@ impl Filesystem for RagFs {
 
         // Handle lookups in real directories
         let inodes = self.runtime.block_on(self.inodes.read());
-        if let Some(entry) = inodes.get(parent) {
-            if let InodeKind::Real { path, .. } = &entry.kind {
-                let real_path = path.join(&*name_str);
-                if real_path.exists() {
-                    drop(inodes);
-                    let metadata = match fs::metadata(&real_path) {
-                        Ok(m) => m,
-                        Err(_) => {
-                            reply.error(ENOENT);
-                            return;
-                        }
-                    };
+        if let Some(entry) = inodes.get(parent)
+            && let InodeKind::Real { path, .. } = &entry.kind
+        {
+            let real_path = path.join(&*name_str);
+            if real_path.exists() {
+                drop(inodes);
+                let metadata = if let Ok(m) = fs::metadata(&real_path) {
+                    m
+                } else {
+                    reply.error(ENOENT);
+                    return;
+                };
 
-                    let mut inodes = self.runtime.block_on(self.inodes.write());
-                    let ino = inodes.get_or_create_real(real_path.clone(), metadata.ino());
-                    drop(inodes);
+                let mut inodes = self.runtime.block_on(self.inodes.write());
+                let ino = inodes.get_or_create_real(real_path.clone(), metadata.ino());
+                drop(inodes);
 
-                    if let Some(attr) = self.real_path_to_attr(&real_path, ino) {
-                        reply.entry(&TTL, &attr, 0);
-                        return;
-                    }
+                if let Some(attr) = self.real_path_to_attr(&real_path, ino) {
+                    reply.entry(&TTL, &attr, 0);
+                    return;
                 }
             }
         }
@@ -429,13 +451,12 @@ impl Filesystem for RagFs {
 
                 // Check if it's a real file
                 let inodes = self.runtime.block_on(self.inodes.read());
-                if let Some(entry) = inodes.get(ino) {
-                    if let InodeKind::Real { path, .. } = &entry.kind {
-                        if let Some(attr) = self.real_path_to_attr(path, ino) {
-                            reply.attr(&TTL, &attr);
-                            return;
-                        }
-                    }
+                if let Some(entry) = inodes.get(ino)
+                    && let InodeKind::Real { path, .. } = &entry.kind
+                    && let Some(attr) = self.real_path_to_attr(path, ino)
+                {
+                    reply.attr(&TTL, &attr);
+                    return;
                 }
                 reply.error(ENOENT);
             }
@@ -505,28 +526,28 @@ impl Filesystem for RagFs {
 
         // Try to read real file
         let inodes = self.runtime.block_on(self.inodes.read());
-        if let Some(entry) = inodes.get(ino) {
-            if let InodeKind::Real { path, .. } = &entry.kind {
-                let path = path.clone();
-                drop(inodes);
+        if let Some(entry) = inodes.get(ino)
+            && let InodeKind::Real { path, .. } = &entry.kind
+        {
+            let path = path.clone();
+            drop(inodes);
 
-                match fs::read(&path) {
-                    Ok(content) => {
-                        let offset = offset as usize;
-                        let size = size as usize;
-                        if offset >= content.len() {
-                            reply.data(&[]);
-                        } else {
-                            let end = (offset + size).min(content.len());
-                            reply.data(&content[offset..end]);
-                        }
-                        return;
+            match fs::read(&path) {
+                Ok(content) => {
+                    let offset = offset as usize;
+                    let size = size as usize;
+                    if offset >= content.len() {
+                        reply.data(&[]);
+                    } else {
+                        let end = (offset + size).min(content.len());
+                        reply.data(&content[offset..end]);
                     }
-                    Err(e) => {
-                        warn!("Failed to read file {:?}: {}", path, e);
-                        reply.error(EIO);
-                        return;
-                    }
+                    return;
+                }
+                Err(e) => {
+                    warn!("Failed to read file {:?}: {}", path, e);
+                    reply.error(EIO);
+                    return;
                 }
             }
         }
@@ -584,7 +605,7 @@ impl Filesystem for RagFs {
                 reply.ok();
             }
             RAGFS_DIR_INO => {
-                let entries = vec![
+                let entries = [
                     (RAGFS_DIR_INO, FileType::Directory, "."),
                     (ROOT_INO, FileType::Directory, ".."),
                     (QUERY_DIR_INO, FileType::Directory, ".query"),
@@ -604,12 +625,13 @@ impl Filesystem for RagFs {
             }
             QUERY_DIR_INO | SEARCH_DIR_INO | SIMILAR_DIR_INO => {
                 // These directories are empty - files are created dynamically on lookup
-                let entries = vec![
+                let entries = [
                     (ino, FileType::Directory, "."),
                     (RAGFS_DIR_INO, FileType::Directory, ".."),
                 ];
 
-                for (i, (entry_ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
+                for (i, (entry_ino, kind, name)) in entries.iter().enumerate().skip(offset as usize)
+                {
                     if reply.add(*entry_ino, (i + 1) as i64, *kind, name) {
                         break;
                     }
@@ -619,49 +641,52 @@ impl Filesystem for RagFs {
             _ => {
                 // Try to read real directory
                 let inodes = self.runtime.block_on(self.inodes.read());
-                if let Some(entry) = inodes.get(ino) {
-                    if let InodeKind::Real { path, .. } = &entry.kind {
-                        let path = path.clone();
-                        let parent_ino = entry.parent;
-                        drop(inodes);
+                if let Some(entry) = inodes.get(ino)
+                    && let InodeKind::Real { path, .. } = &entry.kind
+                {
+                    let path = path.clone();
+                    let parent_ino = entry.parent;
+                    drop(inodes);
 
-                        if path.is_dir() {
-                            let mut entries = vec![
-                                (ino, FileType::Directory, ".".to_string()),
-                                (parent_ino, FileType::Directory, "..".to_string()),
-                            ];
+                    if path.is_dir() {
+                        let mut entries = vec![
+                            (ino, FileType::Directory, ".".to_string()),
+                            (parent_ino, FileType::Directory, "..".to_string()),
+                        ];
 
-                            if let Ok(read_dir) = fs::read_dir(&path) {
-                                for dir_entry in read_dir.flatten() {
-                                    let name = dir_entry.file_name().to_string_lossy().to_string();
-                                    if name.starts_with('.') {
-                                        continue;
-                                    }
-                                    let file_type = if dir_entry.path().is_dir() {
-                                        FileType::Directory
-                                    } else {
-                                        FileType::RegularFile
-                                    };
-
-                                    let metadata = match dir_entry.metadata() {
-                                        Ok(m) => m,
-                                        Err(_) => continue,
-                                    };
-
-                                    let mut inodes = self.runtime.block_on(self.inodes.write());
-                                    let entry_ino = inodes.get_or_create_real(dir_entry.path(), metadata.ino());
-                                    entries.push((entry_ino, file_type, name));
+                        if let Ok(read_dir) = fs::read_dir(&path) {
+                            for dir_entry in read_dir.flatten() {
+                                let name = dir_entry.file_name().to_string_lossy().to_string();
+                                if name.starts_with('.') {
+                                    continue;
                                 }
-                            }
+                                let file_type = if dir_entry.path().is_dir() {
+                                    FileType::Directory
+                                } else {
+                                    FileType::RegularFile
+                                };
 
-                            for (i, (entry_ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
-                                if reply.add(*entry_ino, (i + 1) as i64, *kind, name) {
-                                    break;
-                                }
+                                let metadata = match dir_entry.metadata() {
+                                    Ok(m) => m,
+                                    Err(_) => continue,
+                                };
+
+                                let mut inodes = self.runtime.block_on(self.inodes.write());
+                                let entry_ino =
+                                    inodes.get_or_create_real(dir_entry.path(), metadata.ino());
+                                entries.push((entry_ino, file_type, name));
                             }
-                            reply.ok();
-                            return;
                         }
+
+                        for (i, (entry_ino, kind, name)) in
+                            entries.iter().enumerate().skip(offset as usize)
+                        {
+                            if reply.add(*entry_ino, (i + 1) as i64, *kind, name) {
+                                break;
+                            }
+                        }
+                        reply.ok();
+                        return;
                     }
                 }
                 reply.error(ENOENT);
@@ -738,21 +763,21 @@ impl Filesystem for RagFs {
 
         // Real file writes (passthrough)
         let inodes = self.runtime.block_on(self.inodes.read());
-        if let Some(entry) = inodes.get(ino) {
-            if let InodeKind::Real { path, .. } = &entry.kind {
-                let path = path.clone();
-                drop(inodes);
+        if let Some(entry) = inodes.get(ino)
+            && let InodeKind::Real { path, .. } = &entry.kind
+        {
+            let path = path.clone();
+            drop(inodes);
 
-                match fs::write(&path, data) {
-                    Ok(()) => {
-                        reply.written(data.len() as u32);
-                        return;
-                    }
-                    Err(e) => {
-                        warn!("Failed to write file {:?}: {}", path, e);
-                        reply.error(EIO);
-                        return;
-                    }
+            match fs::write(&path, data) {
+                Ok(()) => {
+                    reply.written(data.len() as u32);
+                    return;
+                }
+                Err(e) => {
+                    warn!("Failed to write file {:?}: {}", path, e);
+                    reply.error(EIO);
+                    return;
                 }
             }
         }

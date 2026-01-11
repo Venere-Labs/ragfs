@@ -1,7 +1,7 @@
 //! File system watcher for detecting changes.
 
 use notify_debouncer_full::notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, RecommendedCache};
+use notify_debouncer_full::{DebounceEventResult, Debouncer, RecommendedCache, new_debouncer};
 use ragfs_core::FileEvent;
 use std::path::Path;
 use std::sync::mpsc;

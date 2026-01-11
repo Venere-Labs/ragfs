@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::bert::{BertModel, Config};
-use hf_hub::{api::tokio::Api, Repo, RepoType};
+use hf_hub::{Repo, RepoType, api::tokio::Api};
 use ragfs_core::{EmbedError, Embedder, EmbeddingConfig, EmbeddingOutput, Modality};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,7 +17,7 @@ use tokenizers::Tokenizer;
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
-/// Model identifier on HuggingFace Hub.
+/// Model identifier on `HuggingFace` Hub.
 const MODEL_ID: &str = "thenlper/gte-small";
 
 /// Embedding dimension for gte-small.
@@ -44,7 +44,7 @@ pub struct CandleEmbedder {
 }
 
 impl CandleEmbedder {
-    /// Create a new CandleEmbedder.
+    /// Create a new `CandleEmbedder`.
     pub fn new(cache_dir: PathBuf) -> Self {
         // Try to use CUDA if available, fallback to CPU
         let device = Device::cuda_if_available(0).unwrap_or(Device::Cpu);
@@ -240,7 +240,11 @@ impl CandleEmbedder {
             .map_err(|e| EmbedError::Inference(format!("Tokenization failed: {e}")))?;
 
         // Find max length for padding
-        let max_len = encodings.iter().map(|e| e.len()).max().unwrap_or(0);
+        let max_len = encodings
+            .iter()
+            .map(tokenizers::Encoding::len)
+            .max()
+            .unwrap_or(0);
         let max_len = max_len.min(MAX_TOKENS);
 
         // Prepare input tensors
@@ -272,7 +276,9 @@ impl CandleEmbedder {
 
         // Create tensors
         let input_ids = Tensor::from_vec(input_ids_vec, (batch_size, max_len), &self.device)
-            .map_err(|e| EmbedError::Inference(format!("Failed to create input_ids tensor: {e}")))?;
+            .map_err(|e| {
+                EmbedError::Inference(format!("Failed to create input_ids tensor: {e}"))
+            })?;
 
         let attention_mask =
             Tensor::from_vec(attention_mask_vec, (batch_size, max_len), &self.device).map_err(
@@ -346,7 +352,11 @@ impl Embedder for CandleEmbedder {
             return Ok(Vec::new());
         }
 
-        debug!("Embedding {} texts with batch_size {}", texts.len(), config.batch_size);
+        debug!(
+            "Embedding {} texts with batch_size {}",
+            texts.len(),
+            config.batch_size
+        );
 
         // Process in batches
         let mut all_results = Vec::with_capacity(texts.len());
@@ -399,7 +409,12 @@ mod tests {
         assert_eq!(results[1].embedding.len(), 384);
 
         // Check normalization (should have unit length)
-        let norm: f32 = results[0].embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let norm: f32 = results[0]
+            .embedding
+            .iter()
+            .map(|x| x * x)
+            .sum::<f32>()
+            .sqrt();
         assert!((norm - 1.0).abs() < 0.01);
     }
 }

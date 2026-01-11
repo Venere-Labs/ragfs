@@ -14,6 +14,7 @@ pub struct PdfExtractor;
 
 impl PdfExtractor {
     /// Create a new PDF extractor.
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -46,8 +47,8 @@ impl ContentExtractor for PdfExtractor {
         // Extract text using pdf-extract (blocking operation)
         let text = tokio::task::spawn_blocking(move || extract_pdf_text(&bytes))
             .await
-            .map_err(|e| ExtractError::Failed(format!("Task join error: {}", e)))?
-            .map_err(|e| ExtractError::Failed(format!("PDF extraction failed: {}", e)))?;
+            .map_err(|e| ExtractError::Failed(format!("Task join error: {e}")))?
+            .map_err(|e| ExtractError::Failed(format!("PDF extraction failed: {e}")))?;
 
         // Split into pages/paragraphs for elements
         let elements = build_elements(&text);
@@ -72,7 +73,7 @@ fn extract_pdf_text(bytes: &[u8]) -> Result<String, String> {
     pdf_extract::extract_text_from_mem(bytes).map_err(|e| e.to_string())
 }
 
-/// Build ContentElements from extracted text.
+/// Build `ContentElements` from extracted text.
 fn build_elements(text: &str) -> Vec<ContentElement> {
     let mut elements = Vec::new();
     let mut current_offset = 0u64;
@@ -128,12 +129,7 @@ fn looks_like_heading(text: &str) -> bool {
         // Check if mostly capitalized
         let caps_count = words
             .iter()
-            .filter(|w| {
-                w.chars()
-                    .next()
-                    .map(|c| c.is_uppercase())
-                    .unwrap_or(false)
-            })
+            .filter(|w| w.chars().next().is_some_and(char::is_uppercase))
             .count();
         return caps_count >= words.len() / 2;
     }

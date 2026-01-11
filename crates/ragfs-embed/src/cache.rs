@@ -129,15 +129,9 @@ impl EmbeddingCache {
 
         // Embed uncached texts
         if !uncached_texts.is_empty() {
-            debug!(
-                "Cache miss for {} texts, embedding",
-                uncached_texts.len()
-            );
+            debug!("Cache miss for {} texts, embedding", uncached_texts.len());
 
-            let new_embeddings = self
-                .embedder
-                .embed_text(&uncached_texts, config)
-                .await?;
+            let new_embeddings = self.embedder.embed_text(&uncached_texts, config).await?;
 
             // Update cache
             self.maybe_evict().await;
@@ -239,7 +233,7 @@ mod tests {
 
     #[async_trait]
     impl Embedder for MockEmbedder {
-        fn model_name(&self) -> &str {
+        fn model_name(&self) -> &'static str {
             "mock-embedder"
         }
 
@@ -269,7 +263,7 @@ mod tests {
                     let hash = blake3::hash(text.as_bytes());
                     let bytes = hash.as_bytes();
                     let embedding: Vec<f32> = (0..self.dimension)
-                        .map(|i| bytes[i % 32] as f32 / 255.0)
+                        .map(|i| f32::from(bytes[i % 32]) / 255.0)
                         .collect();
                     EmbeddingOutput {
                         embedding,
@@ -378,7 +372,7 @@ mod tests {
 
         // Fill cache beyond capacity
         for i in 0..15 {
-            let text = format!("text number {}", i);
+            let text = format!("text number {i}");
             cache.embed_text(&[&text], &config).await.unwrap();
         }
 

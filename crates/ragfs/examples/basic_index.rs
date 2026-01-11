@@ -18,7 +18,7 @@ use ragfs_store::LanceStore;
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{info, Level};
+use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 /// Embedding dimension for the gte-small model.
@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
 
     let source = PathBuf::from(&args[1]);
     if !source.exists() {
-        anyhow::bail!("Directory does not exist: {:?}", source);
+        anyhow::bail!("Directory does not exist: {}", source.display());
     }
 
     // Initialize logging
@@ -161,7 +161,10 @@ async fn create_components(
         .context("Failed to initialize embedder")?;
 
     // Wrap embedder in a pool for concurrent embedding
-    let embedder_pool = Arc::new(EmbedderPool::new(Arc::new(embedder) as Arc<dyn Embedder>, 4));
+    let embedder_pool = Arc::new(EmbedderPool::new(
+        Arc::new(embedder) as Arc<dyn Embedder>,
+        4,
+    ));
 
     Ok((store, extractors, chunkers, embedder_pool))
 }

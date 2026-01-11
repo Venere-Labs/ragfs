@@ -1,6 +1,6 @@
 //! # RAGFS CLI
 //!
-//! Command-line interface for RAGFS (Retrieval-Augmented Generation FileSystem).
+//! Command-line interface for RAGFS (Retrieval-Augmented Generation `FileSystem`).
 //!
 //! RAGFS enables semantic search over your files using vector embeddings.
 //! This binary provides commands for indexing, querying, mounting, and
@@ -42,7 +42,7 @@ use serde::Serialize;
 use std::fs::File;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{info, Level};
+use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 mod config;
@@ -235,9 +235,15 @@ async fn create_components(
 
     // Initialize embedder (downloads model if needed)
     info!("Initializing embedder (this may download the model on first run)...");
-    embedder.init().await.context("Failed to initialize embedder")?;
+    embedder
+        .init()
+        .await
+        .context("Failed to initialize embedder")?;
 
-    let embedder_pool = Arc::new(EmbedderPool::new(Arc::new(embedder) as Arc<dyn Embedder>, 4));
+    let embedder_pool = Arc::new(EmbedderPool::new(
+        Arc::new(embedder) as Arc<dyn Embedder>,
+        4,
+    ));
 
     Ok((store, extractors, chunkers, embedder_pool))
 }
@@ -272,16 +278,17 @@ async fn main() -> Result<()> {
 
             // Verify paths exist
             if !source.exists() {
-                anyhow::bail!("Source directory does not exist: {:?}", source);
+                anyhow::bail!("Source directory does not exist: {}", source.display());
             }
             if !mountpoint.exists() {
-                anyhow::bail!("Mount point does not exist: {:?}", mountpoint);
+                anyhow::bail!("Mount point does not exist: {}", mountpoint.display());
             }
 
             let source = source.canonicalize()?;
 
             // Create components for RAG functionality
-            let (store, extractors, chunkers, embedder_pool) = create_components(source.clone()).await?;
+            let (store, extractors, chunkers, embedder_pool) =
+                create_components(source.clone()).await?;
 
             // Initialize store
             store.init().await.context("Failed to initialize store")?;
@@ -348,7 +355,10 @@ async fn main() -> Result<()> {
             if foreground {
                 info!("Running in foreground (Ctrl+C to unmount)");
                 info!("Try: cat {:?}/.ragfs/.index", mountpoint);
-                info!("Reindex: echo 'path/to/file' > {:?}/.ragfs/.reindex", mountpoint);
+                info!(
+                    "Reindex: echo 'path/to/file' > {:?}/.ragfs/.reindex",
+                    mountpoint
+                );
                 fuser::mount2(fs, &mountpoint, &options)?;
             } else {
                 // Daemonize: fork to background
@@ -359,14 +369,14 @@ async fn main() -> Result<()> {
                 println!("Mounting in background...");
                 println!("PID file: {}", pid_path.display());
                 println!("Log file: {}", log_path.display());
-                println!("Try: cat {:?}/.ragfs/.index", mountpoint);
-                println!("Unmount: fusermount -u {:?}", mountpoint);
+                println!("Try: cat {}/.ragfs/.index", mountpoint.display());
+                println!("Unmount: fusermount -u {}", mountpoint.display());
 
                 // Open log file for stdout/stderr redirection
-                let stdout = File::create(&log_path)
-                    .context("Failed to create log file for stdout")?;
-                let stderr = File::create(&log_path)
-                    .context("Failed to create log file for stderr")?;
+                let stdout =
+                    File::create(&log_path).context("Failed to create log file for stdout")?;
+                let stderr =
+                    File::create(&log_path).context("Failed to create log file for stderr")?;
 
                 let daemonize = Daemonize::new()
                     .pid_file(&pid_path)
@@ -382,7 +392,7 @@ async fn main() -> Result<()> {
                         fuser::mount2(fs, &mountpoint, &options)?;
                     }
                     Err(e) => {
-                        anyhow::bail!("Failed to daemonize: {}", e);
+                        anyhow::bail!("Failed to daemonize: {e}");
                     }
                 }
             }
@@ -393,7 +403,7 @@ async fn main() -> Result<()> {
 
         Commands::Index { path, force, watch } => {
             if !path.exists() {
-                anyhow::bail!("Directory does not exist: {:?}", path);
+                anyhow::bail!("Directory does not exist: {}", path.display());
             }
 
             let path = path.canonicalize()?;
@@ -469,7 +479,7 @@ async fn main() -> Result<()> {
 
         Commands::Query { path, query, limit } => {
             if !path.exists() {
-                anyhow::bail!("Directory does not exist: {:?}", path);
+                anyhow::bail!("Directory does not exist: {}", path.display());
             }
 
             let path = path.canonicalize()?;
@@ -478,9 +488,9 @@ async fn main() -> Result<()> {
             let db_path = get_db_path(&path)?;
             if !db_path.exists() {
                 anyhow::bail!(
-                    "Index not found for {:?}. Run 'ragfs index {:?}' first.",
-                    path,
-                    path
+                    "Index not found for {}. Run 'ragfs index {}' first.",
+                    path.display(),
+                    path.display()
                 );
             }
 
@@ -514,14 +524,17 @@ async fn main() -> Result<()> {
                                 file: r.file_path.to_string_lossy().to_string(),
                                 score: r.score,
                                 content: truncate(&r.content, 200),
-                                lines: r.line_range.as_ref().map(|l| format!("{}:{}", l.start, l.end)),
+                                lines: r
+                                    .line_range
+                                    .as_ref()
+                                    .map(|l| format!("{}:{}", l.start, l.end)),
                             })
                             .collect(),
                     };
                     println!("{}", serde_json::to_string_pretty(&output)?);
                 }
                 OutputFormat::Text => {
-                    println!("Query: {}\n", query);
+                    println!("Query: {query}\n");
                     if results.is_empty() {
                         println!("No results found.");
                     } else {
@@ -545,7 +558,7 @@ async fn main() -> Result<()> {
 
         Commands::Status { path } => {
             if !path.exists() {
-                anyhow::bail!("Directory does not exist: {:?}", path);
+                anyhow::bail!("Directory does not exist: {}", path.display());
             }
 
             let path = path.canonicalize()?;
@@ -557,8 +570,8 @@ async fn main() -> Result<()> {
                         println!(r#"{{"error": "Index not found"}}"#);
                     }
                     OutputFormat::Text => {
-                        println!("Index not found for {:?}", path);
-                        println!("Run 'ragfs index {:?}' to create it.", path);
+                        println!("Index not found for {}", path.display());
+                        println!("Run 'ragfs index {}' to create it.", path.display());
                     }
                 }
                 return Ok(());
@@ -581,7 +594,7 @@ async fn main() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&output)?);
                 }
                 OutputFormat::Text => {
-                    println!("Index Status for {:?}", path);
+                    println!("Index Status for {}", path.display());
                     println!("  Files:  {}", stats.total_files);
                     println!("  Chunks: {}", stats.total_chunks);
                     if let Some(last) = stats.last_updated {

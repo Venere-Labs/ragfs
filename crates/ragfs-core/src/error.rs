@@ -198,7 +198,10 @@ mod tests {
     #[test]
     fn test_store_error_init_display() {
         let err = StoreError::Init("database locked".to_string());
-        assert_eq!(err.to_string(), "store initialization failed: database locked");
+        assert_eq!(
+            err.to_string(),
+            "store initialization failed: database locked"
+        );
     }
 
     #[test]
@@ -283,7 +286,7 @@ mod tests {
     #[test]
     fn test_extract_error_debug() {
         let err = ExtractError::Parse("bad format".to_string());
-        let debug_str = format!("{:?}", err);
+        let debug_str = format!("{err:?}");
         assert!(debug_str.contains("Parse"));
         assert!(debug_str.contains("bad format"));
     }
@@ -291,7 +294,7 @@ mod tests {
     #[test]
     fn test_chunk_error_debug() {
         let err = ChunkError::InvalidConfig("negative size".to_string());
-        let debug_str = format!("{:?}", err);
+        let debug_str = format!("{err:?}");
         assert!(debug_str.contains("InvalidConfig"));
     }
 
@@ -301,7 +304,7 @@ mod tests {
             tokens: 5000,
             max: 4096,
         };
-        let debug_str = format!("{:?}", err);
+        let debug_str = format!("{err:?}");
         assert!(debug_str.contains("InputTooLong"));
         assert!(debug_str.contains("5000"));
     }
@@ -309,14 +312,14 @@ mod tests {
     #[test]
     fn test_store_error_debug() {
         let err = StoreError::Schema("wrong type".to_string());
-        let debug_str = format!("{:?}", err);
+        let debug_str = format!("{err:?}");
         assert!(debug_str.contains("Schema"));
     }
 
     #[test]
     fn test_main_error_debug() {
         let err = Error::Config("missing key".to_string());
-        let debug_str = format!("{:?}", err);
+        let debug_str = format!("{err:?}");
         assert!(debug_str.contains("Config"));
     }
 

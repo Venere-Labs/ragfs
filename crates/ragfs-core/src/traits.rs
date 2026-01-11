@@ -15,7 +15,10 @@ use async_trait::async_trait;
 use std::path::Path;
 
 use crate::error::{ChunkError, EmbedError, ExtractError, StoreError};
-use crate::types::*;
+use crate::types::{
+    Chunk, ChunkConfig, ChunkOutput, ContentType, EmbeddingConfig, EmbeddingOutput,
+    ExtractedContent, FileRecord, IndexStats, Modality, SearchQuery, SearchResult, StoreStats,
+};
 
 // ============================================================================
 // Content Extraction
@@ -29,8 +32,7 @@ pub trait ContentExtractor: Send + Sync {
 
     /// Check if this extractor can handle the given file.
     fn can_extract(&self, path: &Path, mime_type: &str) -> bool {
-        self.supported_types().iter().any(|&t| t == mime_type)
-            || self.can_extract_by_extension(path)
+        self.supported_types().contains(&mime_type) || self.can_extract_by_extension(path)
     }
 
     /// Check if extractor can handle based on file extension.

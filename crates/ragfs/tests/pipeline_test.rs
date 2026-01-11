@@ -30,7 +30,7 @@ impl MockEmbedder {
 
 #[async_trait]
 impl Embedder for MockEmbedder {
-    fn model_name(&self) -> &str {
+    fn model_name(&self) -> &'static str {
         "mock-embedder"
     }
 
@@ -60,7 +60,7 @@ impl Embedder for MockEmbedder {
                 let embedding: Vec<f32> = (0..self.dimension)
                     .map(|i| {
                         let byte_idx = i % 32;
-                        (bytes[byte_idx] as f32 / 255.0) - 0.5
+                        (f32::from(bytes[byte_idx]) / 255.0) - 0.5
                     })
                     .collect();
                 EmbeddingOutput {
@@ -137,10 +137,7 @@ async fn test_full_pipeline_extract_chunk_embed_store_search() {
     std::fs::write(&file3, test_content_3).unwrap();
 
     // Create components
-    let store = Arc::new(LanceStore::new(
-        db_dir.path().join("test.lance"),
-        TEST_DIM,
-    ));
+    let store = Arc::new(LanceStore::new(db_dir.path().join("test.lance"), TEST_DIM));
     store.init().await.unwrap();
 
     let mut extractors = ExtractorRegistry::new();
@@ -163,10 +160,7 @@ async fn test_full_pipeline_extract_chunk_embed_store_search() {
     // Process each file through the pipeline
     for file_path in [&file1, &file2, &file3] {
         // 1. Extract
-        let content = extractors
-            .extract(file_path, "text/plain")
-            .await
-            .unwrap();
+        let content = extractors.extract(file_path, "text/plain").await.unwrap();
 
         // 2. Chunk
         let chunk_outputs = chunkers
@@ -247,7 +241,10 @@ async fn test_full_pipeline_extract_chunk_embed_store_search() {
     assert!(!results.is_empty(), "Should find results for DB query");
     let top_result = &results[0];
     assert!(
-        top_result.file_path.to_string_lossy().contains("database.txt"),
+        top_result
+            .file_path
+            .to_string_lossy()
+            .contains("database.txt"),
         "Top result should be from database.txt, got {:?}",
         top_result.file_path
     );
@@ -272,7 +269,10 @@ async fn test_full_pipeline_extract_chunk_embed_store_search() {
     assert!(!results.is_empty(), "Should find results for auth query");
     let top_result = &results[0];
     assert!(
-        top_result.file_path.to_string_lossy().contains("security.txt"),
+        top_result
+            .file_path
+            .to_string_lossy()
+            .contains("security.txt"),
         "Top result should be from security.txt, got {:?}",
         top_result.file_path
     );
@@ -288,10 +288,7 @@ async fn test_pipeline_delete_and_reindex() {
     std::fs::write(&file_path, "Initial content about Rust programming").unwrap();
 
     // Setup components
-    let store = Arc::new(LanceStore::new(
-        db_dir.path().join("test.lance"),
-        TEST_DIM,
-    ));
+    let store = Arc::new(LanceStore::new(db_dir.path().join("test.lance"), TEST_DIM));
     store.init().await.unwrap();
 
     let mut extractors = ExtractorRegistry::new();
@@ -340,10 +337,17 @@ async fn test_pipeline_delete_and_reindex() {
 
     // Verify deletion
     let stats = store.stats().await.unwrap();
-    assert_eq!(stats.total_chunks, 0, "Should have no chunks after deletion");
+    assert_eq!(
+        stats.total_chunks, 0,
+        "Should have no chunks after deletion"
+    );
 
     // Update file content and reindex
-    std::fs::write(&file_path, "Updated content about Python and machine learning").unwrap();
+    std::fs::write(
+        &file_path,
+        "Updated content about Python and machine learning",
+    )
+    .unwrap();
 
     let content = extractors.extract(&file_path, "text/plain").await.unwrap();
     let chunk_outputs = chunkers
@@ -409,10 +413,7 @@ async fn test_pipeline_hybrid_search() {
     std::fs::write(&file2, "Python is a high-level programming language known for readability. It has dynamic typing and automatic memory management.").unwrap();
 
     // Setup
-    let store = Arc::new(LanceStore::new(
-        db_dir.path().join("test.lance"),
-        TEST_DIM,
-    ));
+    let store = Arc::new(LanceStore::new(db_dir.path().join("test.lance"), TEST_DIM));
     store.init().await.unwrap();
 
     let mut extractors = ExtractorRegistry::new();

@@ -16,7 +16,7 @@ use ragfs_store::LanceStore;
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{info, Level};
+use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 /// Embedding dimension for the gte-small model.
@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
     let query = &args[2];
 
     if !source.exists() {
-        anyhow::bail!("Directory does not exist: {:?}", source);
+        anyhow::bail!("Directory does not exist: {}", source.display());
     }
 
     // Initialize logging
@@ -59,9 +59,9 @@ async fn main() -> Result<()> {
 
     if !db_path.exists() {
         anyhow::bail!(
-            "Index not found at {:?}. Run basic_index first:\n  cargo run --example basic_index -- {:?}",
-            db_path,
-            source
+            "Index not found at {}. Run basic_index first:\n  cargo run --example basic_index -- {}",
+            db_path.display(),
+            source.display()
         );
     }
 
@@ -77,7 +77,10 @@ async fn main() -> Result<()> {
         .await
         .context("Failed to initialize embedder")?;
 
-    let embedder_pool = Arc::new(EmbedderPool::new(Arc::new(embedder) as Arc<dyn Embedder>, 4));
+    let embedder_pool = Arc::new(EmbedderPool::new(
+        Arc::new(embedder) as Arc<dyn Embedder>,
+        4,
+    ));
 
     // Create query executor
     let executor = QueryExecutor::new(
@@ -123,7 +126,7 @@ async fn main() -> Result<()> {
             } else {
                 content
             };
-            println!("   {}\n", display_content);
+            println!("   {display_content}\n");
         }
     }
 

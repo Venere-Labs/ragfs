@@ -1,6 +1,6 @@
 //! # ragfs-core
 //!
-//! Core types and traits for the RAGFS (Retrieval-Augmented Generation FileSystem) project.
+//! Core types and traits for the RAGFS (Retrieval-Augmented Generation `FileSystem`) project.
 //!
 //! This crate provides the foundational abstractions used throughout RAGFS:
 //!
@@ -79,7 +79,7 @@
 //! - `ragfs-extract`: Content extraction implementations
 //! - `ragfs-chunker`: Chunking strategy implementations
 //! - `ragfs-embed`: Embedding generation with Candle
-//! - `ragfs-store`: LanceDB vector storage implementation
+//! - `ragfs-store`: `LanceDB` vector storage implementation
 //! - `ragfs-index`: Indexing pipeline coordination
 //! - `ragfs-query`: Query parsing and execution
 

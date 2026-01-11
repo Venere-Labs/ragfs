@@ -1,9 +1,10 @@
-//! Arrow schema definitions for LanceDB tables.
+//! Arrow schema definitions for `LanceDB` tables.
 
 use arrow_schema::{DataType, Field, Schema, TimeUnit};
 use std::sync::Arc;
 
 /// Schema for the chunks table.
+#[must_use]
 pub fn chunks_schema(embedding_dim: usize) -> Schema {
     Schema::new(vec![
         // Identity
@@ -49,6 +50,7 @@ pub fn chunks_schema(embedding_dim: usize) -> Schema {
 }
 
 /// Schema for the files metadata table.
+#[must_use]
 pub fn files_schema() -> Schema {
     Schema::new(vec![
         Field::new("file_id", DataType::Utf8, false),

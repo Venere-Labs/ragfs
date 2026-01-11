@@ -15,6 +15,7 @@ pub struct SemanticChunker;
 
 impl SemanticChunker {
     /// Create a new semantic chunker.
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -28,7 +29,7 @@ impl Default for SemanticChunker {
 
 #[async_trait]
 impl Chunker for SemanticChunker {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "semantic"
     }
 
@@ -266,7 +267,7 @@ fn chunk_sections(
             let sub_chunks = split_large_section(&section_text, section.start_byte, config)?;
             for mut sub_chunk in sub_chunks {
                 // Add section heading to first sub-chunk's metadata
-                if chunks.len() == 0 || sub_chunk.metadata.symbol_name.is_none() {
+                if chunks.is_empty() || sub_chunk.metadata.symbol_name.is_none() {
                     sub_chunk.metadata.symbol_name = section.heading.clone();
                 }
                 chunks.push(sub_chunk);
@@ -370,7 +371,7 @@ fn split_large_section(
             // Keep overlap
             let overlap_start = current.len().saturating_sub(overlap_chars);
             let overlap = &current[overlap_start..];
-            current = format!("{}\n\n{}", overlap, para);
+            current = format!("{overlap}\n\n{para}");
             current_offset += overlap_start;
         } else {
             if !current.is_empty() {
@@ -428,7 +429,7 @@ fn chunk_from_elements(
                 byte_offset,
             } => {
                 let lang = language.as_deref().unwrap_or("");
-                let block = format!("```{}\n{}\n```", lang, code);
+                let block = format!("```{lang}\n{code}\n```");
                 (block, *byte_offset, false)
             }
             ContentElement::List {
@@ -443,7 +444,7 @@ fn chunk_from_elements(
                         if *ordered {
                             format!("{}. {}", i + 1, item)
                         } else {
-                            format!("- {}", item)
+                            format!("- {item}")
                         }
                     })
                     .collect::<Vec<_>>()
@@ -459,7 +460,11 @@ fn chunk_from_elements(
                 table.push_str(&format!("| {} |\n", headers.join(" | ")));
                 table.push_str(&format!(
                     "| {} |\n",
-                    headers.iter().map(|_| "---").collect::<Vec<_>>().join(" | ")
+                    headers
+                        .iter()
+                        .map(|_| "---")
+                        .collect::<Vec<_>>()
+                        .join(" | ")
                 ));
                 for row in rows {
                     table.push_str(&format!("| {} |\n", row.join(" | ")));
@@ -602,7 +607,7 @@ mod tests {
 
     #[test]
     fn test_default_implementation() {
-        let chunker = SemanticChunker::default();
+        let chunker = SemanticChunker;
         assert_eq!(chunker.name(), "semantic");
     }
 
@@ -679,7 +684,10 @@ mod tests {
         };
 
         let chunks = chunker.chunk(&content, &config).await.unwrap();
-        assert!(chunks.len() > 1, "Large text should produce multiple chunks");
+        assert!(
+            chunks.len() > 1,
+            "Large text should produce multiple chunks"
+        );
     }
 
     #[tokio::test]
@@ -795,10 +803,7 @@ mod tests {
     #[test]
     fn test_parse_markdown_heading_levels() {
         assert_eq!(parse_markdown_heading("# H1"), Some((1, "H1".to_string())));
-        assert_eq!(
-            parse_markdown_heading("## H2"),
-            Some((2, "H2".to_string()))
-        );
+        assert_eq!(parse_markdown_heading("## H2"), Some((2, "H2".to_string())));
         assert_eq!(
             parse_markdown_heading("### H3"),
             Some((3, "H3".to_string()))

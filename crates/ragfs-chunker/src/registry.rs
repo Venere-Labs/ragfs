@@ -16,6 +16,7 @@ pub struct ChunkerRegistry {
 
 impl ChunkerRegistry {
     /// Create a new empty registry.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             chunkers: HashMap::new(),
@@ -40,6 +41,7 @@ impl ChunkerRegistry {
     }
 
     /// Get a chunker for a content type.
+    #[must_use]
     pub fn get_for_content_type(&self, content_type: &ContentType) -> Option<Arc<dyn Chunker>> {
         // Try to find specific chunker
         for chunker in self.chunkers.values() {
@@ -258,6 +260,9 @@ mod tests {
         registry.register("second", FixedSizeChunker::new());
 
         // Second registration should override the type mapping
-        assert_eq!(registry.type_mapping.get("text"), Some(&"second".to_string()));
+        assert_eq!(
+            registry.type_mapping.get("text"),
+            Some(&"second".to_string())
+        );
     }
 }

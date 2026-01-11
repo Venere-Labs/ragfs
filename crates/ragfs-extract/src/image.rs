@@ -16,6 +16,7 @@ pub struct ImageExtractor;
 
 impl ImageExtractor {
     /// Create a new image extractor.
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -58,8 +59,8 @@ impl ContentExtractor for ImageExtractor {
         let (width, height, format) =
             tokio::task::spawn_blocking(move || decode_image_metadata(&bytes))
                 .await
-                .map_err(|e| ExtractError::Failed(format!("Task join error: {}", e)))?
-                .map_err(|e| ExtractError::Failed(format!("Image decode failed: {}", e)))?;
+                .map_err(|e| ExtractError::Failed(format!("Task join error: {e}")))?
+                .map_err(|e| ExtractError::Failed(format!("Image decode failed: {e}")))?;
 
         // Get MIME type
         let mime_type = mime_type_from_extension(path);
@@ -89,7 +90,7 @@ impl ContentExtractor for ImageExtractor {
         Ok(ExtractedContent {
             text,
             elements: vec![ContentElement::Paragraph {
-                text: format!("{}x{} {} image", width, height, format),
+                text: format!("{width}x{height} {format} image"),
                 byte_offset: 0,
             }],
             images: vec![extracted_image],
@@ -97,7 +98,7 @@ impl ContentExtractor for ImageExtractor {
                 title: path
                     .file_name()
                     .and_then(|n| n.to_str())
-                    .map(|s| s.to_string()),
+                    .map(std::string::ToString::to_string),
                 ..Default::default()
             },
         })
@@ -106,15 +107,15 @@ impl ContentExtractor for ImageExtractor {
 
 /// Decode image to get dimensions and format.
 fn decode_image_metadata(bytes: &[u8]) -> Result<(u32, u32, String), String> {
-    let img =
-        image::load_from_memory(bytes).map_err(|e| format!("Failed to load image: {}", e))?;
+    let img = image::load_from_memory(bytes).map_err(|e| format!("Failed to load image: {e}"))?;
 
     let (width, height) = img.dimensions();
 
     // Try to detect format
-    let format = image::guess_format(bytes)
-        .map(|f| format!("{:?}", f).to_lowercase())
-        .unwrap_or_else(|_| "unknown".to_string());
+    let format = image::guess_format(bytes).map_or_else(
+        |_| "unknown".to_string(),
+        |f| format!("{f:?}").to_lowercase(),
+    );
 
     Ok((width, height, format))
 }
@@ -123,16 +124,17 @@ fn decode_image_metadata(bytes: &[u8]) -> Result<(u32, u32, String), String> {
 fn mime_type_from_extension(path: &Path) -> String {
     path.extension()
         .and_then(|ext| ext.to_str())
-        .map(|ext| match ext.to_lowercase().as_str() {
-            "jpg" | "jpeg" => "image/jpeg",
-            "png" => "image/png",
-            "gif" => "image/gif",
-            "webp" => "image/webp",
-            "bmp" => "image/bmp",
-            "tiff" | "tif" => "image/tiff",
-            _ => "application/octet-stream",
+        .map_or("application/octet-stream", |ext| {
+            match ext.to_lowercase().as_str() {
+                "jpg" | "jpeg" => "image/jpeg",
+                "png" => "image/png",
+                "gif" => "image/gif",
+                "webp" => "image/webp",
+                "bmp" => "image/bmp",
+                "tiff" | "tif" => "image/tiff",
+                _ => "application/octet-stream",
+            }
         })
-        .unwrap_or("application/octet-stream")
         .to_string()
 }
 
@@ -185,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_default_implementation() {
-        let extractor = ImageExtractor::default();
+        let extractor = ImageExtractor;
         assert!(!extractor.supported_types().is_empty());
     }
 
@@ -245,14 +247,8 @@ mod tests {
             mime_type_from_extension(Path::new("test.jpg")),
             "image/jpeg"
         );
-        assert_eq!(
-            mime_type_from_extension(Path::new("test.png")),
-            "image/png"
-        );
-        assert_eq!(
-            mime_type_from_extension(Path::new("test.gif")),
-            "image/gif"
-        );
+        assert_eq!(mime_type_from_extension(Path::new("test.png")), "image/png");
+        assert_eq!(mime_type_from_extension(Path::new("test.gif")), "image/gif");
     }
 
     #[test]
@@ -261,10 +257,7 @@ mod tests {
             mime_type_from_extension(Path::new("test.JPG")),
             "image/jpeg"
         );
-        assert_eq!(
-            mime_type_from_extension(Path::new("test.PNG")),
-            "image/png"
-        );
+        assert_eq!(mime_type_from_extension(Path::new("test.PNG")), "image/png");
     }
 
     #[test]

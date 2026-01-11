@@ -53,7 +53,7 @@ jobs:
           cd dist
           tar -czvf ${{ matrix.artifact_name }}.tar.gz ragfs
           sha256sum ${{ matrix.artifact_name }}.tar.gz > ${{ matrix.artifact_name }}.tar.gz.sha256
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: dist/${{ matrix.artifact_name }}.tar.gz*

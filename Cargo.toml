@@ -45,7 +45,7 @@ notify-debouncer-full = "0.4"
 
 # Vector store
 lancedb = "0.15"
-arrow-array = "53"
+arrow-array = "54"
 arrow-schema = "53"
 
 # Embeddings

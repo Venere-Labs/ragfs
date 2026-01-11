@@ -31,7 +31,7 @@ jobs:
       - name: Create index redirect
         run: echo '<html><head><meta http-equiv="refresh" content="0; url=ragfs/index.html"></head></html>' > target/doc/index.html
       - uses: actions/configure-pages@v4
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: target/doc
 

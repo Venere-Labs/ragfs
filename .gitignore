@@ -1,0 +1,15 @@
+/target/
+Cargo.lock
+**/*.rs.bk
+*.swp
+*.swo
+.idea/
+.vscode/
+*.log
+
+# LanceDB data
+*.lance/
+
+# Local config
+.env
+.env.local

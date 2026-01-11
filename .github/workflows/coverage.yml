@@ -1,0 +1,42 @@
+name: Code Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install FUSE dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfuse-dev
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked
+      - name: Generate coverage report
+        run: |
+          cargo tarpaulin \
+            --workspace \
+            --out xml \
+            --out html \
+            --output-dir coverage \
+            --skip-clean \
+            --timeout 300 \
+            --ignore-tests \
+            --exclude-files "*/benches/*" \
+            --exclude-files "*/tests/*"
+      - uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage/cobertura.xml
+          fail_ci_if_error: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7

@@ -1,0 +1,22 @@
+[package]
+name = "ragfs-chunker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Document chunking strategies for RAGFS"
+
+[dependencies]
+ragfs-core.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tiktoken-rs.workspace = true
+tree-sitter.workspace = true
+serde.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

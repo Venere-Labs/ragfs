@@ -1,0 +1,32 @@
+[package]
+name = "ragfs-index"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "File indexing engine for RAGFS"
+
+[dependencies]
+ragfs-core.workspace = true
+ragfs-store.workspace = true
+ragfs-extract.workspace = true
+ragfs-chunker.workspace = true
+ragfs-embed.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+futures.workspace = true
+notify.workspace = true
+notify-debouncer-full.workspace = true
+blake3.workspace = true
+serde.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+mime_guess.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

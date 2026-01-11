@@ -1,0 +1,105 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ragfs",
+    "crates/ragfs-core",
+    "crates/ragfs-fuse",
+    "crates/ragfs-index",
+    "crates/ragfs-chunker",
+    "crates/ragfs-embed",
+    "crates/ragfs-extract",
+    "crates/ragfs-store",
+    "crates/ragfs-query",
+]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/venere-labs/ragfs"
+rust-version = "1.85"
+
+[workspace.dependencies]
+# Internal crates
+ragfs-core = { path = "crates/ragfs-core" }
+ragfs-fuse = { path = "crates/ragfs-fuse" }
+ragfs-index = { path = "crates/ragfs-index" }
+ragfs-chunker = { path = "crates/ragfs-chunker" }
+ragfs-embed = { path = "crates/ragfs-embed" }
+ragfs-extract = { path = "crates/ragfs-extract" }
+ragfs-store = { path = "crates/ragfs-store" }
+ragfs-query = { path = "crates/ragfs-query" }
+
+# Async runtime
+tokio = { version = "1.43", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["fs"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# FUSE
+fuser = "0.15"
+
+# File watching
+notify = "7.0"
+notify-debouncer-full = "0.4"
+
+# Vector store
+lancedb = "0.15"
+arrow-array = "53"
+arrow-schema = "53"
+
+# Embeddings
+# embed_anything = "0.5"
+candle-core = "0.8"
+candle-nn = "0.8"
+candle-transformers = "0.8"
+hf-hub = { version = "0.4", features = ["tokio"] }
+tokenizers = "0.21"
+
+# PDF parsing
+# pdf_oxide = "0.2"  # TODO: verify availability
+pdf-extract = "0.7"
+
+# Image processing
+image = "0.25"
+
+# Code parsing
+tree-sitter = "0.24"
+
+# Tokenization
+tiktoken-rs = "0.6"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Daemonization
+daemonize = "0.5"
+
+# Utilities
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+blake3 = "1.5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+directories = "5.0"
+mime_guess = "2.0"
+
+# Testing
+tempfile = "3.14"
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"

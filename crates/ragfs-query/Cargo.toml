@@ -1,0 +1,24 @@
+[package]
+name = "ragfs-query"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Query DSL and execution for RAGFS"
+
+[dependencies]
+ragfs-core.workspace = true
+ragfs-store.workspace = true
+ragfs-embed.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

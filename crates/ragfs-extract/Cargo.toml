@@ -1,0 +1,23 @@
+[package]
+name = "ragfs-extract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Content extraction for RAGFS (text, PDF, images, code)"
+
+[dependencies]
+ragfs-core.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs"] }
+pdf-extract.workspace = true
+image.workspace = true
+mime_guess.workspace = true
+serde.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

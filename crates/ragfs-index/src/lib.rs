@@ -43,5 +43,5 @@
 pub mod indexer;
 pub mod watcher;
 
-pub use indexer::{IndexerConfig, IndexerService, IndexUpdate};
+pub use indexer::{IndexUpdate, IndexerConfig, IndexerService};
 pub use watcher::FileWatcher;

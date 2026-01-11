@@ -21,6 +21,7 @@ pub struct QueryParser {
 
 impl QueryParser {
     /// Create a new query parser.
+    #[must_use]
     pub fn new(default_limit: usize) -> Self {
         Self { default_limit }
     }
@@ -32,6 +33,7 @@ impl QueryParser {
     /// - `path:src/**`
     /// - `type:code` or `type:text`
     /// - `limit:10`
+    #[must_use]
     pub fn parse(&self, query: &str) -> ParsedQuery {
         let mut text_parts = Vec::new();
         let mut filters = Vec::new();

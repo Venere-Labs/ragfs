@@ -2,7 +2,7 @@
 //!
 //! Measures embedding throughput in tokens/second for various batch sizes.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use ragfs_core::{Embedder, EmbeddingConfig};
 use ragfs_embed::CandleEmbedder;
 use std::sync::Arc;
@@ -28,7 +28,7 @@ fn embedding_benchmark(c: &mut Criterion) {
         let embedder = CandleEmbedder::new(cache_dir);
         // Initialize (may download model on first run)
         if let Err(e) = embedder.init().await {
-            eprintln!("Warning: Could not initialize embedder: {}", e);
+            eprintln!("Warning: Could not initialize embedder: {e}");
             return None;
         }
         Some(Arc::new(embedder) as Arc<dyn Embedder>)
@@ -44,9 +44,9 @@ fn embedding_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("embedding");
 
     // Benchmark different batch sizes with short texts
-    for batch_size in [1, 10, 50, 100].iter() {
+    for batch_size in &[1, 10, 50, 100] {
         let texts = create_test_texts(*batch_size, SHORT_TEXT);
-        let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+        let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
 
         // Estimate token count (rough approximation: ~4 chars per token)
         let total_tokens = texts.iter().map(|t| t.len() / 4).sum::<usize>() as u64;
@@ -73,7 +73,7 @@ fn embedding_benchmark(c: &mut Criterion) {
         ("long", LONG_TEXT),
     ] {
         let texts = create_test_texts(10, text);
-        let text_refs: Vec<&str> = texts.iter().map(|s| s.as_str()).collect();
+        let text_refs: Vec<&str> = texts.iter().map(std::string::String::as_str).collect();
 
         let total_tokens = texts.iter().map(|t| t.len() / 4).sum::<usize>() as u64;
 

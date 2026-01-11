@@ -5,7 +5,7 @@
 [![codecov](https://codecov.io/gh/Venere-Labs/ragfs/branch/main/graph/badge.svg)](https://codecov.io/gh/Venere-Labs/ragfs)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://Venere-Labs.github.io/ragfs/ragfs/)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
 A FUSE filesystem for RAG (Retrieval-Augmented Generation) architectures. RAGFS enables semantic search over your files using vector embeddings, allowing you to find content by meaning rather than keywords.
 
@@ -23,7 +23,7 @@ A FUSE filesystem for RAG (Retrieval-Augmented Generation) architectures. RAGFS 
 
 ## Requirements
 
-- Rust 1.85 or later
+- Rust 1.88 or later
 - Linux with FUSE support (`libfuse-dev` on Debian/Ubuntu, `fuse` on Arch)
 - ~500MB disk space for the embedding model (downloaded on first run)
 

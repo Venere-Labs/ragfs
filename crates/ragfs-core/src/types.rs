@@ -685,7 +685,10 @@ mod tests {
             serde_json::to_string(&DistanceMetric::Cosine).unwrap(),
             "\"cosine\""
         );
-        assert_eq!(serde_json::to_string(&DistanceMetric::L2).unwrap(), "\"l2\"");
+        assert_eq!(
+            serde_json::to_string(&DistanceMetric::L2).unwrap(),
+            "\"l2\""
+        );
         assert_eq!(
             serde_json::to_string(&DistanceMetric::Dot).unwrap(),
             "\"dot\""

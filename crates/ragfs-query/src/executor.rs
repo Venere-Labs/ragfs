@@ -1,6 +1,8 @@
 //! Query execution.
 
-use ragfs_core::{DistanceMetric, Embedder, EmbeddingConfig, SearchQuery, SearchResult, VectorStore};
+use ragfs_core::{
+    DistanceMetric, Embedder, EmbeddingConfig, SearchQuery, SearchResult, VectorStore,
+};
 use std::sync::Arc;
 use tracing::debug;
 
@@ -137,7 +139,7 @@ mod tests {
 
     #[async_trait]
     impl Embedder for MockEmbedder {
-        fn model_name(&self) -> &str {
+        fn model_name(&self) -> &'static str {
             "mock-embedder"
         }
 
@@ -322,9 +324,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_vector_only() {
-        let vector_results =
-            vec![create_test_result("/test/vector.txt", "Vector only result", 0.9)];
-        let hybrid_results = vec![create_test_result("/test/hybrid.txt", "Hybrid result", 0.95)];
+        let vector_results = vec![create_test_result(
+            "/test/vector.txt",
+            "Vector only result",
+            0.9,
+        )];
+        let hybrid_results = vec![create_test_result(
+            "/test/hybrid.txt",
+            "Hybrid result",
+            0.95,
+        )];
 
         let store = Arc::new(MockStore::with_hybrid_results(
             vector_results.clone(),

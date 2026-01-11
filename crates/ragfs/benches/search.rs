@@ -2,7 +2,7 @@
 //!
 //! Measures search latency (p50, p95, p99) across different index sizes.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use ragfs_core::{Chunk, ChunkMetadata, ContentType, DistanceMetric, SearchQuery, VectorStore};
 use ragfs_store::LanceStore;
 use std::path::PathBuf;
@@ -54,7 +54,8 @@ async fn populate_store(store: &LanceStore, chunk_count: usize) {
     let chunks: Vec<Chunk> = (0..chunk_count)
         .map(|i| {
             let file_path = PathBuf::from(format!("/test/file_{}.txt", i / 10));
-            let content = format!("Test content for chunk number {} with some additional text for variety.", i);
+            let content =
+                format!("Test content for chunk number {i} with some additional text for variety.");
             create_test_chunk(&file_path, &content, (i % 10) as u32, i as u64)
         })
         .collect();
@@ -71,7 +72,7 @@ fn search_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("search");
 
     // Benchmark different index sizes
-    for chunk_count in [100, 1_000, 10_000].iter() {
+    for chunk_count in &[100, 1_000, 10_000] {
         // Skip large benchmarks in CI
         if *chunk_count > 1_000 && std::env::var("CI").is_ok() {
             continue;
@@ -91,7 +92,7 @@ fn search_benchmark(c: &mut Criterion) {
         let query_embedding = create_random_embedding(EMBEDDING_DIM, 12345);
 
         group.bench_with_input(
-            BenchmarkId::new("vector_search", format!("{}_chunks", chunk_count)),
+            BenchmarkId::new("vector_search", format!("{chunk_count}_chunks")),
             chunk_count,
             |b, _| {
                 b.to_async(&rt).iter(|| async {
@@ -110,7 +111,7 @@ fn search_benchmark(c: &mut Criterion) {
 
         // Benchmark hybrid search if available
         group.bench_with_input(
-            BenchmarkId::new("hybrid_search", format!("{}_chunks", chunk_count)),
+            BenchmarkId::new("hybrid_search", format!("{chunk_count}_chunks")),
             chunk_count,
             |b, _| {
                 b.to_async(&rt).iter(|| async {
@@ -128,13 +129,13 @@ fn search_benchmark(c: &mut Criterion) {
         );
 
         // Benchmark with different result limits
-        for limit in [5, 10, 25, 50].iter() {
+        for limit in &[5, 10, 25, 50] {
             if *chunk_count < 10_000 {
                 continue; // Only benchmark limits on larger indices
             }
 
             group.bench_with_input(
-                BenchmarkId::new("limit", format!("top_{}", limit)),
+                BenchmarkId::new("limit", format!("top_{limit}")),
                 limit,
                 |b, limit| {
                     b.to_async(&rt).iter(|| async {

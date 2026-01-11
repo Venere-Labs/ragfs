@@ -1,7 +1,7 @@
-//! Vector storage layer for RAGFS using LanceDB.
+//! Vector storage layer for RAGFS using `LanceDB`.
 //!
 //! This crate provides the storage backend for RAGFS, implementing the
-//! [`VectorStore`](ragfs_core::VectorStore) trait using LanceDB as the
+//! [`VectorStore`](ragfs_core::VectorStore) trait using `LanceDB` as the
 //! underlying database.
 //!
 //! # Features

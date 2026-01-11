@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// Main configuration structure.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     /// Mount configuration
     #[serde(default)]
@@ -36,31 +36,12 @@ pub struct Config {
     pub logging: LoggingConfig,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            mount: MountConfig::default(),
-            index: IndexConfig::default(),
-            embedding: EmbeddingConfig::default(),
-            chunking: ChunkingConfig::default(),
-            query: QueryConfig::default(),
-            logging: LoggingConfig::default(),
-        }
-    }
-}
-
 /// Mount-related configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MountConfig {
     /// Allow other users to access the mount
     #[serde(default)]
     pub allow_other: bool,
-}
-
-impl Default for MountConfig {
-    fn default() -> Self {
-        Self { allow_other: false }
-    }
 }
 
 /// Index-related configuration.

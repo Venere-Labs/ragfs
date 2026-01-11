@@ -3,14 +3,14 @@
 use chrono::Utc;
 use ragfs_chunker::ChunkerRegistry;
 use ragfs_core::{
-    Chunk, ChunkConfig, ChunkMetadata, ChunkOutput, ContentType, EmbeddingConfig, Error,
-    FileEvent, FileRecord, FileStatus, IndexStats, Indexer, Result, VectorStore,
+    Chunk, ChunkConfig, ChunkMetadata, ChunkOutput, ContentType, EmbeddingConfig, Error, FileEvent,
+    FileRecord, FileStatus, IndexStats, Indexer, Result, VectorStore,
 };
 use ragfs_embed::EmbedderPool;
 use ragfs_extract::ExtractorRegistry;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{RwLock, broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -114,11 +114,13 @@ impl IndexerService {
     }
 
     /// Subscribe to index updates.
+    #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<IndexUpdate> {
         self.update_tx.subscribe()
     }
 
     /// Get the root path.
+    #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -176,9 +178,8 @@ impl IndexerService {
                         debug!("Received file event: {:?}", event);
                         match &event {
                             FileEvent::Created(path) | FileEvent::Modified(path) => {
-                                let _ = update_tx.send(IndexUpdate::IndexingStarted {
-                                    path: path.clone(),
-                                });
+                                let _ = update_tx
+                                    .send(IndexUpdate::IndexingStarted { path: path.clone() });
 
                                 match process_file(
                                     path,
@@ -200,7 +201,7 @@ impl IndexerService {
                                         // Update stats
                                         let mut s = stats.write().await;
                                         s.indexed_files += 1;
-                                        s.total_chunks += chunk_count as u64;
+                                        s.total_chunks += u64::from(chunk_count);
                                         s.last_update = Some(Utc::now());
                                     }
                                     Err(e) => {
@@ -220,9 +221,8 @@ impl IndexerService {
                                 if let Err(e) = store.delete_by_file_path(path).await {
                                     error!("Failed to delete {:?}: {}", path, e);
                                 } else {
-                                    let _ = update_tx.send(IndexUpdate::FileRemoved {
-                                        path: path.clone(),
-                                    });
+                                    let _ = update_tx
+                                        .send(IndexUpdate::FileRemoved { path: path.clone() });
                                 }
                             }
                             FileEvent::Renamed { from, to } => {
@@ -230,9 +230,8 @@ impl IndexerService {
                                 if let Err(e) = store.delete_by_file_path(from).await {
                                     warn!("Failed to delete old path {:?}: {}", from, e);
                                 }
-                                let _ = update_tx.send(IndexUpdate::IndexingStarted {
-                                    path: to.clone(),
-                                });
+                                let _ = update_tx
+                                    .send(IndexUpdate::IndexingStarted { path: to.clone() });
 
                                 match process_file(
                                     to,
@@ -308,7 +307,10 @@ impl IndexerService {
     /// If the path is a directory, all files in it will be reindexed recursively.
     pub async fn reindex_path(&self, path: &Path) -> Result<()> {
         if !path.exists() {
-            return Err(Error::Other(format!("Path does not exist: {:?}", path)));
+            return Err(Error::Other(format!(
+                "Path does not exist: {}",
+                path.display()
+            )));
         }
 
         if path.is_file() {
@@ -398,9 +400,9 @@ impl IndexerService {
                 // Reindex file - use process_file directly to avoid recursion
                 let _ = self.store.delete_by_file_path(&path).await;
 
-                let _ = self.update_tx.send(IndexUpdate::IndexingStarted {
-                    path: path.clone(),
-                });
+                let _ = self
+                    .update_tx
+                    .send(IndexUpdate::IndexingStarted { path: path.clone() });
 
                 match process_file(
                     &path,
@@ -436,18 +438,10 @@ impl IndexerService {
 }
 
 /// Scan a directory and send file events.
-fn scan_directory(
-    root: &Path,
-    event_tx: &mpsc::Sender<FileEvent>,
-    exclude_patterns: &[String],
-) {
+fn scan_directory(root: &Path, event_tx: &mpsc::Sender<FileEvent>, exclude_patterns: &[String]) {
     use std::fs;
 
-    fn visit_dir(
-        dir: &Path,
-        event_tx: &mpsc::Sender<FileEvent>,
-        exclude_patterns: &[String],
-    ) {
+    fn visit_dir(dir: &Path, event_tx: &mpsc::Sender<FileEvent>, exclude_patterns: &[String]) {
         let entries = match fs::read_dir(dir) {
             Ok(e) => e,
             Err(e) => {
@@ -520,11 +514,12 @@ async fn process_file(
     let content_hash = compute_hash(path).await?;
 
     // Check if already indexed with same hash
-    if let Ok(Some(existing)) = store.get_file(path).await {
-        if existing.content_hash == content_hash && existing.status == FileStatus::Indexed {
-            debug!("File {:?} already indexed, skipping", path);
-            return Ok(existing.chunk_count);
-        }
+    if let Ok(Some(existing)) = store.get_file(path).await
+        && existing.content_hash == content_hash
+        && existing.status == FileStatus::Indexed
+    {
+        debug!("File {:?} already indexed, skipping", path);
+        return Ok(existing.chunk_count);
     }
 
     // Determine MIME type
@@ -606,15 +601,17 @@ async fn process_file(
         content_hash,
         modified_at: metadata
             .modified()
-            .map(|t| chrono::DateTime::<Utc>::from(t))
-            .unwrap_or_else(|_| now),
+            .map_or_else(|_| now, chrono::DateTime::<Utc>::from),
         indexed_at: Some(now),
         chunk_count,
         status: FileStatus::Indexed,
         error_message: None,
     };
 
-    store.upsert_file(&file_record).await.map_err(Error::Store)?;
+    store
+        .upsert_file(&file_record)
+        .await
+        .map_err(Error::Store)?;
 
     Ok(chunk_count)
 }
@@ -667,7 +664,7 @@ fn determine_content_type(
         for (code_ext, lang) in &code_extensions {
             if ext_lower == *code_ext {
                 return ContentType::Code {
-                    language: lang.to_string(),
+                    language: (*lang).to_string(),
                     symbol: None,
                 };
             }
@@ -684,13 +681,13 @@ fn determine_content_type(
     }
 
     // Check language from extraction metadata
-    if let Some(ref lang) = content.metadata.language {
-        if !lang.is_empty() {
-            return ContentType::Code {
-                language: lang.clone(),
-                symbol: None,
-            };
-        }
+    if let Some(ref lang) = content.metadata.language
+        && !lang.is_empty()
+    {
+        return ContentType::Code {
+            language: lang.clone(),
+            symbol: None,
+        };
     }
 
     ContentType::Text
@@ -943,7 +940,11 @@ mod tests {
             path: &Path,
         ) -> std::result::Result<Vec<Chunk>, StoreError> {
             let chunks = self.chunks.read().await;
-            Ok(chunks.iter().filter(|c| c.file_path == path).cloned().collect())
+            Ok(chunks
+                .iter()
+                .filter(|c| c.file_path == path)
+                .cloned()
+                .collect())
         }
     }
 
@@ -1168,7 +1169,7 @@ mod tests {
         let chunk_count1 = indexer.process_single(&file_path).await.unwrap();
 
         // Count chunks after first indexing
-        let chunks_after_first = store.chunks.read().await.len();
+        let _chunks_after_first = store.chunks.read().await.len();
 
         // Second indexing (should skip because content hasn't changed)
         let chunk_count2 = indexer.process_single(&file_path).await.unwrap();
@@ -1282,8 +1283,16 @@ mod tests {
 
         assert!(!config.exclude_patterns.is_empty());
         assert!(config.exclude_patterns.contains(&"**/.git/**".to_string()));
-        assert!(config.exclude_patterns.contains(&"**/node_modules/**".to_string()));
-        assert!(config.exclude_patterns.contains(&"**/target/**".to_string()));
+        assert!(
+            config
+                .exclude_patterns
+                .contains(&"**/node_modules/**".to_string())
+        );
+        assert!(
+            config
+                .exclude_patterns
+                .contains(&"**/target/**".to_string())
+        );
     }
 
     #[tokio::test]

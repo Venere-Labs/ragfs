@@ -15,6 +15,7 @@ pub struct ExtractorRegistry {
 
 impl ExtractorRegistry {
     /// Create a new empty registry.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             extractors: HashMap::new(),
@@ -26,12 +27,14 @@ impl ExtractorRegistry {
     pub fn register<E: ContentExtractor + 'static>(&mut self, name: &str, extractor: E) {
         let extractor = Arc::new(extractor);
         for mime in extractor.supported_types() {
-            self.mime_mapping.insert((*mime).to_string(), name.to_string());
+            self.mime_mapping
+                .insert((*mime).to_string(), name.to_string());
         }
         self.extractors.insert(name.to_string(), extractor);
     }
 
     /// Get an extractor for a MIME type.
+    #[must_use]
     pub fn get_for_mime(&self, mime_type: &str) -> Option<Arc<dyn ContentExtractor>> {
         self.mime_mapping
             .get(mime_type)
@@ -40,6 +43,7 @@ impl ExtractorRegistry {
     }
 
     /// Get an extractor that can handle a file.
+    #[must_use]
     pub fn get_for_file(&self, path: &Path, mime_type: &str) -> Option<Arc<dyn ContentExtractor>> {
         // First try by MIME type
         if let Some(extractor) = self.get_for_mime(mime_type) {
@@ -153,11 +157,13 @@ mod tests {
     async fn test_extract_unsupported_type() {
         let temp_dir = tempdir().unwrap();
         let file_path = temp_dir.path().join("test.bin");
-        std::fs::write(&file_path, &[0u8; 10]).unwrap();
+        std::fs::write(&file_path, [0u8; 10]).unwrap();
 
         let registry = ExtractorRegistry::new();
 
-        let result = registry.extract(&file_path, "application/octet-stream").await;
+        let result = registry
+            .extract(&file_path, "application/octet-stream")
+            .await;
         assert!(result.is_err());
 
         match result.unwrap_err() {
@@ -176,7 +182,7 @@ mod tests {
 
         assert_eq!(registry.extractors.len(), 1);
         // TextExtractor registers multiple MIME types
-        assert!(registry.mime_mapping.len() >= 1);
+        assert!(!registry.mime_mapping.is_empty());
     }
 
     #[test]

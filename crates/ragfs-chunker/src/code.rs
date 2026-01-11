@@ -15,6 +15,7 @@ pub struct CodeChunker;
 
 impl CodeChunker {
     /// Create a new code chunker.
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -37,7 +38,7 @@ impl Default for CodeChunker {
 
 #[async_trait]
 impl Chunker for CodeChunker {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "code"
     }
 
@@ -70,7 +71,13 @@ impl Chunker for CodeChunker {
             return chunk_by_lines(text, &lines, config, &content.metadata.language);
         }
 
-        create_chunks_from_boundaries(text, &lines, &boundaries, config, &content.metadata.language)
+        create_chunks_from_boundaries(
+            text,
+            &lines,
+            &boundaries,
+            config,
+            &content.metadata.language,
+        )
     }
 }
 
@@ -161,7 +168,10 @@ fn find_code_boundaries(lines: &[&str], language: Option<&Language>) -> Vec<Code
 }
 
 /// Detect if a line starts a code boundary.
-fn detect_boundary(line: &str, language: Option<&Language>) -> Option<(BoundaryKind, Option<String>)> {
+fn detect_boundary(
+    line: &str,
+    language: Option<&Language>,
+) -> Option<(BoundaryKind, Option<String>)> {
     // Language-specific patterns
     match language {
         Some(Language::Rust) => detect_rust_boundary(line),
@@ -399,9 +409,7 @@ fn extract_rust_fn_name(line: &str) -> Option<String> {
 }
 
 fn extract_python_fn_name(line: &str) -> Option<String> {
-    let line = line
-        .trim_start_matches("async ")
-        .trim_start_matches("def ");
+    let line = line.trim_start_matches("async ").trim_start_matches("def ");
     line.split('(')
         .next()
         .map(|s| s.trim().to_string())
@@ -420,7 +428,9 @@ fn extract_js_fn_name(line: &str) -> Option<String> {
 }
 
 fn extract_const_fn_name(line: &str) -> Option<String> {
-    let line = line.trim_start_matches("export ").trim_start_matches("const ");
+    let line = line
+        .trim_start_matches("export ")
+        .trim_start_matches("const ");
     line.split(" =")
         .next()
         .map(|s| s.trim().to_string())
@@ -457,7 +467,7 @@ fn extract_java_method_name(line: &str) -> Option<String> {
         before_paren
             .split_whitespace()
             .last()
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
     } else {
         None
     }
@@ -497,7 +507,7 @@ fn extract_after_keyword(line: &str, keyword: &str) -> Option<String> {
         let name = name
             .split(|c: char| c.is_whitespace() || c == '{' || c == '(' || c == '<' || c == ':')
             .next()
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .filter(|s| !s.is_empty());
         return name;
     }
@@ -535,7 +545,14 @@ fn create_chunks_from_boundaries(
 
         // If content is too large, split it
         if content.len() > max_chars {
-            let sub_chunks = split_large_chunk(&content, start_line, config, language, &boundary.kind, &boundary.name)?;
+            let sub_chunks = split_large_chunk(
+                &content,
+                start_line,
+                config,
+                language,
+                &boundary.kind,
+                &boundary.name,
+            )?;
             chunks.extend(sub_chunks);
         } else {
             let (byte_start, byte_end) = calculate_byte_range(text, lines, start_line, end_line);
@@ -667,7 +684,12 @@ fn chunk_by_lines(
 }
 
 /// Calculate byte range for a line range.
-fn calculate_byte_range(text: &str, lines: &[&str], start_line: usize, end_line: usize) -> (u64, u64) {
+fn calculate_byte_range(
+    text: &str,
+    lines: &[&str],
+    start_line: usize,
+    end_line: usize,
+) -> (u64, u64) {
     let byte_start: usize = lines[..start_line].iter().map(|l| l.len() + 1).sum();
     let byte_end: usize = lines[..end_line].iter().map(|l| l.len() + 1).sum();
     (byte_start as u64, byte_end.min(text.len()) as u64)

@@ -1,17 +1,17 @@
-//! LanceDB implementation of VectorStore.
+//! `LanceDB` implementation of `VectorStore`.
 
 use arrow_array::{
     Array, ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator,
-    StringArray, UInt32Array, UInt64Array, UInt8Array,
+    StringArray, UInt8Array, UInt32Array, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
 use async_trait::async_trait;
 use chrono::Utc;
 use futures::TryStreamExt;
-use lancedb::index::scalar::{FtsIndexBuilder, FullTextSearchQuery};
 use lancedb::index::Index;
+use lancedb::index::scalar::{FtsIndexBuilder, FullTextSearchQuery};
 use lancedb::query::{ExecutableQuery, QueryBase};
-use lancedb::{connect, Connection, Table};
+use lancedb::{Connection, Table, connect};
 use ragfs_core::{
     Chunk, ChunkMetadata, ContentType, FileRecord, FileStatus, SearchQuery, SearchResult,
     StoreError, StoreStats, VectorStore,
@@ -28,7 +28,7 @@ const FILES_TABLE: &str = "files";
 
 /// LanceDB-based vector store.
 pub struct LanceStore {
-    /// Path to the LanceDB database
+    /// Path to the `LanceDB` database
     db_path: PathBuf,
     /// Embedding dimension
     embedding_dim: usize,
@@ -41,7 +41,8 @@ pub struct LanceStore {
 }
 
 impl LanceStore {
-    /// Create a new LanceStore.
+    /// Create a new `LanceStore`.
+    #[must_use]
     pub fn new(db_path: PathBuf, embedding_dim: usize) -> Self {
         Self {
             db_path,
@@ -179,7 +180,7 @@ impl LanceStore {
         Ok(table_lock.as_ref().unwrap().clone())
     }
 
-    /// Convert chunks to Arrow RecordBatch.
+    /// Convert chunks to Arrow `RecordBatch`.
     fn chunks_to_batch(&self, chunks: &[Chunk]) -> Result<RecordBatch, StoreError> {
         let chunk_ids: Vec<_> = chunks.iter().map(|c| c.id.to_string()).collect();
         let file_ids: Vec<_> = chunks.iter().map(|c| c.file_id.to_string()).collect();
@@ -228,8 +229,7 @@ impl LanceStore {
             .map(|c| {
                 c.metadata
                     .indexed_at
-                    .map(|t| t.to_rfc3339())
-                    .unwrap_or_else(|| Utc::now().to_rfc3339())
+                    .map_or_else(|| Utc::now().to_rfc3339(), |t| t.to_rfc3339())
             })
             .collect();
 
@@ -294,7 +294,7 @@ impl LanceStore {
         Ok(batch)
     }
 
-    /// Convert file record to Arrow RecordBatch.
+    /// Convert file record to Arrow `RecordBatch`.
     fn file_to_batch(&self, record: &FileRecord) -> Result<RecordBatch, StoreError> {
         let schema = Arc::new(self.files_schema());
 
@@ -302,17 +302,16 @@ impl LanceStore {
             schema,
             vec![
                 Arc::new(StringArray::from(vec![record.id.to_string()])),
-                Arc::new(StringArray::from(vec![record
-                    .path
-                    .to_string_lossy()
-                    .to_string()])),
+                Arc::new(StringArray::from(vec![
+                    record.path.to_string_lossy().to_string(),
+                ])),
                 Arc::new(UInt64Array::from(vec![record.size_bytes])),
                 Arc::new(StringArray::from(vec![record.mime_type.clone()])),
                 Arc::new(StringArray::from(vec![record.content_hash.clone()])),
                 Arc::new(StringArray::from(vec![record.modified_at.to_rfc3339()])),
-                Arc::new(StringArray::from(vec![record
-                    .indexed_at
-                    .map(|t| t.to_rfc3339())])),
+                Arc::new(StringArray::from(vec![
+                    record.indexed_at.map(|t| t.to_rfc3339()),
+                ])),
                 Arc::new(UInt32Array::from(vec![record.chunk_count])),
                 Arc::new(StringArray::from(vec![status_to_string(&record.status)])),
                 Arc::new(StringArray::from(vec![record.error_message.clone()])),
@@ -527,10 +526,7 @@ impl VectorStore for LanceStore {
             self.upsert_file(&file_record).await?;
         }
 
-        info!(
-            "Updated {} chunks from {:?} to {:?}",
-            chunk_count, from, to
-        );
+        info!("Updated {} chunks from {:?} to {:?}", chunk_count, from, to);
         Ok(chunk_count)
     }
 
@@ -693,9 +689,9 @@ fn calculate_dir_size(path: &Path) -> u64 {
 fn content_type_to_string(ct: &ContentType) -> String {
     match ct {
         ContentType::Text => "text".to_string(),
-        ContentType::Code { language, .. } => format!("code:{}", language),
+        ContentType::Code { language, .. } => format!("code:{language}"),
         ContentType::ImageCaption => "image_caption".to_string(),
-        ContentType::PdfPage { page_num } => format!("pdf:{}", page_num),
+        ContentType::PdfPage { page_num } => format!("pdf:{page_num}"),
         ContentType::Markdown => "markdown".to_string(),
     }
 }
@@ -751,22 +747,19 @@ fn build_vector_array(
     let mut builder = FixedSizeListBuilder::new(Float32Builder::new(), dim as i32);
 
     for emb in embeddings {
-        match emb {
-            Some(values) => {
-                let values_builder = builder.values();
-                for &v in values {
-                    values_builder.append_option(v);
-                }
-                builder.append(true);
+        if let Some(values) = emb {
+            let values_builder = builder.values();
+            for &v in values {
+                values_builder.append_option(v);
             }
-            None => {
-                // Append zeros for missing embeddings
-                let values_builder = builder.values();
-                for _ in 0..dim {
-                    values_builder.append_value(0.0);
-                }
-                builder.append(true);
+            builder.append(true);
+        } else {
+            // Append zeros for missing embeddings
+            let values_builder = builder.values();
+            for _ in 0..dim {
+                values_builder.append_value(0.0);
             }
+            builder.append(true);
         }
     }
 
@@ -801,13 +794,8 @@ fn batch_to_search_results(batch: &RecordBatch) -> Result<Vec<SearchResult>, Sto
         .column_by_name("_distance")
         .and_then(|c| c.as_any().downcast_ref::<Float32Array>());
 
-    let (
-        Some(chunk_ids),
-        Some(file_paths),
-        Some(contents),
-        Some(start_bytes),
-        Some(end_bytes),
-    ) = (chunk_ids, file_paths, contents, start_bytes, end_bytes)
+    let (Some(chunk_ids), Some(file_paths), Some(contents), Some(start_bytes), Some(end_bytes)) =
+        (chunk_ids, file_paths, contents, start_bytes, end_bytes)
     else {
         return Err(StoreError::Query("Missing required columns".to_string()));
     };
@@ -826,7 +814,7 @@ fn batch_to_search_results(batch: &RecordBatch) -> Result<Vec<SearchResult>, Sto
             _ => None,
         };
 
-        let score = distances.map(|d| 1.0 - d.value(i)).unwrap_or(0.0);
+        let score = distances.map_or(0.0, |d| 1.0 - d.value(i));
 
         results.push(SearchResult {
             chunk_id: Uuid::parse_str(chunk_id).unwrap_or_default(),
@@ -916,14 +904,13 @@ fn batch_to_chunks(batch: &RecordBatch) -> Result<Vec<Chunk>, StoreError> {
     };
 
     for i in 0..batch.num_rows() {
-        let mime_type = mime_types
-            .and_then(|m| {
-                if m.is_null(i) {
-                    None
-                } else {
-                    Some(m.value(i).to_string())
-                }
-            });
+        let mime_type = mime_types.and_then(|m| {
+            if m.is_null(i) {
+                None
+            } else {
+                Some(m.value(i).to_string())
+            }
+        });
 
         // Parse line range from start_line and end_line columns
         let line_range = match (start_lines, end_lines) {
@@ -1024,8 +1011,7 @@ fn batch_to_file_records(batch: &RecordBatch) -> Result<Vec<FileRecord>, StoreEr
 
     for i in 0..batch.num_rows() {
         let modified_at = chrono::DateTime::parse_from_rfc3339(modified_ats.value(i))
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(|_| Utc::now());
+            .map_or_else(|_| Utc::now(), |dt| dt.with_timezone(&Utc));
 
         // Parse indexed_at timestamp
         let indexed_at = indexed_ats.and_then(|arr| {
@@ -1172,7 +1158,7 @@ mod tests {
             .map(|i| {
                 create_test_chunk(
                     &file_path,
-                    &format!("Chunk content {}", i),
+                    &format!("Chunk content {i}"),
                     create_random_embedding(TEST_DIM),
                     i,
                 )
@@ -1237,7 +1223,7 @@ mod tests {
             .map(|i| {
                 create_test_chunk(
                     &file_path,
-                    &format!("Content {}", i),
+                    &format!("Content {i}"),
                     create_random_embedding(TEST_DIM),
                     i,
                 )
@@ -1349,7 +1335,11 @@ mod tests {
 
         // Verify chunks still exist after upsert_file
         let chunks = store.get_chunks_for_file(&file_path).await.unwrap();
-        assert_eq!(chunks.len(), 1, "Chunks should still exist after upsert_file");
+        assert_eq!(
+            chunks.len(),
+            1,
+            "Chunks should still exist after upsert_file"
+        );
 
         // Verify file exists
         let file = store.get_file(&file_path).await.unwrap();

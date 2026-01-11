@@ -6,7 +6,7 @@ This guide helps developers set up their environment and contribute to RAGFS.
 
 ### Rust
 
-Install Rust 1.85 or later via [rustup](https://rustup.rs/):
+Install Rust 1.88 or later via [rustup](https://rustup.rs/):
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -17,7 +17,7 @@ Verify your installation:
 
 ```bash
 rustc --version
-# Should show 1.85.0 or later
+# Should show 1.88.0 or later
 ```
 
 ### System Dependencies

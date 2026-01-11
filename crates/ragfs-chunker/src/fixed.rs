@@ -11,6 +11,7 @@ pub struct FixedSizeChunker;
 
 impl FixedSizeChunker {
     /// Create a new fixed-size chunker.
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
@@ -24,7 +25,7 @@ impl Default for FixedSizeChunker {
 
 #[async_trait]
 impl Chunker for FixedSizeChunker {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "fixed_size"
     }
 
@@ -65,21 +66,15 @@ impl Chunker for FixedSizeChunker {
             let actual_end = find_break_point(&chars, start, end, total_chars);
 
             let chunk_text: String = chars[start..actual_end].iter().collect();
-            let byte_start = text
-                .char_indices()
-                .nth(start)
-                .map(|(i, _)| i)
-                .unwrap_or(0) as u64;
+            let byte_start = text.char_indices().nth(start).map_or(0, |(i, _)| i) as u64;
             let byte_end = text
                 .char_indices()
                 .nth(actual_end)
-                .map(|(i, _)| i)
-                .unwrap_or(text.len()) as u64;
+                .map_or(text.len(), |(i, _)| i) as u64;
 
             // Count lines
             let line_start = text[..byte_start as usize].matches('\n').count() as u32;
-            let line_end =
-                line_start + chunk_text.matches('\n').count() as u32;
+            let line_end = line_start + chunk_text.matches('\n').count() as u32;
 
             chunks.push(ChunkOutput {
                 content: chunk_text,
@@ -129,10 +124,11 @@ fn find_break_point(chars: &[char], start: usize, target_end: usize, total: usiz
 
     // Then sentence end
     for i in (search_start..search_end).rev() {
-        if chars[i] == '.' || chars[i] == '!' || chars[i] == '?' {
-            if i + 1 < total && chars[i + 1].is_whitespace() {
-                return i + 1;
-            }
+        if (chars[i] == '.' || chars[i] == '!' || chars[i] == '?')
+            && i + 1 < total
+            && chars[i + 1].is_whitespace()
+        {
+            return i + 1;
         }
     }
 
@@ -254,11 +250,11 @@ mod tests {
         // Should prefer to break at paragraph boundaries
         assert!(!chunks.is_empty());
         // Check that at least one chunk ends near a paragraph break
-        let has_clean_break = chunks
+        let _has_clean_break = chunks
             .iter()
             .any(|c| c.content.ends_with("\n\n") || c.content.ends_with('\n'));
         // This might not always be true depending on text length, so we just verify chunks exist
-        assert!(chunks.len() >= 1);
+        assert!(!chunks.is_empty());
     }
 
     #[tokio::test]
@@ -364,7 +360,7 @@ mod tests {
 
     #[test]
     fn test_default_implementation() {
-        let chunker = FixedSizeChunker::default();
+        let chunker = FixedSizeChunker;
         assert_eq!(chunker.name(), "fixed_size");
     }
 }

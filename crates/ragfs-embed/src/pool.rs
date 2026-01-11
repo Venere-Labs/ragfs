@@ -105,7 +105,7 @@ mod tests {
 
     #[async_trait]
     impl Embedder for MockEmbedder {
-        fn model_name(&self) -> &str {
+        fn model_name(&self) -> &'static str {
             "mock-embedder"
         }
 
@@ -201,11 +201,15 @@ mod tests {
         let pool2 = Arc::clone(&pool);
 
         let handle1 = tokio::spawn(async move {
-            let _ = pool1.embed_query("query1", &EmbeddingConfig::default()).await;
+            let _ = pool1
+                .embed_query("query1", &EmbeddingConfig::default())
+                .await;
         });
 
         let handle2 = tokio::spawn(async move {
-            let _ = pool2.embed_query("query2", &EmbeddingConfig::default()).await;
+            let _ = pool2
+                .embed_query("query2", &EmbeddingConfig::default())
+                .await;
         });
 
         // Wait for both to complete

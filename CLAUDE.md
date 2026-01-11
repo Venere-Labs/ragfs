@@ -64,7 +64,7 @@ File → Extraction → Chunking → Embedding → Storage → Search
 
 ## Key Details
 
-- Rust 1.85+ required (edition 2024)
+- Rust 1.88+ required (edition 2024)
 - Async-first design using Tokio
 - Content-addressed storage using blake3 hashing
 - Embeddings are generated locally (offline after first model download)

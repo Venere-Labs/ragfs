@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Verbose logging support
 
 ### Technical Details
-- Rust edition 2024, MSRV 1.85
+- Rust edition 2024, MSRV 1.88
 - Async-first design with Tokio
 - 384-dimensional embeddings (gte-small model)
 - LanceDB for vector storage with ANN search

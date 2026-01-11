@@ -37,7 +37,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 ### Prerequisites
 
-- Rust 1.85 or later
+- Rust 1.88 or later
 - FUSE development libraries
 - Git
 

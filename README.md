@@ -1,9 +1,9 @@
 # RAGFS
 
-[![CI](https://github.com/venere-labs/ragfs/actions/workflows/ci.yml/badge.svg)](https://github.com/venere-labs/ragfs/actions/workflows/ci.yml)
-[![Security Audit](https://github.com/venere-labs/ragfs/actions/workflows/security.yml/badge.svg)](https://github.com/venere-labs/ragfs/actions/workflows/security.yml)
-[![codecov](https://codecov.io/gh/venere-labs/ragfs/branch/main/graph/badge.svg)](https://codecov.io/gh/venere-labs/ragfs)
-[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://venere-labs.github.io/ragfs/ragfs/)
+[![CI](https://github.com/Venere-Labs/ragfs/actions/workflows/ci.yml/badge.svg)](https://github.com/Venere-Labs/ragfs/actions/workflows/ci.yml)
+[![Security Audit](https://github.com/Venere-Labs/ragfs/actions/workflows/security.yml/badge.svg)](https://github.com/Venere-Labs/ragfs/actions/workflows/security.yml)
+[![codecov](https://codecov.io/gh/Venere-Labs/ragfs/branch/main/graph/badge.svg)](https://codecov.io/gh/Venere-Labs/ragfs)
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://Venere-Labs.github.io/ragfs/ragfs/)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
@@ -31,7 +31,7 @@ A FUSE filesystem for RAG (Retrieval-Augmented Generation) architectures. RAGFS 
 
 ```bash
 # Clone the repository
-git clone https://github.com/venere-labs/ragfs.git
+git clone https://github.com/Venere-Labs/ragfs.git
 cd ragfs
 
 # Build in release mode

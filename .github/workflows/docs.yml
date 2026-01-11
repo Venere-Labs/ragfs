@@ -22,8 +22,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install FUSE dependencies
-        run: sudo apt-get update && sudo apt-get install -y libfuse-dev
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
       - name: Build documentation
         run: cargo doc --no-deps --all-features --document-private-items
         env:

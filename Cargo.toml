@@ -51,7 +51,7 @@ arrow-schema = "53"
 # Embeddings
 # embed_anything = "0.5"
 candle-core = "0.8"
-candle-nn = "0.8"
+candle-nn = "0.9"
 candle-transformers = "0.8"
 hf-hub = { version = "0.4", features = ["tokio"] }
 tokenizers = "0.21"

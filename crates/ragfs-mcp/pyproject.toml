@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ragfs-mcp"
 version = "0.2.0"
-description = "MCP server for RAGFS semantic search"
+description = "MCP server for RAGFS semantic filesystem"
 readme = "README.md"
 license = { text = "MIT OR Apache-2.0" }
 requires-python = ">=3.9"
@@ -21,9 +21,10 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-keywords = ["mcp", "rag", "semantic-search", "claude", "ai"]
+keywords = ["rag", "semantic-search", "mcp", "ai", "claude"]
 dependencies = [
     "mcp>=1.2.0",
     "ragfs>=0.2.0",

@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "FUSE filesystem implementation for RAGFS"
-keywords = ["fuse", "filesystem", "rag", "semantic-search"]
+description = "FUSE filesystem implementation for RAGFS semantic search"
+keywords = ["rag", "semantic-search", "fuse", "filesystem"]
 categories = ["filesystem"]
 
 [features]

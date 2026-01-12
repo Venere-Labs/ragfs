@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "RAGFS - A FUSE filesystem for RAG architectures"
-keywords = ["rag", "fuse", "semantic-search", "embeddings", "filesystem"]
+description = "A FUSE filesystem for semantic search and RAG architectures"
+keywords = ["rag", "semantic-search", "fuse", "filesystem", "embeddings"]
 categories = ["command-line-utilities", "filesystem"]
 
 [[bin]]

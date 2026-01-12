@@ -12,6 +12,27 @@ categories = ["command-line-utilities", "filesystem"]
 name = "ragfs"
 path = "src/main.rs"
 
+[features]
+default = ["candle", "lancedb"]
+full = ["candle", "lancedb", "vision"]
+candle = [
+    "ragfs-embed/candle",
+    "ragfs-index/candle",
+    "ragfs-query/candle",
+    "ragfs-fuse/candle",
+]
+lancedb = [
+    "ragfs-store/lancedb",
+    "ragfs-index/lancedb",
+    "ragfs-query/lancedb",
+    "ragfs-fuse/lancedb",
+]
+vision = [
+    "ragfs-extract/vision",
+    "ragfs-index/vision",
+    "ragfs-fuse/vision",
+]
+
 [dependencies]
 ragfs-core.workspace = true
 ragfs-fuse.workspace = true

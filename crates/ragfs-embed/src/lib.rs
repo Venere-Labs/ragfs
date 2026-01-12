@@ -13,6 +13,11 @@
 //! - **Concurrent**: Thread pool for parallel embedding generation
 //! - **Cached**: LRU cache to avoid redundant computations
 //!
+//! ## Cargo Features
+//!
+//! - `candle` (default): Enables the Candle ML stack for real embeddings
+//! - Without `candle`: Only `NoopEmbedder` is available (for testing/development)
+//!
 //! ## Model Details
 //!
 //! | Property | Value |
@@ -65,14 +70,25 @@
 //!
 //! | Type | Description |
 //! |------|-------------|
-//! | [`CandleEmbedder`] | Transformer-based embeddings using `gte-small` |
-//! | [`EmbedderPool`] | Concurrent embedding with semaphore limiting |
-//! | [`EmbeddingCache`] | LRU cache for embedding results |
+//! | [`CandleEmbedder`] | Transformer-based embeddings using `gte-small` (requires `candle` feature) |
+//! | [`EmbeddingCache`] | LRU cache for embedding results (requires `candle` feature) |
+//! | [`EmbedderPool`] | Concurrent embedding with semaphore limiting (always available) |
+//! | [`NoopEmbedder`] | No-op embedder for testing (always available) |
 
+// Candle-based modules (optional)
+#[cfg(feature = "candle")]
 pub mod cache;
+#[cfg(feature = "candle")]
 pub mod candle;
+
+#[cfg(feature = "candle")]
+pub use cache::EmbeddingCache;
+#[cfg(feature = "candle")]
+pub use candle::CandleEmbedder;
+
+// Always available modules
+pub mod noop;
 pub mod pool;
 
-pub use cache::EmbeddingCache;
-pub use candle::CandleEmbedder;
+pub use noop::NoopEmbedder;
 pub use pool::EmbedderPool;

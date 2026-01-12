@@ -1,17 +1,30 @@
-//! Vector storage layer for RAGFS using `LanceDB`.
+//! Vector storage layer for RAGFS.
 //!
-//! This crate provides the storage backend for RAGFS, implementing the
-//! [`VectorStore`](ragfs_core::VectorStore) trait using `LanceDB` as the
-//! underlying database.
+//! This crate provides storage backends for RAGFS, implementing the
+//! [`VectorStore`](ragfs_core::VectorStore) trait.
 //!
-//! # Features
+//! ## Cargo Features
+//!
+//! - `lancedb` (default): Enables the `LanceDB` backend for production use
+//! - Without `lancedb`: Only `MemoryStore` is available (for testing/development)
+//!
+//! ## Backends
+//!
+//! | Backend | Description |
+//! |---------|-------------|
+//! | [`LanceStore`] | Production backend using `LanceDB` (requires `lancedb` feature) |
+//! | [`MemoryStore`] | In-memory backend for testing (always available) |
+//!
+//! ## `LanceDB` Features
+//!
+//! When the `lancedb` feature is enabled:
 //!
 //! - **Vector Search**: Fast approximate nearest neighbor search using HNSW
 //! - **Hybrid Search**: Combined FTS and vector search for better relevance
 //! - **Full CRUD**: Create, read, update, delete operations for chunks and files
 //! - **Automatic Indexing**: Creates vector and FTS indices automatically
 //!
-//! # Example
+//! ## Example
 //!
 //! ```rust,ignore
 //! use ragfs_store::LanceStore;
@@ -28,7 +41,15 @@
 //! let results = store.search(query).await?;
 //! ```
 
+// LanceDB-based modules (optional)
+#[cfg(feature = "lancedb")]
 pub mod lancedb;
+#[cfg(feature = "lancedb")]
 pub mod schema;
 
+#[cfg(feature = "lancedb")]
 pub use lancedb::LanceStore;
+
+// In-memory store (always available for testing)
+pub mod memory;
+pub use memory::MemoryStore;

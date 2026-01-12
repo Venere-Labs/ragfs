@@ -946,6 +946,16 @@ mod tests {
                 .cloned()
                 .collect())
         }
+
+        async fn get_all_chunks(&self) -> std::result::Result<Vec<Chunk>, StoreError> {
+            let chunks = self.chunks.read().await;
+            Ok(chunks.clone())
+        }
+
+        async fn get_all_files(&self) -> std::result::Result<Vec<FileRecord>, StoreError> {
+            let files = self.files.read().await;
+            Ok(files.values().cloned().collect())
+        }
     }
 
     // ==================== Helper function tests ====================

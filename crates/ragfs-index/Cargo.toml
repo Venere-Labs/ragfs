@@ -8,6 +8,12 @@ description = "File indexing engine for RAGFS"
 keywords = ["indexing", "file-watcher", "embeddings", "rag"]
 categories = ["filesystem", "database-implementations"]
 
+[features]
+default = ["candle", "lancedb"]
+candle = ["ragfs-embed/candle"]
+lancedb = ["ragfs-store/lancedb"]
+vision = ["ragfs-extract/vision"]
+
 [dependencies]
 ragfs-core.workspace = true
 ragfs-store.workspace = true

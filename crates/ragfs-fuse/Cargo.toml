@@ -8,6 +8,12 @@ description = "FUSE filesystem implementation for RAGFS"
 keywords = ["fuse", "filesystem", "rag", "semantic-search"]
 categories = ["filesystem"]
 
+[features]
+default = ["candle", "lancedb"]
+candle = ["ragfs-index/candle", "ragfs-query/candle"]
+lancedb = ["ragfs-index/lancedb", "ragfs-query/lancedb"]
+vision = ["ragfs-index/vision"]
+
 [dependencies]
 ragfs-core.workspace = true
 ragfs-store.workspace = true

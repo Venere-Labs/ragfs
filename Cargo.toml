@@ -21,16 +21,16 @@ repository = "https://github.com/Venere-Labs/ragfs"
 rust-version = "1.88"
 
 [workspace.dependencies]
-# Internal crates
+# Internal crates (default-features = false for proper feature propagation)
 ragfs-core = { path = "crates/ragfs-core" }
-ragfs-fuse = { path = "crates/ragfs-fuse" }
-ragfs-index = { path = "crates/ragfs-index" }
+ragfs-fuse = { path = "crates/ragfs-fuse", default-features = false }
+ragfs-index = { path = "crates/ragfs-index", default-features = false }
 ragfs-chunker = { path = "crates/ragfs-chunker" }
-ragfs-embed = { path = "crates/ragfs-embed" }
-ragfs-extract = { path = "crates/ragfs-extract" }
-ragfs-store = { path = "crates/ragfs-store" }
-ragfs-query = { path = "crates/ragfs-query" }
-ragfs-python = { path = "crates/ragfs-python" }
+ragfs-embed = { path = "crates/ragfs-embed", default-features = false }
+ragfs-extract = { path = "crates/ragfs-extract", default-features = false }
+ragfs-store = { path = "crates/ragfs-store", default-features = false }
+ragfs-query = { path = "crates/ragfs-query", default-features = false }
+ragfs-python = { path = "crates/ragfs-python", default-features = false }
 
 # Python bindings
 pyo3 = { version = "0.23", features = ["extension-module"] }

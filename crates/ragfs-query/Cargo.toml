@@ -8,6 +8,11 @@ description = "Query DSL and execution for RAGFS"
 keywords = ["semantic-search", "vector-search", "query", "rag"]
 categories = ["database-implementations"]
 
+[features]
+default = ["candle", "lancedb"]
+candle = ["ragfs-embed/candle"]
+lancedb = ["ragfs-store/lancedb"]
+
 [dependencies]
 ragfs-core.workspace = true
 ragfs-store.workspace = true

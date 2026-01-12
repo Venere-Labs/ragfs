@@ -8,14 +8,19 @@ description = "Vector storage layer for RAGFS using LanceDB"
 keywords = ["vector-database", "lancedb", "embeddings", "rag"]
 categories = ["database-implementations"]
 
+[features]
+default = ["lancedb"]
+lancedb = [
+    "dep:lancedb",
+    "dep:arrow-array",
+    "dep:arrow-schema",
+]
+
 [dependencies]
 ragfs-core.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-lancedb.workspace = true
-arrow-array.workspace = true
-arrow-schema.workspace = true
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -24,6 +29,11 @@ chrono.workspace = true
 directories.workspace = true
 blake3.workspace = true
 tracing.workspace = true
+
+# Optional: LanceDB backend
+lancedb = { workspace = true, optional = true }
+arrow-array = { workspace = true, optional = true }
+arrow-schema = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

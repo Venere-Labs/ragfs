@@ -262,6 +262,14 @@ mod tests {
         async fn get_chunks_for_file(&self, _path: &Path) -> Result<Vec<Chunk>, StoreError> {
             Ok(vec![])
         }
+
+        async fn get_all_chunks(&self) -> Result<Vec<Chunk>, StoreError> {
+            Ok(vec![])
+        }
+
+        async fn get_all_files(&self) -> Result<Vec<FileRecord>, StoreError> {
+            Ok(vec![])
+        }
     }
 
     // ==================== Helper functions ====================

@@ -9,9 +9,9 @@
 //! All operations follow a Propose-Review-Apply pattern for safety.
 
 use chrono::{DateTime, Utc};
-use ragfs_core::{DistanceMetric, Embedder, EmbeddingConfig, SearchQuery, VectorStore};
+use ragfs_core::{Chunk, DistanceMetric, Embedder, EmbeddingConfig, FileRecord, SearchQuery, VectorStore};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -131,7 +131,7 @@ pub enum PlanStatus {
 }
 
 /// Impact summary of a plan.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PlanImpact {
     /// Total files affected
     pub files_affected: usize,
@@ -442,10 +442,18 @@ impl SemanticManager {
 
         debug!("Finding duplicate files");
 
-        // Get stats to know how many files we have
-        let stats = store.stats().await.map_err(|e| format!("Failed to get stats: {e}"))?;
+        // Get all chunks and files from the store
+        let all_chunks = store
+            .get_all_chunks()
+            .await
+            .map_err(|e| format!("Failed to get chunks: {e}"))?;
 
-        if stats.total_files == 0 {
+        let all_files = store
+            .get_all_files()
+            .await
+            .map_err(|e| format!("Failed to get files: {e}"))?;
+
+        if all_files.is_empty() {
             return Ok(DuplicateGroups {
                 analyzed_at: Utc::now(),
                 threshold: self.config.duplicate_threshold,
@@ -454,17 +462,130 @@ impl SemanticManager {
             });
         }
 
-        // This is a simplified duplicate detection algorithm
-        // For each file, search for very similar files
-        // In a real implementation, we'd use a more efficient clustering algorithm
+        // Build a map of file_path -> chunks with embeddings
+        let mut file_chunks: HashMap<PathBuf, Vec<&Chunk>> = HashMap::new();
+        for chunk in &all_chunks {
+            if chunk.embedding.is_some() {
+                file_chunks
+                    .entry(chunk.file_path.clone())
+                    .or_default()
+                    .push(chunk);
+            }
+        }
 
-        let groups: Vec<DuplicateGroup> = Vec::new();
-        let _processed: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-        let potential_savings: u64 = 0;
+        // Build file info map
+        let file_info: HashMap<PathBuf, &FileRecord> = all_files
+            .iter()
+            .map(|f| (f.path.clone(), f))
+            .collect();
 
-        // For now, return empty groups since full implementation requires iterating all files
-        // which would need additional VectorStore API methods
-        // This is a placeholder that can be enhanced later
+        // Calculate average embedding for each file
+        let file_embeddings: HashMap<PathBuf, Vec<f32>> = file_chunks
+            .iter()
+            .filter_map(|(path, chunks)| {
+                let embeddings: Vec<&Vec<f32>> = chunks
+                    .iter()
+                    .filter_map(|c| c.embedding.as_ref())
+                    .collect();
+
+                if embeddings.is_empty() {
+                    return None;
+                }
+
+                // Average the embeddings
+                let dim = embeddings[0].len();
+                let mut avg = vec![0.0f32; dim];
+                for emb in &embeddings {
+                    for (i, &v) in emb.iter().enumerate() {
+                        avg[i] += v;
+                    }
+                }
+                let count = embeddings.len() as f32;
+                for v in &mut avg {
+                    *v /= count;
+                }
+
+                // Normalize the averaged embedding
+                let norm: f32 = avg.iter().map(|x| x * x).sum::<f32>().sqrt();
+                if norm > 0.0 {
+                    for v in &mut avg {
+                        *v /= norm;
+                    }
+                }
+
+                Some((path.clone(), avg))
+            })
+            .collect();
+
+        // Find similar file pairs using cosine similarity
+        let file_paths: Vec<&PathBuf> = file_embeddings.keys().collect();
+        let mut similarity_pairs: Vec<(PathBuf, PathBuf, f32)> = Vec::new();
+
+        for (i, path_a) in file_paths.iter().enumerate() {
+            let emb_a = &file_embeddings[*path_a];
+            for path_b in file_paths.iter().skip(i + 1) {
+                let emb_b = &file_embeddings[*path_b];
+                let similarity = cosine_similarity(emb_a, emb_b);
+
+                if similarity >= self.config.duplicate_threshold {
+                    similarity_pairs.push(((*path_a).clone(), (*path_b).clone(), similarity));
+                }
+            }
+        }
+
+        // Cluster similar files using Union-Find
+        let mut groups: Vec<DuplicateGroup> = Vec::new();
+        let mut processed: HashSet<PathBuf> = HashSet::new();
+
+        for (path_a, path_b, similarity) in similarity_pairs {
+            if processed.contains(&path_a) || processed.contains(&path_b) {
+                continue;
+            }
+
+            // Find or create group for path_a
+            let size_a = file_info.get(&path_a).map(|f| f.size_bytes).unwrap_or(0);
+            let size_b = file_info.get(&path_b).map(|f| f.size_bytes).unwrap_or(0);
+
+            // Use the larger file as representative
+            let (representative, duplicate, dup_similarity, dup_size) = if size_a >= size_b {
+                (path_a.clone(), path_b.clone(), similarity, size_b)
+            } else {
+                (path_b.clone(), path_a.clone(), similarity, size_a)
+            };
+
+            // Check if representative already has a group
+            if let Some(group) = groups.iter_mut().find(|g| g.representative == representative) {
+                group.duplicates.push(DuplicateEntry {
+                    path: duplicate.clone(),
+                    similarity: dup_similarity,
+                    size_bytes: dup_size,
+                });
+                group.wasted_bytes += dup_size;
+                processed.insert(duplicate);
+            } else {
+                // Create new group
+                groups.push(DuplicateGroup {
+                    id: Uuid::new_v4(),
+                    representative: representative.clone(),
+                    duplicates: vec![DuplicateEntry {
+                        path: duplicate.clone(),
+                        similarity: dup_similarity,
+                        size_bytes: dup_size,
+                    }],
+                    wasted_bytes: dup_size,
+                });
+                processed.insert(representative);
+                processed.insert(duplicate);
+            }
+        }
+
+        let potential_savings: u64 = groups.iter().map(|g| g.wasted_bytes).sum();
+
+        info!(
+            "Found {} duplicate groups with {} bytes potential savings",
+            groups.len(),
+            potential_savings
+        );
 
         let result = DuplicateGroups {
             analyzed_at: Utc::now(),
@@ -489,44 +610,115 @@ impl SemanticManager {
         &self,
         request: OrganizeRequest,
     ) -> Result<SemanticPlan, String> {
-        let _store = self.store.as_ref().ok_or("Vector store not available")?;
+        let store = self.store.as_ref().ok_or("Vector store not available")?;
         let _embedder = self.embedder.as_ref().ok_or("Embedder not available")?;
 
         debug!("Creating organization plan for: {}", request.scope.display());
 
-        // Generate a plan based on the strategy
-        let actions = Vec::new();
-        let description = match &request.strategy {
+        // Get all chunks and files
+        let all_chunks = store
+            .get_all_chunks()
+            .await
+            .map_err(|e| format!("Failed to get chunks: {e}"))?;
+
+        let all_files = store
+            .get_all_files()
+            .await
+            .map_err(|e| format!("Failed to get files: {e}"))?;
+
+        // Filter files within scope
+        let scope_path = if request.scope.is_absolute() {
+            request.scope.clone()
+        } else {
+            self.source.join(&request.scope)
+        };
+
+        let scoped_files: Vec<&FileRecord> = all_files
+            .iter()
+            .filter(|f| f.path.starts_with(&scope_path))
+            .collect();
+
+        if scoped_files.is_empty() {
+            return Ok(SemanticPlan {
+                id: Uuid::new_v4(),
+                created_at: Utc::now(),
+                operation: PlanOperation::Organize {
+                    scope: request.scope.clone(),
+                    strategy: request.strategy.clone(),
+                },
+                description: format!("No files found in scope: {}", request.scope.display()),
+                actions: Vec::new(),
+                status: PlanStatus::Pending,
+                impact: PlanImpact::default(),
+            });
+        }
+
+        // Build file embeddings map
+        let mut file_chunks: HashMap<PathBuf, Vec<&Chunk>> = HashMap::new();
+        for chunk in &all_chunks {
+            if chunk.embedding.is_some() && chunk.file_path.starts_with(&scope_path) {
+                file_chunks
+                    .entry(chunk.file_path.clone())
+                    .or_default()
+                    .push(chunk);
+            }
+        }
+
+        // Calculate average embedding for each file
+        let file_embeddings: HashMap<PathBuf, Vec<f32>> = file_chunks
+            .iter()
+            .filter_map(|(path, chunks)| {
+                let embeddings: Vec<&Vec<f32>> = chunks
+                    .iter()
+                    .filter_map(|c| c.embedding.as_ref())
+                    .collect();
+
+                if embeddings.is_empty() {
+                    return None;
+                }
+
+                let dim = embeddings[0].len();
+                let mut avg = vec![0.0f32; dim];
+                for emb in &embeddings {
+                    for (i, &v) in emb.iter().enumerate() {
+                        avg[i] += v;
+                    }
+                }
+                let count = embeddings.len() as f32;
+                for v in &mut avg {
+                    *v /= count;
+                }
+
+                // Normalize
+                let norm: f32 = avg.iter().map(|x| x * x).sum::<f32>().sqrt();
+                if norm > 0.0 {
+                    for v in &mut avg {
+                        *v /= norm;
+                    }
+                }
+
+                Some((path.clone(), avg))
+            })
+            .collect();
+
+        // Generate actions based on strategy
+        let (actions, description) = match &request.strategy {
             OrganizeStrategy::ByTopic => {
-                format!(
-                    "Organize files in {} by semantic topic with {} max groups",
-                    request.scope.display(),
-                    request.max_groups
-                )
+                self.plan_by_topic(&file_embeddings, &scope_path, request.max_groups, request.similarity_threshold)
             }
             OrganizeStrategy::ByType => {
-                format!(
-                    "Organize files in {} by type and content",
-                    request.scope.display()
-                )
+                self.plan_by_type(&scoped_files, &scope_path)
             }
             OrganizeStrategy::ByProject => {
-                format!(
-                    "Organize files in {} by project structure",
-                    request.scope.display()
-                )
+                self.plan_by_project(&scoped_files, &scope_path)
             }
             OrganizeStrategy::Custom { categories } => {
-                format!(
-                    "Organize files in {} into categories: {}",
-                    request.scope.display(),
-                    categories.join(", ")
-                )
+                self.plan_by_custom(&file_embeddings, &scope_path, categories)
             }
         };
 
-        // For now, create an empty plan that can be populated with actual file analysis
-        // Full implementation would analyze files and generate move operations
+        let dirs_created = actions.iter().filter(|a| matches!(a.action, ActionType::Mkdir { .. })).count();
+        let files_moved = actions.iter().filter(|a| matches!(a.action, ActionType::Move { .. })).count();
 
         let plan = SemanticPlan {
             id: Uuid::new_v4(),
@@ -539,9 +731,9 @@ impl SemanticManager {
             actions,
             status: PlanStatus::Pending,
             impact: PlanImpact {
-                files_affected: 0,
-                dirs_created: 0,
-                files_moved: 0,
+                files_affected: files_moved,
+                dirs_created,
+                files_moved,
                 files_deleted: 0,
             },
         };
@@ -549,8 +741,267 @@ impl SemanticManager {
         // Store the plan
         self.pending_plans.write().await.insert(plan.id, plan.clone());
 
-        info!("Created organization plan: {}", plan.id);
+        info!("Created organization plan: {} with {} actions", plan.id, plan.actions.len());
         Ok(plan)
+    }
+
+    /// Plan organization by semantic topic using clustering.
+    fn plan_by_topic(
+        &self,
+        file_embeddings: &HashMap<PathBuf, Vec<f32>>,
+        scope_path: &PathBuf,
+        max_groups: usize,
+        similarity_threshold: f32,
+    ) -> (Vec<PlanAction>, String) {
+        if file_embeddings.is_empty() {
+            return (Vec::new(), "No files with embeddings found".to_string());
+        }
+
+        // Simple clustering: find centroids and group files
+        let file_paths: Vec<&PathBuf> = file_embeddings.keys().collect();
+        let num_files = file_paths.len();
+        let num_clusters = max_groups.min(num_files);
+
+        // Initialize clusters with k random files (here we use evenly spaced indices)
+        let step = if num_files > num_clusters { num_files / num_clusters } else { 1 };
+        let mut centroids: Vec<Vec<f32>> = (0..num_clusters)
+            .map(|i| file_embeddings[file_paths[i * step.min(num_files - 1)]].clone())
+            .collect();
+
+        // Simple k-means iterations
+        let mut cluster_assignments: HashMap<PathBuf, usize> = HashMap::new();
+
+        for _ in 0..5 {
+            // Assign each file to nearest centroid
+            cluster_assignments.clear();
+            for path in &file_paths {
+                let emb = &file_embeddings[*path];
+                let mut best_cluster = 0;
+                let mut best_sim = -1.0f32;
+
+                for (cluster_idx, centroid) in centroids.iter().enumerate() {
+                    let sim = cosine_similarity(emb, centroid);
+                    if sim > best_sim {
+                        best_sim = sim;
+                        best_cluster = cluster_idx;
+                    }
+                }
+
+                cluster_assignments.insert((*path).clone(), best_cluster);
+            }
+
+            // Update centroids
+            for (cluster_idx, centroid) in centroids.iter_mut().enumerate() {
+                let members: Vec<&PathBuf> = cluster_assignments
+                    .iter()
+                    .filter(|&(_, c)| *c == cluster_idx)
+                    .map(|(p, _)| p)
+                    .collect();
+
+                if members.is_empty() {
+                    continue;
+                }
+
+                let dim = centroid.len();
+                let mut new_centroid = vec![0.0f32; dim];
+
+                for path in &members {
+                    let emb = &file_embeddings[*path];
+                    for (i, &v) in emb.iter().enumerate() {
+                        new_centroid[i] += v;
+                    }
+                }
+
+                let count = members.len() as f32;
+                for v in &mut new_centroid {
+                    *v /= count;
+                }
+
+                // Normalize
+                let norm: f32 = new_centroid.iter().map(|x| x * x).sum::<f32>().sqrt();
+                if norm > 0.0 {
+                    for v in &mut new_centroid {
+                        *v /= norm;
+                    }
+                }
+
+                *centroid = new_centroid;
+            }
+        }
+
+        // Generate actions
+        let mut actions = Vec::new();
+
+        // Create topic directories
+        for cluster_idx in 0..num_clusters {
+            let topic_dir = scope_path.join(format!("topic_{}", cluster_idx + 1));
+            actions.push(PlanAction {
+                action: ActionType::Mkdir { path: topic_dir },
+                confidence: 1.0,
+                reason: format!("Create directory for topic cluster {}", cluster_idx + 1),
+            });
+        }
+
+        // Move files to their clusters
+        for (path, &cluster_idx) in &cluster_assignments {
+            let file_name = path.file_name().unwrap_or_default();
+            let topic_dir = scope_path.join(format!("topic_{}", cluster_idx + 1));
+            let new_path = topic_dir.join(file_name);
+
+            if new_path != *path {
+                // Calculate confidence based on distance to centroid
+                let emb = &file_embeddings[path];
+                let centroid = &centroids[cluster_idx];
+                let confidence = cosine_similarity(emb, centroid).max(similarity_threshold);
+
+                actions.push(PlanAction {
+                    action: ActionType::Move {
+                        from: path.clone(),
+                        to: new_path,
+                    },
+                    confidence,
+                    reason: format!("Move to topic cluster {} based on content similarity", cluster_idx + 1),
+                });
+            }
+        }
+
+        let description = format!(
+            "Organize {} files into {} topic clusters",
+            file_paths.len(),
+            num_clusters
+        );
+
+        (actions, description)
+    }
+
+    /// Plan organization by file type.
+    fn plan_by_type(
+        &self,
+        files: &[&FileRecord],
+        scope_path: &PathBuf,
+    ) -> (Vec<PlanAction>, String) {
+        let mut actions = Vec::new();
+        let mut type_dirs: HashSet<String> = HashSet::new();
+
+        for file in files {
+            // Determine type directory based on extension or MIME type
+            let type_dir = if let Some(ext) = file.path.extension() {
+                ext.to_string_lossy().to_string()
+            } else {
+                // Use MIME type category
+                file.mime_type
+                    .split('/')
+                    .next()
+                    .unwrap_or("other")
+                    .to_string()
+            };
+
+            // Create type directory if needed
+            if type_dirs.insert(type_dir.clone()) {
+                actions.push(PlanAction {
+                    action: ActionType::Mkdir {
+                        path: scope_path.join(&type_dir),
+                    },
+                    confidence: 1.0,
+                    reason: format!("Create directory for {} files", type_dir),
+                });
+            }
+
+            // Move file
+            let file_name = file.path.file_name().unwrap_or_default();
+            let new_path = scope_path.join(&type_dir).join(file_name);
+
+            if new_path != file.path {
+                actions.push(PlanAction {
+                    action: ActionType::Move {
+                        from: file.path.clone(),
+                        to: new_path,
+                    },
+                    confidence: 1.0,
+                    reason: format!("Move to {} directory based on file type", type_dir),
+                });
+            }
+        }
+
+        let description = format!(
+            "Organize {} files into {} type-based directories",
+            files.len(),
+            type_dirs.len()
+        );
+
+        (actions, description)
+    }
+
+    /// Plan organization by project structure (based on imports/dependencies).
+    fn plan_by_project(
+        &self,
+        files: &[&FileRecord],
+        scope_path: &PathBuf,
+    ) -> (Vec<PlanAction>, String) {
+        // For project-based organization, we look at file paths to infer structure
+        // This is a simplified implementation
+        let mut actions = Vec::new();
+        let mut project_dirs: HashSet<String> = HashSet::new();
+
+        for file in files {
+            // Use the first directory component after scope as "project"
+            let relative = file.path.strip_prefix(scope_path).unwrap_or(&file.path);
+            let project = relative
+                .components()
+                .next()
+                .map(|c| c.as_os_str().to_string_lossy().to_string())
+                .unwrap_or_else(|| "root".to_string());
+
+            if project_dirs.insert(project.clone()) && !project.contains('.') {
+                actions.push(PlanAction {
+                    action: ActionType::Mkdir {
+                        path: scope_path.join(&project),
+                    },
+                    confidence: 0.8,
+                    reason: format!("Create project directory: {}", project),
+                });
+            }
+        }
+
+        let description = format!(
+            "Organize {} files into {} project directories",
+            files.len(),
+            project_dirs.len()
+        );
+
+        (actions, description)
+    }
+
+    /// Plan organization by custom categories.
+    fn plan_by_custom(
+        &self,
+        file_embeddings: &HashMap<PathBuf, Vec<f32>>,
+        scope_path: &PathBuf,
+        categories: &[String],
+    ) -> (Vec<PlanAction>, String) {
+        let mut actions = Vec::new();
+
+        // Create category directories
+        for category in categories {
+            actions.push(PlanAction {
+                action: ActionType::Mkdir {
+                    path: scope_path.join(category),
+                },
+                confidence: 1.0,
+                reason: format!("Create custom category directory: {}", category),
+            });
+        }
+
+        // Without category embeddings, we can't automatically assign files
+        // This would require generating embeddings for category names and matching
+
+        let description = format!(
+            "Created {} custom category directories for {} files (manual assignment needed)",
+            categories.len(),
+            file_embeddings.len()
+        );
+
+        (actions, description)
     }
 
     /// List all pending plans.
@@ -696,6 +1147,23 @@ fn truncate_content(content: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &content[..max_len])
     }
+}
+
+/// Calculate cosine similarity between two embeddings.
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() {
+        return 0.0;
+    }
+
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
+    }
+
+    (dot / (norm_a * norm_b)).clamp(-1.0, 1.0)
 }
 
 #[cfg(test)]

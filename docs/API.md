@@ -313,8 +313,40 @@ impl ExtractorRegistry {
 ### Built-in Extractors
 
 - `TextExtractor` - Plain text and markdown files
-- `PdfExtractor` - PDF documents (text extraction)
-- `ImageExtractor` - Images (metadata extraction)
+- `PdfExtractor` - PDF documents (text + embedded image extraction)
+- `ImageExtractor` - Images (metadata extraction, optional captioning)
+
+### `ImageCaptioner` Trait
+
+Interface for vision-based image captioning.
+
+```rust
+#[async_trait]
+pub trait ImageCaptioner: Send + Sync {
+    /// Initialize the captioner (load model, etc.).
+    async fn init(&self) -> Result<(), CaptionError>;
+
+    /// Generate a caption for image bytes.
+    async fn caption(&self, image_data: &[u8]) -> Result<Option<String>, CaptionError>;
+
+    /// Check if the captioner is initialized.
+    async fn is_initialized(&self) -> bool;
+
+    /// Get the model name.
+    fn model_name(&self) -> &str;
+}
+```
+
+**Built-in Implementations:**
+- `PlaceholderCaptioner` - No-op implementation (returns `None`)
+
+### PDF Image Extraction
+
+The `PdfExtractor` extracts embedded images from PDFs:
+
+- **Supported formats**: JPEG (DCTDecode), PNG (FlateDecode), JPEG2000 (JPXDecode)
+- **Color spaces**: RGB, Grayscale, CMYK (auto-converted to RGB)
+- **Limits**: 100 images max, 50MB total, 50px minimum dimension
 
 ---
 
@@ -476,7 +508,8 @@ impl RagFs {
 │   ├── .query/                # Query interface
 │   │   └── <query>            # Read returns search results (JSON)
 │   ├── .search/               # Search interface (symlinks)
-│   └── .similar/              # Similar files
+│   ├── .similar/              # Similar files
+│   └── .help                  # Usage documentation
 ├── real_dir/                  # Passthrough to source
 └── real_file.txt              # Passthrough to source
 ```

@@ -151,6 +151,18 @@ Content extraction from various file formats.
 - Code: `.rs`, `.py`, `.js`, `.ts`, `.go`, `.java`, etc.
 - Config: `.json`, `.yaml`, `.toml`, `.xml`
 - Markup: `.html`, `.css`
+- PDF: Text extraction + embedded images (JPEG, PNG, JPEG2000)
+- Images: Metadata extraction, optional vision captioning
+
+**PDF Image Extraction:**
+- Supports DCTDecode (JPEG), FlateDecode (PNG), JPXDecode (JPEG2000)
+- CMYK to RGB conversion
+- Memory limits: 100 images, 50MB total, 50px minimum dimension
+
+**Vision Captioning (Optional):**
+- `ImageCaptioner` trait for model-based image descriptions
+- `PlaceholderCaptioner` no-op implementation (default)
+- Future: BLIP model integration via Candle
 
 ### ragfs-chunker
 
@@ -245,7 +257,12 @@ FUSE filesystem implementation for mounting indexed directories.
 
 **Virtual Structure:**
 - Pass-through access to source files
-- Special `.ragfs/` directory for metadata (planned)
+- Special `.ragfs/` control directory:
+  - `.index` - Index statistics (JSON)
+  - `.config` - Current configuration (JSON)
+  - `.query/<text>` - Execute query, returns results (JSON)
+  - `.reindex` - Write path to trigger reindexing
+  - `.help` - Usage documentation
 
 ## Key Design Decisions
 

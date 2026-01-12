@@ -96,6 +96,7 @@ Index Status for "/home/user/Documents"
 
 | Option | Short | Description |
 |--------|-------|-------------|
+| `--config` | `-c` | Config file path (default: `~/.config/ragfs/config.toml`) |
 | `--verbose` | `-v` | Enable debug-level logging |
 | `--format` | `-f` | Output format: `text` (default), `json` |
 | `--help` | `-h` | Print help information |
@@ -270,7 +271,81 @@ ragfs status ./src -f json
 }
 ```
 
+### ragfs config
+
+Manage RAGFS configuration.
+
+```
+ragfs config <ACTION>
+```
+
+**Actions:**
+| Action | Description |
+|--------|-------------|
+| `show` | Display current configuration |
+| `init` | Print sample config file |
+| `path` | Print config file path |
+
+**Examples:**
+
+```bash
+# Generate sample config
+ragfs config init > ~/.config/ragfs/config.toml
+
+# View current settings
+ragfs config show
+
+# Get config file location
+ragfs config path
+```
+
 ## Configuration
+
+### Configuration File
+
+RAGFS can be configured via `~/.config/ragfs/config.toml`. Generate a sample config:
+
+```bash
+ragfs config init > ~/.config/ragfs/config.toml
+```
+
+**Sample configuration:**
+
+```toml
+[mount]
+allow_other = false
+
+[index]
+include = ["**/*"]
+exclude = ["**/node_modules/**", "**/.git/**", "**/target/**"]
+max_file_size = 52428800  # 50MB
+debounce_ms = 500
+
+[embedding]
+model = "jina-embeddings-v3"
+batch_size = 32
+use_gpu = true
+max_concurrent = 4
+
+[chunking]
+target_size = 512
+max_size = 1024
+overlap = 64
+hierarchical = true
+max_depth = 2
+
+[query]
+default_limit = 10
+max_limit = 100
+hybrid = true
+rerank = false
+
+[logging]
+level = "info"
+# file = "/path/to/ragfs.log"
+```
+
+**Precedence:** CLI arguments > config file > defaults
 
 ### Environment Variables
 

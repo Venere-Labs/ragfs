@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - PID file stored in `$XDG_RUNTIME_DIR/ragfs/` or `~/.cache/ragfs/run/`
   - Logs written to `~/.cache/ragfs/logs/`
   - Graceful unmount via `fusermount -u <mountpoint>`
+- **TOML configuration**: Load settings from `~/.config/ragfs/config.toml`
+  - `ragfs config show` - Display current configuration
+  - `ragfs config init` - Generate sample config file
+  - `ragfs config path` - Show config file location
+  - `--config` global flag to specify custom config path
+- **PDF image extraction**: Extract embedded images from PDFs using lopdf
+  - Supports JPEG (DCTDecode), PNG (FlateDecode), JPEG2000 (JPXDecode)
+  - CMYK to RGB conversion
+  - Memory limits: 100 images max, 50MB total, 50px minimum dimension
+- **Vision captioning infrastructure**: `ImageCaptioner` trait for future BLIP integration
+  - `PlaceholderCaptioner` no-op implementation
+  - Optional captioner in `ImageExtractor`
+- **Virtual `.ragfs/.help` file**: Usage documentation accessible via FUSE mount
 
 ### Changed
 - N/A

@@ -19,7 +19,7 @@ A FUSE filesystem for RAG (Retrieval-Augmented Generation) architectures. RAGFS 
 - **Code-aware Chunking** - Syntax-aware splitting using tree-sitter for source code
 - **Hybrid Search** - Combine vector similarity with full-text search
 - **JSON Output** - Machine-readable output for scripting and integration
-- **Comprehensive Testing** - 291 tests across all crates ensuring reliability
+- **Comprehensive Testing** - 294 tests across all crates ensuring reliability
 
 ## Requirements
 
@@ -92,8 +92,10 @@ Commands:
   index   Index a directory (without mounting)
   query   Query the index
   status  Show index status
+  config  Manage configuration
 
 Options:
+  -c, --config <FILE>    Config file path [default: ~/.config/ragfs/config.toml]
   -v, --verbose          Enable verbose logging
   -f, --format <FORMAT>  Output format: text, json [default: text]
   -h, --help             Print help
@@ -147,6 +149,17 @@ ragfs status <PATH>
 
 Arguments:
   <PATH>  Path to indexed directory
+```
+
+### config
+
+```
+ragfs config <ACTION>
+
+Actions:
+  show  Display current configuration
+  init  Print sample config file
+  path  Print config file path
 ```
 
 ## Architecture

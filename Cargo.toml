@@ -48,7 +48,7 @@ fuser = "0.15"
 
 # File watching
 notify = "7.0"
-notify-debouncer-full = "0.4"
+notify-debouncer-full = "0.6"
 
 # Vector store
 lancedb = "0.15"

@@ -34,8 +34,8 @@ vision = [
 
 [dependencies]
 # PyO3 for Python bindings
-pyo3 = { version = "0.23", features = ["extension-module"] }
-pyo3-async-runtimes = { version = "0.23", features = ["tokio-runtime"] }
+pyo3.workspace = true
+pyo3-async-runtimes.workspace = true
 
 # Internal crates
 ragfs-core.workspace = true

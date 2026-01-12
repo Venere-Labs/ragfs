@@ -207,7 +207,7 @@ impl PyOperationResult {
     }
 
     /// Convert to dictionary.
-    fn to_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         use pyo3::types::PyDict;
         let dict = PyDict::new(py);
         dict.set_item("id", &self.id)?;
@@ -294,7 +294,7 @@ impl PyBatchResult {
     }
 
     /// Convert to dictionary.
-    fn to_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+    fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         use pyo3::types::PyDict;
         let dict = PyDict::new(py);
         dict.set_item("id", &self.id)?;

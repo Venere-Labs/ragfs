@@ -1,10 +1,10 @@
 //! FUSE filesystem implementation.
 
 use fuser::{
-    FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry, ReplyOpen,
-    ReplyWrite, Request,
+    FileAttr, FileType, Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty,
+    ReplyEntry, ReplyOpen, ReplyWrite, Request, TimeOrNow,
 };
-use libc::{EIO, ENOENT, ENOSYS};
+use libc::{EEXIST, EINVAL, EIO, EISDIR, ENOENT, ENOTEMPTY, ENOSYS, ENOTDIR, EPERM};
 use ragfs_core::{Embedder, VectorStore};
 use ragfs_query::QueryExecutor;
 use std::collections::HashMap;
@@ -19,9 +19,16 @@ use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, info, warn};
 
 use crate::inode::{
-    CONFIG_FILE_INO, HELP_FILE_INO, INDEX_FILE_INO, InodeKind, InodeTable, QUERY_DIR_INO,
-    RAGFS_DIR_INO, REINDEX_FILE_INO, ROOT_INO, SEARCH_DIR_INO, SIMILAR_DIR_INO,
+    APPROVE_FILE_INO, CLEANUP_FILE_INO, CONFIG_FILE_INO, DEDUPE_FILE_INO, FIRST_REAL_INO,
+    HELP_FILE_INO, HISTORY_FILE_INO, INDEX_FILE_INO, InodeKind, InodeTable, OPS_BATCH_INO,
+    OPS_CREATE_INO, OPS_DELETE_INO, OPS_DIR_INO, OPS_MOVE_INO, OPS_RESULT_INO, ORGANIZE_FILE_INO,
+    PENDING_DIR_INO, QUERY_DIR_INO, RAGFS_DIR_INO, REINDEX_FILE_INO, REJECT_FILE_INO, ROOT_INO,
+    SAFETY_DIR_INO, SEARCH_DIR_INO, SEMANTIC_DIR_INO, SIMILAR_DIR_INO, SIMILAR_OPS_FILE_INO,
+    TRASH_DIR_INO, UNDO_FILE_INO,
 };
+use crate::ops::OpsManager;
+use crate::safety::SafetyManager;
+use crate::semantic::SemanticManager;
 
 const TTL: Duration = Duration::from_secs(1);
 const BLOCK_SIZE: u64 = 512;
@@ -42,12 +49,26 @@ pub struct RagFs {
     content_cache: Arc<RwLock<HashMap<u64, Vec<u8>>>>,
     /// Channel sender for reindex requests
     reindex_sender: Option<mpsc::Sender<PathBuf>>,
+    /// Operations manager for agent file management
+    ops_manager: Arc<OpsManager>,
+    /// Safety manager for trash/history/undo
+    safety_manager: Arc<SafetyManager>,
+    /// Semantic manager for intelligent operations
+    semantic_manager: Arc<SemanticManager>,
 }
 
 impl RagFs {
     /// Create a new RAGFS filesystem (basic, for passthrough only).
     #[must_use]
     pub fn new(source: PathBuf) -> Self {
+        let safety_manager = Arc::new(SafetyManager::new(&source, None));
+        let ops_manager = Arc::new(OpsManager::with_safety(
+            source.clone(),
+            None,
+            None,
+            safety_manager.clone(),
+        ));
+        let semantic_manager = Arc::new(SemanticManager::new(source.clone(), None, None, None));
         Self {
             source,
             inodes: Arc::new(RwLock::new(InodeTable::new())),
@@ -56,6 +77,9 @@ impl RagFs {
             runtime: Handle::current(),
             content_cache: Arc::new(RwLock::new(HashMap::new())),
             reindex_sender: None,
+            ops_manager,
+            safety_manager,
+            semantic_manager,
         }
     }
 
@@ -69,9 +93,23 @@ impl RagFs {
     ) -> Self {
         let query_executor = Arc::new(QueryExecutor::new(
             store.clone(),
-            embedder,
+            embedder.clone(),
             10,    // default limit
             false, // hybrid search
+        ));
+
+        let safety_manager = Arc::new(SafetyManager::new(&source, None));
+        let ops_manager = Arc::new(OpsManager::with_safety(
+            source.clone(),
+            Some(store.clone()),
+            reindex_sender.clone(),
+            safety_manager.clone(),
+        ));
+        let semantic_manager = Arc::new(SemanticManager::new(
+            source.clone(),
+            Some(store.clone()),
+            Some(embedder.clone()),
+            None,
         ));
 
         Self {
@@ -82,6 +120,9 @@ impl RagFs {
             runtime,
             content_cache: Arc::new(RwLock::new(HashMap::new())),
             reindex_sender,
+            ops_manager,
+            safety_manager,
+            semantic_manager,
         }
     }
 
@@ -261,6 +302,23 @@ impl RagFs {
             .into_bytes()
     }
 
+    /// Resolve a parent inode to a real path.
+    /// Returns None if the parent doesn't exist or is not a directory.
+    fn resolve_parent_path(&self, parent: u64) -> Option<PathBuf> {
+        if parent == ROOT_INO {
+            return Some(self.source.clone());
+        }
+
+        let inodes = self.runtime.block_on(self.inodes.read());
+        if let Some(entry) = inodes.get(parent)
+            && let InodeKind::Real { path, .. } = &entry.kind
+        {
+            Some(path.clone())
+        } else {
+            None
+        }
+    }
+
     /// Get help content for the virtual control directory.
     fn get_help_content(&self) -> Vec<u8> {
         r#"RAGFS Virtual Control Directory
@@ -411,6 +469,173 @@ impl Filesystem for RagFs {
                     reply.entry(&TTL, &attr, 0);
                     return;
                 }
+                ".ops" => {
+                    let attr = self.make_attr(OPS_DIR_INO, FileType::Directory, 0);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                ".safety" => {
+                    let attr = self.make_attr(SAFETY_DIR_INO, FileType::Directory, 0);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                ".semantic" => {
+                    let attr = self.make_attr(SEMANTIC_DIR_INO, FileType::Directory, 0);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                _ => {}
+            }
+        }
+
+        // Handle .semantic directory lookups
+        if parent == SEMANTIC_DIR_INO {
+            match name_str.as_ref() {
+                ".organize" => {
+                    let attr = self.make_attr(ORGANIZE_FILE_INO, FileType::RegularFile, 0);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                ".similar" => {
+                    let content = self.runtime.block_on(self.semantic_manager.get_similar_json());
+                    let attr = self.make_attr(
+                        SIMILAR_OPS_FILE_INO,
+                        FileType::RegularFile,
+                        content.len() as u64,
+                    );
+                    let mut cache = self.runtime.block_on(self.content_cache.write());
+                    cache.insert(SIMILAR_OPS_FILE_INO, content);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                ".cleanup" => {
+                    let content = self.runtime.block_on(self.semantic_manager.get_cleanup_json());
+                    let attr = self.make_attr(
+                        CLEANUP_FILE_INO,
+                        FileType::RegularFile,
+                        content.len() as u64,
+                    );
+                    let mut cache = self.runtime.block_on(self.content_cache.write());
+                    cache.insert(CLEANUP_FILE_INO, content);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                ".dedupe" => {
+                    let content = self.runtime.block_on(self.semantic_manager.get_dedupe_json());
+                    let attr = self.make_attr(
+                        DEDUPE_FILE_INO,
+                        FileType::RegularFile,
+                        content.len() as u64,
+                    );
+                    let mut cache = self.runtime.block_on(self.content_cache.write());
+                    cache.insert(DEDUPE_FILE_INO, content);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                ".pending" => {
+                    let attr = self.make_attr(PENDING_DIR_INO, FileType::Directory, 0);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                ".approve" => {
+                    let attr = self.make_attr(APPROVE_FILE_INO, FileType::RegularFile, 0);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                ".reject" => {
+                    let attr = self.make_attr(REJECT_FILE_INO, FileType::RegularFile, 0);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                _ => {}
+            }
+        }
+
+        // Handle .pending directory lookups (semantic plans)
+        if parent == PENDING_DIR_INO {
+            // Lookup a specific pending plan by ID
+            let plan_ids = self
+                .runtime
+                .block_on(self.semantic_manager.get_pending_plan_ids());
+            if plan_ids.contains(&name_str.to_string()) {
+                let content = self
+                    .runtime
+                    .block_on(self.semantic_manager.get_plan_json(&name_str));
+                // Use dynamic inode for pending plans
+                let mut inodes = self.runtime.block_on(self.inodes.write());
+                let ino = inodes.get_or_create_query_result(PENDING_DIR_INO, name_str.to_string());
+                let attr = self.make_attr(ino, FileType::RegularFile, content.len() as u64);
+                let mut cache = self.runtime.block_on(self.content_cache.write());
+                cache.insert(ino, content);
+                reply.entry(&TTL, &attr, 0);
+                return;
+            }
+        }
+
+        // Handle .safety directory lookups
+        if parent == SAFETY_DIR_INO {
+            match name_str.as_ref() {
+                ".trash" => {
+                    let attr = self.make_attr(TRASH_DIR_INO, FileType::Directory, 0);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                ".history" => {
+                    let content = self.safety_manager.get_history_json(Some(100));
+                    let attr = self.make_attr(
+                        HISTORY_FILE_INO,
+                        FileType::RegularFile,
+                        content.len() as u64,
+                    );
+                    let mut cache = self.runtime.block_on(self.content_cache.write());
+                    cache.insert(HISTORY_FILE_INO, content);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                ".undo" => {
+                    let attr = self.make_attr(UNDO_FILE_INO, FileType::RegularFile, 0);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                _ => {}
+            }
+        }
+
+        // Handle .ops directory lookups
+        if parent == OPS_DIR_INO {
+            match name_str.as_ref() {
+                ".create" => {
+                    let attr = self.make_attr(OPS_CREATE_INO, FileType::RegularFile, 0);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                ".delete" => {
+                    let attr = self.make_attr(OPS_DELETE_INO, FileType::RegularFile, 0);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                ".move" => {
+                    let attr = self.make_attr(OPS_MOVE_INO, FileType::RegularFile, 0);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                ".batch" => {
+                    let attr = self.make_attr(OPS_BATCH_INO, FileType::RegularFile, 0);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
+                ".result" => {
+                    let content = self.runtime.block_on(self.ops_manager.get_last_result());
+                    let attr = self.make_attr(
+                        OPS_RESULT_INO,
+                        FileType::RegularFile,
+                        content.len() as u64,
+                    );
+                    let mut cache = self.runtime.block_on(self.content_cache.write());
+                    cache.insert(OPS_RESULT_INO, content);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
                 _ => {}
             }
         }
@@ -503,6 +728,76 @@ impl Filesystem for RagFs {
                 let mut cache = self.runtime.block_on(self.content_cache.write());
                 cache.insert(HELP_FILE_INO, content);
                 let attr = self.make_attr(ino, FileType::RegularFile, size);
+                reply.attr(&TTL, &attr);
+            }
+            // .ops/ directory and files
+            OPS_DIR_INO => {
+                let attr = self.make_attr(ino, FileType::Directory, 0);
+                reply.attr(&TTL, &attr);
+            }
+            OPS_CREATE_INO | OPS_DELETE_INO | OPS_MOVE_INO | OPS_BATCH_INO => {
+                // Write-only files have size 0
+                let attr = self.make_attr(ino, FileType::RegularFile, 0);
+                reply.attr(&TTL, &attr);
+            }
+            OPS_RESULT_INO => {
+                let content = self.runtime.block_on(self.ops_manager.get_last_result());
+                let size = content.len() as u64;
+                let mut cache = self.runtime.block_on(self.content_cache.write());
+                cache.insert(OPS_RESULT_INO, content);
+                let attr = self.make_attr(ino, FileType::RegularFile, size);
+                reply.attr(&TTL, &attr);
+            }
+            // .safety/ directory and files
+            SAFETY_DIR_INO | TRASH_DIR_INO => {
+                let attr = self.make_attr(ino, FileType::Directory, 0);
+                reply.attr(&TTL, &attr);
+            }
+            HISTORY_FILE_INO => {
+                let content = self.safety_manager.get_history_json(Some(100));
+                let size = content.len() as u64;
+                let mut cache = self.runtime.block_on(self.content_cache.write());
+                cache.insert(HISTORY_FILE_INO, content);
+                let attr = self.make_attr(ino, FileType::RegularFile, size);
+                reply.attr(&TTL, &attr);
+            }
+            UNDO_FILE_INO => {
+                // Write-only file
+                let attr = self.make_attr(ino, FileType::RegularFile, 0);
+                reply.attr(&TTL, &attr);
+            }
+            // .semantic/ directory and files
+            SEMANTIC_DIR_INO | PENDING_DIR_INO => {
+                let attr = self.make_attr(ino, FileType::Directory, 0);
+                reply.attr(&TTL, &attr);
+            }
+            SIMILAR_OPS_FILE_INO => {
+                let content = self.runtime.block_on(self.semantic_manager.get_similar_json());
+                let size = content.len() as u64;
+                let mut cache = self.runtime.block_on(self.content_cache.write());
+                cache.insert(SIMILAR_OPS_FILE_INO, content);
+                let attr = self.make_attr(ino, FileType::RegularFile, size);
+                reply.attr(&TTL, &attr);
+            }
+            CLEANUP_FILE_INO => {
+                let content = self.runtime.block_on(self.semantic_manager.get_cleanup_json());
+                let size = content.len() as u64;
+                let mut cache = self.runtime.block_on(self.content_cache.write());
+                cache.insert(CLEANUP_FILE_INO, content);
+                let attr = self.make_attr(ino, FileType::RegularFile, size);
+                reply.attr(&TTL, &attr);
+            }
+            DEDUPE_FILE_INO => {
+                let content = self.runtime.block_on(self.semantic_manager.get_dedupe_json());
+                let size = content.len() as u64;
+                let mut cache = self.runtime.block_on(self.content_cache.write());
+                cache.insert(DEDUPE_FILE_INO, content);
+                let attr = self.make_attr(ino, FileType::RegularFile, size);
+                reply.attr(&TTL, &attr);
+            }
+            ORGANIZE_FILE_INO | APPROVE_FILE_INO | REJECT_FILE_INO => {
+                // Write-only files
+                let attr = self.make_attr(ino, FileType::RegularFile, 0);
                 reply.attr(&TTL, &attr);
             }
             _ => {
@@ -599,6 +894,82 @@ impl Filesystem for RagFs {
                 }
                 return;
             }
+            OPS_RESULT_INO => {
+                let content = self.runtime.block_on(self.ops_manager.get_last_result());
+                let offset = offset as usize;
+                let size = size as usize;
+                if offset >= content.len() {
+                    reply.data(&[]);
+                } else {
+                    let end = (offset + size).min(content.len());
+                    reply.data(&content[offset..end]);
+                }
+                return;
+            }
+            // Write-only .ops/ files return empty
+            OPS_CREATE_INO | OPS_DELETE_INO | OPS_MOVE_INO | OPS_BATCH_INO => {
+                reply.data(&[]);
+                return;
+            }
+            HISTORY_FILE_INO => {
+                let content = self.safety_manager.get_history_json(Some(100));
+                let offset = offset as usize;
+                let size = size as usize;
+                if offset >= content.len() {
+                    reply.data(&[]);
+                } else {
+                    let end = (offset + size).min(content.len());
+                    reply.data(&content[offset..end]);
+                }
+                return;
+            }
+            // Write-only .safety/ files return empty
+            UNDO_FILE_INO => {
+                reply.data(&[]);
+                return;
+            }
+            // .semantic/ read-only files
+            SIMILAR_OPS_FILE_INO => {
+                let content = self.runtime.block_on(self.semantic_manager.get_similar_json());
+                let offset = offset as usize;
+                let size = size as usize;
+                if offset >= content.len() {
+                    reply.data(&[]);
+                } else {
+                    let end = (offset + size).min(content.len());
+                    reply.data(&content[offset..end]);
+                }
+                return;
+            }
+            CLEANUP_FILE_INO => {
+                let content = self.runtime.block_on(self.semantic_manager.get_cleanup_json());
+                let offset = offset as usize;
+                let size = size as usize;
+                if offset >= content.len() {
+                    reply.data(&[]);
+                } else {
+                    let end = (offset + size).min(content.len());
+                    reply.data(&content[offset..end]);
+                }
+                return;
+            }
+            DEDUPE_FILE_INO => {
+                let content = self.runtime.block_on(self.semantic_manager.get_dedupe_json());
+                let offset = offset as usize;
+                let size = size as usize;
+                if offset >= content.len() {
+                    reply.data(&[]);
+                } else {
+                    let end = (offset + size).min(content.len());
+                    reply.data(&content[offset..end]);
+                }
+                return;
+            }
+            // Write-only .semantic/ files return empty
+            ORGANIZE_FILE_INO | APPROVE_FILE_INO | REJECT_FILE_INO => {
+                reply.data(&[]);
+                return;
+            }
             _ => {}
         }
 
@@ -693,7 +1064,112 @@ impl Filesystem for RagFs {
                     (REINDEX_FILE_INO, FileType::RegularFile, ".reindex"),
                     (HELP_FILE_INO, FileType::RegularFile, ".help"),
                     (SIMILAR_DIR_INO, FileType::Directory, ".similar"),
+                    (OPS_DIR_INO, FileType::Directory, ".ops"),
+                    (SAFETY_DIR_INO, FileType::Directory, ".safety"),
+                    (SEMANTIC_DIR_INO, FileType::Directory, ".semantic"),
                 ];
+
+                for (i, (ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
+                    if reply.add(*ino, (i + 1) as i64, *kind, name) {
+                        break;
+                    }
+                }
+                reply.ok();
+            }
+            SAFETY_DIR_INO => {
+                let entries = [
+                    (SAFETY_DIR_INO, FileType::Directory, "."),
+                    (RAGFS_DIR_INO, FileType::Directory, ".."),
+                    (TRASH_DIR_INO, FileType::Directory, ".trash"),
+                    (HISTORY_FILE_INO, FileType::RegularFile, ".history"),
+                    (UNDO_FILE_INO, FileType::RegularFile, ".undo"),
+                ];
+
+                for (i, (ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
+                    if reply.add(*ino, (i + 1) as i64, *kind, name) {
+                        break;
+                    }
+                }
+                reply.ok();
+            }
+            TRASH_DIR_INO => {
+                // List trash entries dynamically
+                let mut entries: Vec<(u64, FileType, String)> = vec![
+                    (TRASH_DIR_INO, FileType::Directory, ".".to_string()),
+                    (SAFETY_DIR_INO, FileType::Directory, "..".to_string()),
+                ];
+
+                // Add trash entries from SafetyManager
+                let trash = self.runtime.block_on(self.safety_manager.list_trash());
+                for entry in trash {
+                    // Use a dynamic inode (starting from a high number to avoid conflicts)
+                    let entry_ino = FIRST_REAL_INO + 500_000 + (entry.id.as_u128() % 100_000) as u64;
+                    entries.push((entry_ino, FileType::RegularFile, entry.id.to_string()));
+                }
+
+                for (i, (ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
+                    if reply.add(*ino, (i + 1) as i64, *kind, name) {
+                        break;
+                    }
+                }
+                reply.ok();
+            }
+            OPS_DIR_INO => {
+                let entries = [
+                    (OPS_DIR_INO, FileType::Directory, "."),
+                    (RAGFS_DIR_INO, FileType::Directory, ".."),
+                    (OPS_CREATE_INO, FileType::RegularFile, ".create"),
+                    (OPS_DELETE_INO, FileType::RegularFile, ".delete"),
+                    (OPS_MOVE_INO, FileType::RegularFile, ".move"),
+                    (OPS_BATCH_INO, FileType::RegularFile, ".batch"),
+                    (OPS_RESULT_INO, FileType::RegularFile, ".result"),
+                ];
+
+                for (i, (ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
+                    if reply.add(*ino, (i + 1) as i64, *kind, name) {
+                        break;
+                    }
+                }
+                reply.ok();
+            }
+            SEMANTIC_DIR_INO => {
+                let entries = [
+                    (SEMANTIC_DIR_INO, FileType::Directory, "."),
+                    (RAGFS_DIR_INO, FileType::Directory, ".."),
+                    (ORGANIZE_FILE_INO, FileType::RegularFile, ".organize"),
+                    (SIMILAR_OPS_FILE_INO, FileType::RegularFile, ".similar"),
+                    (CLEANUP_FILE_INO, FileType::RegularFile, ".cleanup"),
+                    (DEDUPE_FILE_INO, FileType::RegularFile, ".dedupe"),
+                    (PENDING_DIR_INO, FileType::Directory, ".pending"),
+                    (APPROVE_FILE_INO, FileType::RegularFile, ".approve"),
+                    (REJECT_FILE_INO, FileType::RegularFile, ".reject"),
+                ];
+
+                for (i, (ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
+                    if reply.add(*ino, (i + 1) as i64, *kind, name) {
+                        break;
+                    }
+                }
+                reply.ok();
+            }
+            PENDING_DIR_INO => {
+                // List pending plans dynamically
+                let mut entries: Vec<(u64, FileType, String)> = vec![
+                    (PENDING_DIR_INO, FileType::Directory, ".".to_string()),
+                    (SEMANTIC_DIR_INO, FileType::Directory, "..".to_string()),
+                ];
+
+                // Add pending plan entries from SemanticManager
+                let plan_ids = self
+                    .runtime
+                    .block_on(self.semantic_manager.get_pending_plan_ids());
+                for plan_id in plan_ids {
+                    // Use a dynamic inode
+                    let mut inodes = self.runtime.block_on(self.inodes.write());
+                    let entry_ino =
+                        inodes.get_or_create_query_result(PENDING_DIR_INO, plan_id.clone());
+                    entries.push((entry_ino, FileType::RegularFile, plan_id));
+                }
 
                 for (i, (ino, kind, name)) in entries.iter().enumerate().skip(offset as usize) {
                     if reply.add(*ino, (i + 1) as i64, *kind, name) {
@@ -840,6 +1316,138 @@ impl Filesystem for RagFs {
             return;
         }
 
+        // Handle .ops/ virtual file writes
+        if ino == OPS_CREATE_INO {
+            let data_str = String::from_utf8_lossy(data).to_string();
+            let ops_manager = self.ops_manager.clone();
+            self.runtime.block_on(async move {
+                ops_manager.parse_and_create(&data_str).await;
+            });
+            reply.written(data.len() as u32);
+            return;
+        }
+
+        if ino == OPS_DELETE_INO {
+            let data_str = String::from_utf8_lossy(data).to_string();
+            let ops_manager = self.ops_manager.clone();
+            self.runtime.block_on(async move {
+                ops_manager.parse_and_delete(&data_str).await;
+            });
+            reply.written(data.len() as u32);
+            return;
+        }
+
+        if ino == OPS_MOVE_INO {
+            let data_str = String::from_utf8_lossy(data).to_string();
+            let ops_manager = self.ops_manager.clone();
+            self.runtime.block_on(async move {
+                ops_manager.parse_and_move(&data_str).await;
+            });
+            reply.written(data.len() as u32);
+            return;
+        }
+
+        if ino == OPS_BATCH_INO {
+            let data_str = String::from_utf8_lossy(data).to_string();
+            let ops_manager = self.ops_manager.clone();
+            self.runtime.block_on(async move {
+                ops_manager.parse_and_batch(&data_str).await;
+            });
+            reply.written(data.len() as u32);
+            return;
+        }
+
+        // Handle .safety/.undo writes
+        if ino == UNDO_FILE_INO {
+            let data_str = String::from_utf8_lossy(data).trim().to_string();
+            if let Ok(operation_id) = uuid::Uuid::parse_str(&data_str) {
+                let safety_manager = self.safety_manager.clone();
+                let result = self.runtime.block_on(async move {
+                    safety_manager.undo(operation_id).await
+                });
+                match result {
+                    Ok(msg) => info!("Undo successful: {}", msg),
+                    Err(e) => warn!("Undo failed: {}", e),
+                }
+            } else {
+                warn!("Invalid operation ID for undo: {}", data_str);
+            }
+            reply.written(data.len() as u32);
+            return;
+        }
+
+        // Handle .semantic/.organize writes
+        if ino == ORGANIZE_FILE_INO {
+            let data_str = String::from_utf8_lossy(data).to_string();
+            let semantic_manager = self.semantic_manager.clone();
+            let result = self.runtime.block_on(async move {
+                match serde_json::from_str::<crate::semantic::OrganizeRequest>(&data_str) {
+                    Ok(request) => semantic_manager.create_organize_plan(request).await,
+                    Err(e) => Err(format!("Invalid OrganizeRequest JSON: {e}")),
+                }
+            });
+            match result {
+                Ok(plan) => info!("Created organization plan: {}", plan.id),
+                Err(e) => warn!("Failed to create organization plan: {}", e),
+            }
+            reply.written(data.len() as u32);
+            return;
+        }
+
+        // Handle .semantic/.similar writes
+        if ino == SIMILAR_OPS_FILE_INO {
+            let data_str = String::from_utf8_lossy(data).trim().to_string();
+            let path = PathBuf::from(&data_str);
+            let semantic_manager = self.semantic_manager.clone();
+            let result = self.runtime.block_on(async move {
+                semantic_manager.find_similar(&path).await
+            });
+            match result {
+                Ok(r) => info!("Found {} similar files to {}", r.similar.len(), data_str),
+                Err(e) => warn!("Failed to find similar files: {}", e),
+            }
+            reply.written(data.len() as u32);
+            return;
+        }
+
+        // Handle .semantic/.approve writes
+        if ino == APPROVE_FILE_INO {
+            let data_str = String::from_utf8_lossy(data).trim().to_string();
+            if let Ok(plan_id) = uuid::Uuid::parse_str(&data_str) {
+                let semantic_manager = self.semantic_manager.clone();
+                let result = self.runtime.block_on(async move {
+                    semantic_manager.approve_plan(plan_id).await
+                });
+                match result {
+                    Ok(plan) => info!("Approved plan: {}", plan.id),
+                    Err(e) => warn!("Failed to approve plan: {}", e),
+                }
+            } else {
+                warn!("Invalid plan ID for approve: {}", data_str);
+            }
+            reply.written(data.len() as u32);
+            return;
+        }
+
+        // Handle .semantic/.reject writes
+        if ino == REJECT_FILE_INO {
+            let data_str = String::from_utf8_lossy(data).trim().to_string();
+            if let Ok(plan_id) = uuid::Uuid::parse_str(&data_str) {
+                let semantic_manager = self.semantic_manager.clone();
+                let result = self.runtime.block_on(async move {
+                    semantic_manager.reject_plan(plan_id).await
+                });
+                match result {
+                    Ok(plan) => info!("Rejected plan: {}", plan.id),
+                    Err(e) => warn!("Failed to reject plan: {}", e),
+                }
+            } else {
+                warn!("Invalid plan ID for reject: {}", data_str);
+            }
+            reply.written(data.len() as u32);
+            return;
+        }
+
         // Real file writes (passthrough)
         let inodes = self.runtime.block_on(self.inodes.read());
         if let Some(entry) = inodes.get(ino)
@@ -868,6 +1476,415 @@ impl Filesystem for RagFs {
         debug!("forget: ino={}, nlookup={}", ino, nlookup);
         let mut inodes = self.runtime.block_on(self.inodes.write());
         inodes.forget(ino, nlookup);
+    }
+
+    fn create(
+        &mut self,
+        _req: &Request<'_>,
+        parent: u64,
+        name: &OsStr,
+        mode: u32,
+        _umask: u32,
+        flags: i32,
+        reply: ReplyCreate,
+    ) {
+        let name_str = name.to_string_lossy();
+        debug!("create: parent={}, name={}, mode={:o}", parent, name_str, mode);
+
+        // Prevent creating files in virtual directories
+        if parent < FIRST_REAL_INO && parent != ROOT_INO {
+            reply.error(EPERM);
+            return;
+        }
+
+        // Resolve parent to path
+        let Some(parent_path) = self.resolve_parent_path(parent) else {
+            reply.error(ENOENT);
+            return;
+        };
+
+        let new_path = parent_path.join(&*name_str);
+
+        // Check if file already exists
+        if new_path.exists() {
+            reply.error(EEXIST);
+            return;
+        }
+
+        // Create the file
+        match fs::File::create(&new_path) {
+            Ok(_) => {
+                // Get metadata for the new file
+                let metadata = match fs::metadata(&new_path) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        warn!("Failed to get metadata for new file {:?}: {}", new_path, e);
+                        reply.error(EIO);
+                        return;
+                    }
+                };
+
+                // Create inode entry
+                let mut inodes = self.runtime.block_on(self.inodes.write());
+                let ino = inodes.get_or_create_real(new_path.clone(), metadata.ino());
+                drop(inodes);
+
+                // Trigger reindex for the new file
+                if let Some(ref sender) = self.reindex_sender {
+                    let sender = sender.clone();
+                    let path_to_send = new_path.clone();
+                    self.runtime.spawn(async move {
+                        if let Err(e) = sender.send(path_to_send).await {
+                            warn!("Failed to send reindex request: {}", e);
+                        }
+                    });
+                }
+
+                if let Some(attr) = self.real_path_to_attr(&new_path, ino) {
+                    reply.created(&TTL, &attr, 0, 0, flags as u32);
+                } else {
+                    reply.error(EIO);
+                }
+            }
+            Err(e) => {
+                warn!("Failed to create file {:?}: {}", new_path, e);
+                reply.error(EIO);
+            }
+        }
+    }
+
+    fn unlink(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        let name_str = name.to_string_lossy();
+        debug!("unlink: parent={}, name={}", parent, name_str);
+
+        // Prevent unlinking from virtual directories
+        if parent < FIRST_REAL_INO && parent != ROOT_INO {
+            reply.error(EPERM);
+            return;
+        }
+
+        // Resolve parent to path
+        let Some(parent_path) = self.resolve_parent_path(parent) else {
+            reply.error(ENOENT);
+            return;
+        };
+
+        let file_path = parent_path.join(&*name_str);
+
+        // Check if path exists and is a file
+        if !file_path.exists() {
+            reply.error(ENOENT);
+            return;
+        }
+
+        if file_path.is_dir() {
+            reply.error(EISDIR);
+            return;
+        }
+
+        // Delete from vector store first
+        if let Some(ref store) = self.store {
+            let store = store.clone();
+            let path_for_delete = file_path.clone();
+            let result = self.runtime.block_on(async move {
+                store.delete_by_file_path(&path_for_delete).await
+            });
+            if let Err(e) = result {
+                warn!("Failed to delete from store {:?}: {}", file_path, e);
+                // Continue with file deletion anyway
+            }
+        }
+
+        // Delete the file
+        match fs::remove_file(&file_path) {
+            Ok(()) => {
+                // Remove inode entry
+                let mut inodes = self.runtime.block_on(self.inodes.write());
+                if let Some(ino) = inodes.get_by_path(&file_path) {
+                    inodes.remove(ino);
+                }
+                info!("Deleted file: {:?}", file_path);
+                reply.ok();
+            }
+            Err(e) => {
+                warn!("Failed to delete file {:?}: {}", file_path, e);
+                reply.error(EIO);
+            }
+        }
+    }
+
+    fn mkdir(
+        &mut self,
+        _req: &Request<'_>,
+        parent: u64,
+        name: &OsStr,
+        mode: u32,
+        _umask: u32,
+        reply: ReplyEntry,
+    ) {
+        let name_str = name.to_string_lossy();
+        debug!("mkdir: parent={}, name={}, mode={:o}", parent, name_str, mode);
+
+        // Prevent creating directories in virtual directories
+        if parent < FIRST_REAL_INO && parent != ROOT_INO {
+            reply.error(EPERM);
+            return;
+        }
+
+        // Resolve parent to path
+        let Some(parent_path) = self.resolve_parent_path(parent) else {
+            reply.error(ENOENT);
+            return;
+        };
+
+        let new_path = parent_path.join(&*name_str);
+
+        // Check if path already exists
+        if new_path.exists() {
+            reply.error(EEXIST);
+            return;
+        }
+
+        // Create the directory
+        match fs::create_dir(&new_path) {
+            Ok(()) => {
+                // Get metadata
+                let metadata = match fs::metadata(&new_path) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        warn!("Failed to get metadata for new dir {:?}: {}", new_path, e);
+                        reply.error(EIO);
+                        return;
+                    }
+                };
+
+                // Create inode entry
+                let mut inodes = self.runtime.block_on(self.inodes.write());
+                let ino = inodes.get_or_create_real(new_path.clone(), metadata.ino());
+                drop(inodes);
+
+                if let Some(attr) = self.real_path_to_attr(&new_path, ino) {
+                    info!("Created directory: {:?}", new_path);
+                    reply.entry(&TTL, &attr, 0);
+                } else {
+                    reply.error(EIO);
+                }
+            }
+            Err(e) => {
+                warn!("Failed to create directory {:?}: {}", new_path, e);
+                reply.error(EIO);
+            }
+        }
+    }
+
+    fn rmdir(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        let name_str = name.to_string_lossy();
+        debug!("rmdir: parent={}, name={}", parent, name_str);
+
+        // Prevent removing directories from virtual areas
+        if parent < FIRST_REAL_INO && parent != ROOT_INO {
+            reply.error(EPERM);
+            return;
+        }
+
+        // Resolve parent to path
+        let Some(parent_path) = self.resolve_parent_path(parent) else {
+            reply.error(ENOENT);
+            return;
+        };
+
+        let dir_path = parent_path.join(&*name_str);
+
+        // Check if path exists and is a directory
+        if !dir_path.exists() {
+            reply.error(ENOENT);
+            return;
+        }
+
+        if !dir_path.is_dir() {
+            reply.error(ENOTDIR);
+            return;
+        }
+
+        // Remove the directory (will fail if not empty)
+        match fs::remove_dir(&dir_path) {
+            Ok(()) => {
+                // Remove inode entry
+                let mut inodes = self.runtime.block_on(self.inodes.write());
+                if let Some(ino) = inodes.get_by_path(&dir_path) {
+                    inodes.remove(ino);
+                }
+                info!("Removed directory: {:?}", dir_path);
+                reply.ok();
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::DirectoryNotEmpty
+                    || e.raw_os_error() == Some(libc::ENOTEMPTY)
+                {
+                    reply.error(ENOTEMPTY);
+                } else {
+                    warn!("Failed to remove directory {:?}: {}", dir_path, e);
+                    reply.error(EIO);
+                }
+            }
+        }
+    }
+
+    fn rename(
+        &mut self,
+        _req: &Request<'_>,
+        parent: u64,
+        name: &OsStr,
+        newparent: u64,
+        newname: &OsStr,
+        _flags: u32,
+        reply: ReplyEmpty,
+    ) {
+        let name_str = name.to_string_lossy();
+        let newname_str = newname.to_string_lossy();
+        debug!(
+            "rename: parent={}, name={}, newparent={}, newname={}",
+            parent, name_str, newparent, newname_str
+        );
+
+        // Prevent renaming from/to virtual directories
+        if (parent < FIRST_REAL_INO && parent != ROOT_INO)
+            || (newparent < FIRST_REAL_INO && newparent != ROOT_INO)
+        {
+            reply.error(EPERM);
+            return;
+        }
+
+        // Resolve source path
+        let Some(src_parent_path) = self.resolve_parent_path(parent) else {
+            reply.error(ENOENT);
+            return;
+        };
+
+        // Resolve destination path
+        let Some(dst_parent_path) = self.resolve_parent_path(newparent) else {
+            reply.error(ENOENT);
+            return;
+        };
+
+        let src_path = src_parent_path.join(&*name_str);
+        let dst_path = dst_parent_path.join(&*newname_str);
+
+        // Check source exists
+        if !src_path.exists() {
+            reply.error(ENOENT);
+            return;
+        }
+
+        // Perform rename
+        match fs::rename(&src_path, &dst_path) {
+            Ok(()) => {
+                // Update vector store path
+                if let Some(ref store) = self.store {
+                    let store = store.clone();
+                    let src = src_path.clone();
+                    let dst = dst_path.clone();
+                    let result = self.runtime.block_on(async move {
+                        store.update_file_path(&src, &dst).await
+                    });
+                    if let Err(e) = result {
+                        warn!("Failed to update store path {:?} -> {:?}: {}", src_path, dst_path, e);
+                    }
+                }
+
+                // Update inode table
+                let mut inodes = self.runtime.block_on(self.inodes.write());
+                if let Some(ino) = inodes.get_by_path(&src_path) {
+                    inodes.update_path(ino, dst_path.clone());
+                }
+                drop(inodes);
+
+                info!("Renamed: {:?} -> {:?}", src_path, dst_path);
+                reply.ok();
+            }
+            Err(e) => {
+                warn!("Failed to rename {:?} -> {:?}: {}", src_path, dst_path, e);
+                reply.error(EIO);
+            }
+        }
+    }
+
+    fn setattr(
+        &mut self,
+        _req: &Request<'_>,
+        ino: u64,
+        _mode: Option<u32>,
+        _uid: Option<u32>,
+        _gid: Option<u32>,
+        size: Option<u64>,
+        _atime: Option<TimeOrNow>,
+        _mtime: Option<TimeOrNow>,
+        _ctime: Option<SystemTime>,
+        _fh: Option<u64>,
+        _crtime: Option<SystemTime>,
+        _chgtime: Option<SystemTime>,
+        _bkuptime: Option<SystemTime>,
+        _flags: Option<u32>,
+        reply: ReplyAttr,
+    ) {
+        debug!("setattr: ino={}, size={:?}", ino, size);
+
+        // Don't allow setattr on virtual files
+        if ino < FIRST_REAL_INO {
+            reply.error(EPERM);
+            return;
+        }
+
+        // Get the file path
+        let inodes = self.runtime.block_on(self.inodes.read());
+        let Some(entry) = inodes.get(ino) else {
+            drop(inodes);
+            reply.error(ENOENT);
+            return;
+        };
+        let InodeKind::Real { path, .. } = &entry.kind else {
+            drop(inodes);
+            reply.error(EINVAL);
+            return;
+        };
+        let path = path.clone();
+        drop(inodes);
+
+        // Handle truncate
+        if let Some(new_size) = size {
+            match fs::OpenOptions::new().write(true).open(&path) {
+                Ok(file) => {
+                    if let Err(e) = file.set_len(new_size) {
+                        warn!("Failed to truncate {:?}: {}", path, e);
+                        reply.error(EIO);
+                        return;
+                    }
+
+                    // Trigger reindex after truncate
+                    if let Some(ref sender) = self.reindex_sender {
+                        let sender = sender.clone();
+                        let path_to_send = path.clone();
+                        self.runtime.spawn(async move {
+                            if let Err(e) = sender.send(path_to_send).await {
+                                warn!("Failed to send reindex request: {}", e);
+                            }
+                        });
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to open {:?} for truncate: {}", path, e);
+                    reply.error(EIO);
+                    return;
+                }
+            }
+        }
+
+        // Return updated attributes
+        if let Some(attr) = self.real_path_to_attr(&path, ino) {
+            reply.attr(&TTL, &attr);
+        } else {
+            reply.error(EIO);
+        }
     }
 }
 

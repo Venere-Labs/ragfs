@@ -13,6 +13,31 @@ pub const CONFIG_FILE_INO: u64 = 6;
 pub const REINDEX_FILE_INO: u64 = 7;
 pub const SIMILAR_DIR_INO: u64 = 8;
 pub const HELP_FILE_INO: u64 = 9;
+
+// Phase 2: .ops/ directory for agent operations
+pub const OPS_DIR_INO: u64 = 10;
+pub const OPS_CREATE_INO: u64 = 11;
+pub const OPS_DELETE_INO: u64 = 12;
+pub const OPS_MOVE_INO: u64 = 13;
+pub const OPS_BATCH_INO: u64 = 14;
+pub const OPS_RESULT_INO: u64 = 15;
+
+// Phase 3: .safety/ directory for protection
+pub const SAFETY_DIR_INO: u64 = 20;
+pub const TRASH_DIR_INO: u64 = 21;
+pub const HISTORY_FILE_INO: u64 = 22;
+pub const UNDO_FILE_INO: u64 = 23;
+
+// Phase 4: .semantic/ directory for intelligent operations
+pub const SEMANTIC_DIR_INO: u64 = 30;
+pub const ORGANIZE_FILE_INO: u64 = 31;
+pub const SIMILAR_OPS_FILE_INO: u64 = 32;
+pub const CLEANUP_FILE_INO: u64 = 33;
+pub const DEDUPE_FILE_INO: u64 = 34;
+pub const PENDING_DIR_INO: u64 = 35;
+pub const APPROVE_FILE_INO: u64 = 36;
+pub const REJECT_FILE_INO: u64 = 37;
+
 pub const FIRST_REAL_INO: u64 = 1000;
 
 /// Type of inode.
@@ -44,6 +69,52 @@ pub enum InodeKind {
     SimilarLookup { source_path: PathBuf },
     /// Real file/directory passthrough
     Real { path: PathBuf, underlying_ino: u64 },
+
+    // Phase 2: .ops/ virtual directory
+    /// .ops directory for agent operations
+    OpsDir,
+    /// .ops/.create - write "path\ncontent" to create file
+    OpsCreate,
+    /// .ops/.delete - write "path" to delete file
+    OpsDelete,
+    /// .ops/.move - write "src\ndst" to move file
+    OpsMove,
+    /// .ops/.batch - write JSON for batch operations
+    OpsBatch,
+    /// .ops/.result - read JSON result of last operation
+    OpsResult,
+
+    // Phase 3: .safety/ virtual directory
+    /// .safety directory for protection features
+    SafetyDir,
+    /// .safety/.trash directory for deleted files
+    TrashDir,
+    /// .safety/.trash/<uuid> - individual trash entry
+    TrashEntry { id: String },
+    /// .safety/.history - audit log file
+    History,
+    /// .safety/.undo - write `operation_id` to undo
+    Undo,
+
+    // Phase 4: .semantic/ virtual directory
+    /// .semantic directory for intelligent operations
+    SemanticDir,
+    /// .semantic/.organize - write `OrganizeRequest` JSON to create plan
+    Organize,
+    /// .semantic/.similar - write path to find similar files
+    SimilarOps,
+    /// .semantic/.cleanup - read cleanup analysis JSON
+    Cleanup,
+    /// .semantic/.dedupe - read duplicate groups JSON
+    Dedupe,
+    /// .semantic/.pending directory for proposed plans
+    PendingDir,
+    /// .semantic/.pending/`<plan_id>` - individual plan
+    PendingPlan { plan_id: String },
+    /// .semantic/.approve - write `plan_id` to execute plan
+    Approve,
+    /// .semantic/.reject - write `plan_id` to cancel plan
+    Reject,
 }
 
 /// Entry in the inode table.
@@ -187,6 +258,189 @@ impl InodeTable {
                 lookup_count: 0,
             },
         );
+
+        // Phase 2: .ops directory and files
+        self.inodes.insert(
+            OPS_DIR_INO,
+            InodeEntry {
+                ino: OPS_DIR_INO,
+                kind: InodeKind::OpsDir,
+                parent: RAGFS_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            OPS_CREATE_INO,
+            InodeEntry {
+                ino: OPS_CREATE_INO,
+                kind: InodeKind::OpsCreate,
+                parent: OPS_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            OPS_DELETE_INO,
+            InodeEntry {
+                ino: OPS_DELETE_INO,
+                kind: InodeKind::OpsDelete,
+                parent: OPS_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            OPS_MOVE_INO,
+            InodeEntry {
+                ino: OPS_MOVE_INO,
+                kind: InodeKind::OpsMove,
+                parent: OPS_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            OPS_BATCH_INO,
+            InodeEntry {
+                ino: OPS_BATCH_INO,
+                kind: InodeKind::OpsBatch,
+                parent: OPS_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            OPS_RESULT_INO,
+            InodeEntry {
+                ino: OPS_RESULT_INO,
+                kind: InodeKind::OpsResult,
+                parent: OPS_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        // Phase 3: .safety directory and files
+        self.inodes.insert(
+            SAFETY_DIR_INO,
+            InodeEntry {
+                ino: SAFETY_DIR_INO,
+                kind: InodeKind::SafetyDir,
+                parent: RAGFS_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            TRASH_DIR_INO,
+            InodeEntry {
+                ino: TRASH_DIR_INO,
+                kind: InodeKind::TrashDir,
+                parent: SAFETY_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            HISTORY_FILE_INO,
+            InodeEntry {
+                ino: HISTORY_FILE_INO,
+                kind: InodeKind::History,
+                parent: SAFETY_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            UNDO_FILE_INO,
+            InodeEntry {
+                ino: UNDO_FILE_INO,
+                kind: InodeKind::Undo,
+                parent: SAFETY_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        // Phase 4: .semantic directory and files
+        self.inodes.insert(
+            SEMANTIC_DIR_INO,
+            InodeEntry {
+                ino: SEMANTIC_DIR_INO,
+                kind: InodeKind::SemanticDir,
+                parent: RAGFS_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            ORGANIZE_FILE_INO,
+            InodeEntry {
+                ino: ORGANIZE_FILE_INO,
+                kind: InodeKind::Organize,
+                parent: SEMANTIC_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            SIMILAR_OPS_FILE_INO,
+            InodeEntry {
+                ino: SIMILAR_OPS_FILE_INO,
+                kind: InodeKind::SimilarOps,
+                parent: SEMANTIC_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            CLEANUP_FILE_INO,
+            InodeEntry {
+                ino: CLEANUP_FILE_INO,
+                kind: InodeKind::Cleanup,
+                parent: SEMANTIC_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            DEDUPE_FILE_INO,
+            InodeEntry {
+                ino: DEDUPE_FILE_INO,
+                kind: InodeKind::Dedupe,
+                parent: SEMANTIC_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            PENDING_DIR_INO,
+            InodeEntry {
+                ino: PENDING_DIR_INO,
+                kind: InodeKind::PendingDir,
+                parent: SEMANTIC_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            APPROVE_FILE_INO,
+            InodeEntry {
+                ino: APPROVE_FILE_INO,
+                kind: InodeKind::Approve,
+                parent: SEMANTIC_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
+        self.inodes.insert(
+            REJECT_FILE_INO,
+            InodeEntry {
+                ino: REJECT_FILE_INO,
+                kind: InodeKind::Reject,
+                parent: SEMANTIC_DIR_INO,
+                lookup_count: 0,
+            },
+        );
     }
 
     /// Get an inode entry.
@@ -273,6 +527,50 @@ impl InodeTable {
     #[must_use]
     pub fn get_by_path(&self, path: &PathBuf) -> Option<u64> {
         self.path_to_ino.get(path).copied()
+    }
+
+    /// Remove an inode entry (for deleted files).
+    /// Only removes real files and query results, not virtual inodes.
+    pub fn remove(&mut self, ino: u64) {
+        // Don't remove virtual inodes
+        if self.is_virtual(ino) {
+            return;
+        }
+
+        if let Some(entry) = self.inodes.remove(&ino) {
+            if let InodeKind::Real {
+                path,
+                underlying_ino,
+            } = entry.kind
+            {
+                self.path_to_ino.remove(&path);
+                self.real_ino_map.remove(&underlying_ino);
+            } else if let InodeKind::QueryResult { query } = entry.kind {
+                self.query_to_ino.remove(&query);
+            }
+        }
+    }
+
+    /// Update the path for an existing inode (for renames).
+    pub fn update_path(&mut self, ino: u64, new_path: PathBuf) {
+        if let Some(entry) = self.inodes.get_mut(&ino)
+            && let InodeKind::Real {
+                ref path,
+                underlying_ino,
+            } = entry.kind
+        {
+            // Remove old path mapping
+            self.path_to_ino.remove(path);
+
+            // Update the kind with new path
+            entry.kind = InodeKind::Real {
+                path: new_path.clone(),
+                underlying_ino,
+            };
+
+            // Add new path mapping
+            self.path_to_ino.insert(new_path, ino);
+        }
     }
 }
 
@@ -757,5 +1055,114 @@ mod tests {
 
         assert_eq!(ino2, ino1 + 1);
         assert_eq!(ino3, ino2 + 1);
+    }
+
+    // ========== remove() Tests ==========
+
+    #[test]
+    fn test_remove_real_inode() {
+        let mut table = InodeTable::new();
+        let path = PathBuf::from("/test/file.txt");
+        let underlying_ino = 12345;
+
+        let ino = table.get_or_create_real(path.clone(), underlying_ino);
+        assert!(table.get(ino).is_some());
+        assert!(table.get_by_path(&path).is_some());
+
+        table.remove(ino);
+
+        assert!(table.get(ino).is_none());
+        assert!(table.get_by_path(&path).is_none());
+    }
+
+    #[test]
+    fn test_remove_query_result_inode() {
+        let mut table = InodeTable::new();
+        let query = "test query".to_string();
+
+        let ino = table.get_or_create_query_result(QUERY_DIR_INO, query.clone());
+        assert!(table.get(ino).is_some());
+
+        table.remove(ino);
+
+        assert!(table.get(ino).is_none());
+        // Creating the same query again should get a new inode
+        let new_ino = table.get_or_create_query_result(QUERY_DIR_INO, query);
+        assert_ne!(ino, new_ino);
+    }
+
+    #[test]
+    fn test_remove_nonexistent_does_nothing() {
+        let mut table = InodeTable::new();
+        table.remove(99999); // Should not panic
+    }
+
+    #[test]
+    fn test_remove_virtual_inode_does_nothing() {
+        let mut table = InodeTable::new();
+        // Virtual inodes shouldn't be removed via this method
+        table.remove(ROOT_INO);
+        // Root should still exist (not removed because it's not Real or QueryResult)
+        assert!(table.get(ROOT_INO).is_some());
+    }
+
+    // ========== update_path() Tests ==========
+
+    #[test]
+    fn test_update_path_basic() {
+        let mut table = InodeTable::new();
+        let old_path = PathBuf::from("/old/path.txt");
+        let new_path = PathBuf::from("/new/path.txt");
+
+        let ino = table.get_or_create_real(old_path.clone(), 100);
+
+        table.update_path(ino, new_path.clone());
+
+        // Old path should not be found
+        assert!(table.get_by_path(&old_path).is_none());
+        // New path should be found
+        assert_eq!(table.get_by_path(&new_path), Some(ino));
+
+        // Entry should have new path
+        let entry = table.get(ino).unwrap();
+        if let InodeKind::Real { path, .. } = &entry.kind {
+            assert_eq!(path, &new_path);
+        } else {
+            panic!("Expected Real inode kind");
+        }
+    }
+
+    #[test]
+    fn test_update_path_preserves_underlying_ino() {
+        let mut table = InodeTable::new();
+        let old_path = PathBuf::from("/old.txt");
+        let new_path = PathBuf::from("/new.txt");
+        let underlying = 54321_u64;
+
+        let ino = table.get_or_create_real(old_path, underlying);
+        table.update_path(ino, new_path);
+
+        let entry = table.get(ino).unwrap();
+        if let InodeKind::Real { underlying_ino, .. } = &entry.kind {
+            assert_eq!(*underlying_ino, underlying);
+        } else {
+            panic!("Expected Real inode kind");
+        }
+    }
+
+    #[test]
+    fn test_update_path_nonexistent_does_nothing() {
+        let mut table = InodeTable::new();
+        table.update_path(99999, PathBuf::from("/new.txt")); // Should not panic
+    }
+
+    #[test]
+    fn test_update_path_virtual_inode_does_nothing() {
+        let mut table = InodeTable::new();
+        // Virtual inodes shouldn't be updated
+        table.update_path(ROOT_INO, PathBuf::from("/new/root"));
+        // Root should still have its original kind
+        let root = table.get(ROOT_INO).unwrap();
+        assert!(matches!(root.kind, InodeKind::Root));
     }
 }

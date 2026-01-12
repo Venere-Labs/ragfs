@@ -49,6 +49,15 @@
 
 pub mod filesystem;
 pub mod inode;
+pub mod ops;
+pub mod safety;
+pub mod semantic;
 
 pub use filesystem::RagFs;
 pub use inode::{InodeKind, InodeTable};
+pub use ops::{BatchRequest, BatchResult, OpsManager, Operation, OperationResult};
+pub use safety::{HistoryEntry, HistoryOperation, SafetyConfig, SafetyManager, TrashEntry, UndoData};
+pub use semantic::{
+    CleanupAnalysis, DuplicateGroups, OrganizeRequest, OrganizeStrategy, SemanticConfig,
+    SemanticManager, SemanticPlan, SimilarFilesResult,
+};

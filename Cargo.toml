@@ -10,6 +10,7 @@ members = [
     "crates/ragfs-extract",
     "crates/ragfs-store",
     "crates/ragfs-query",
+    "crates/ragfs-python",
 ]
 
 [workspace.package]
@@ -29,6 +30,11 @@ ragfs-embed = { path = "crates/ragfs-embed" }
 ragfs-extract = { path = "crates/ragfs-extract" }
 ragfs-store = { path = "crates/ragfs-store" }
 ragfs-query = { path = "crates/ragfs-query" }
+ragfs-python = { path = "crates/ragfs-python" }
+
+# Python bindings
+pyo3 = { version = "0.23", features = ["extension-module"] }
+pyo3-async-runtimes = { version = "0.23", features = ["tokio-runtime"] }
 
 # Async runtime
 tokio = { version = "1.43", features = ["full"] }

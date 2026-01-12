@@ -3,7 +3,10 @@ name = "ragfs-query"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Query DSL and execution for RAGFS"
+keywords = ["semantic-search", "vector-search", "query", "rag"]
+categories = ["database-implementations"]
 
 [dependencies]
 ragfs-core.workspace = true

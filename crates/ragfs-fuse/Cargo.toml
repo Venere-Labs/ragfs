@@ -3,7 +3,10 @@ name = "ragfs-fuse"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "FUSE filesystem implementation for RAGFS"
+keywords = ["fuse", "filesystem", "rag", "semantic-search"]
+categories = ["filesystem"]
 
 [dependencies]
 ragfs-core.workspace = true

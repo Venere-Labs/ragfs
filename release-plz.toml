@@ -1,0 +1,50 @@
+[workspace]
+# Update CHANGELOG.md with release notes
+changelog_update = true
+# Git tag format
+git_tag_name = "v{{ version }}"
+# Create GitHub releases
+git_release_enable = true
+# Don't release packages that haven't changed
+release_always = false
+# Changelog configuration
+changelog_config = "cliff.toml"
+
+# CLI binary - don't publish to crates.io, but create GitHub release
+[[package]]
+name = "ragfs"
+publish = false
+git_release_enable = true
+
+# Library crates - publish to crates.io
+[[package]]
+name = "ragfs-core"
+publish = true
+
+[[package]]
+name = "ragfs-store"
+publish = true
+
+[[package]]
+name = "ragfs-embed"
+publish = true
+
+[[package]]
+name = "ragfs-extract"
+publish = true
+
+[[package]]
+name = "ragfs-chunker"
+publish = true
+
+[[package]]
+name = "ragfs-index"
+publish = true
+
+[[package]]
+name = "ragfs-query"
+publish = true
+
+[[package]]
+name = "ragfs-fuse"
+publish = true

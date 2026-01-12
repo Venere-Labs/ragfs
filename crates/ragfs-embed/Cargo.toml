@@ -3,7 +3,10 @@ name = "ragfs-embed"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Local embedding generation for RAGFS using Candle"
+keywords = ["embeddings", "machine-learning", "candle", "rag"]
+categories = ["science", "text-processing"]
 
 [dependencies]
 ragfs-core.workspace = true

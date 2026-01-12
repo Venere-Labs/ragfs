@@ -3,7 +3,10 @@ name = "ragfs-index"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "File indexing engine for RAGFS"
+keywords = ["indexing", "file-watcher", "embeddings", "rag"]
+categories = ["filesystem", "database-implementations"]
 
 [dependencies]
 ragfs-core.workspace = true

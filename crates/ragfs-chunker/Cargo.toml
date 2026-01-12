@@ -3,7 +3,10 @@ name = "ragfs-chunker"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Document chunking strategies for RAGFS"
+keywords = ["chunking", "text-processing", "tree-sitter", "rag"]
+categories = ["text-processing", "parser-implementations"]
 
 [dependencies]
 ragfs-core.workspace = true

@@ -3,7 +3,10 @@ name = "ragfs"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "RAGFS - A FUSE filesystem for RAG architectures"
+keywords = ["rag", "fuse", "semantic-search", "embeddings", "filesystem"]
+categories = ["command-line-utilities", "filesystem"]
 
 [[bin]]
 name = "ragfs"

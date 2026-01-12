@@ -3,7 +3,10 @@ name = "ragfs-extract"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Content extraction for RAGFS (text, PDF, images, code)"
+keywords = ["extraction", "pdf", "text-processing", "rag"]
+categories = ["text-processing", "parser-implementations"]
 
 [dependencies]
 ragfs-core.workspace = true

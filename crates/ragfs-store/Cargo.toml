@@ -3,7 +3,10 @@ name = "ragfs-store"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Vector storage layer for RAGFS using LanceDB"
+keywords = ["vector-database", "lancedb", "embeddings", "rag"]
+categories = ["database-implementations"]
 
 [dependencies]
 ragfs-core.workspace = true

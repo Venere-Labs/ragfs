@@ -152,7 +152,7 @@ pub struct RollbackError {
 }
 
 /// Data needed to rollback an operation.
-/// This is internal to batch operations and more detailed than UndoData.
+/// This is internal to batch operations and more detailed than `UndoData`.
 #[derive(Debug, Clone)]
 enum RollbackData {
     /// Rollback a create by deleting the created file
@@ -303,7 +303,7 @@ impl OpsManager {
     }
 
     /// Execute an operation and capture rollback data for atomic batches.
-    /// Returns (result, rollback_data) tuple.
+    /// Returns (result, `rollback_data`) tuple.
     async fn execute_with_rollback(&self, op: &Operation) -> (OperationResult, Option<RollbackData>) {
         match op {
             Operation::Create { path, content } => {
@@ -424,15 +424,14 @@ impl OpsManager {
                 content_backup,
             } => {
                 // Try to restore from trash first
-                if let Some(id) = trash_id {
-                    if let Some(ref safety) = self.safety_manager {
+                if let Some(id) = trash_id
+                    && let Some(ref safety) = self.safety_manager {
                         return safety
                             .restore(*id)
                             .await
                             .map(|_| ())
                             .map_err(|e| format!("Failed to restore from trash: {e}"));
                     }
-                }
                 // Fall back to content backup
                 if let Some(content) = content_backup {
                     if let Some(parent) = original_path.parent() {
@@ -1019,14 +1018,13 @@ impl OpsManager {
             if result.success {
                 succeeded += 1;
                 // Record in journal for potential rollback
-                if request.atomic {
-                    if let Some(rd) = rollback_data {
+                if request.atomic
+                    && let Some(rd) = rollback_data {
                         journal.push(JournalEntry {
                             operation_index: index,
                             rollback_data: rd,
                         });
                     }
-                }
                 results.push(result);
             } else {
                 failed += 1;

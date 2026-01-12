@@ -389,8 +389,8 @@ impl SemanticManager {
 
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "json") {
-                if let Ok(content) = fs::read_to_string(&path) {
+            if path.extension().is_some_and(|e| e == "json")
+                && let Ok(content) = fs::read_to_string(&path) {
                     match serde_json::from_str::<SemanticPlan>(&content) {
                         Ok(plan) => {
                             plans.insert(plan.id, plan);
@@ -400,7 +400,6 @@ impl SemanticManager {
                         }
                     }
                 }
-            }
         }
 
         plans
@@ -423,7 +422,7 @@ impl SemanticManager {
 
     /// Delete a plan file from disk.
     fn delete_plan_file(&self, plan_id: Uuid) -> std::io::Result<()> {
-        let plan_path = self.plans_dir.join(format!("{}.json", plan_id));
+        let plan_path = self.plans_dir.join(format!("{plan_id}.json"));
         if plan_path.exists() {
             fs::remove_file(&plan_path)?;
         }
@@ -706,8 +705,8 @@ impl SemanticManager {
             }
 
             // Find or create group for path_a
-            let size_a = file_info.get(&path_a).map(|f| f.size_bytes).unwrap_or(0);
-            let size_b = file_info.get(&path_b).map(|f| f.size_bytes).unwrap_or(0);
+            let size_a = file_info.get(&path_a).map_or(0, |f| f.size_bytes);
+            let size_b = file_info.get(&path_b).map_or(0, |f| f.size_bytes);
 
             // Use the larger file as representative
             let (representative, duplicate, dup_similarity, dup_size) = if size_a >= size_b {
@@ -1071,7 +1070,7 @@ impl SemanticManager {
                         path: scope_path.join(&type_dir),
                     },
                     confidence: 1.0,
-                    reason: format!("Create directory for {} files", type_dir),
+                    reason: format!("Create directory for {type_dir} files"),
                 });
             }
 
@@ -1086,7 +1085,7 @@ impl SemanticManager {
                         to: new_path,
                     },
                     confidence: 1.0,
-                    reason: format!("Move to {} directory based on file type", type_dir),
+                    reason: format!("Move to {type_dir} directory based on file type"),
                 });
             }
         }
@@ -1116,9 +1115,7 @@ impl SemanticManager {
             let relative = file.path.strip_prefix(scope_path).unwrap_or(&file.path);
             let project = relative
                 .components()
-                .next()
-                .map(|c| c.as_os_str().to_string_lossy().to_string())
-                .unwrap_or_else(|| "root".to_string());
+                .next().map_or_else(|| "root".to_string(), |c| c.as_os_str().to_string_lossy().to_string());
 
             if project_dirs.insert(project.clone()) && !project.contains('.') {
                 actions.push(PlanAction {
@@ -1126,7 +1123,7 @@ impl SemanticManager {
                         path: scope_path.join(&project),
                     },
                     confidence: 0.8,
-                    reason: format!("Create project directory: {}", project),
+                    reason: format!("Create project directory: {project}"),
                 });
             }
         }
@@ -1156,7 +1153,7 @@ impl SemanticManager {
                     path: scope_path.join(category),
                 },
                 confidence: 1.0,
-                reason: format!("Create custom category directory: {}", category),
+                reason: format!("Create custom category directory: {category}"),
             });
         }
 
@@ -1188,7 +1185,7 @@ impl SemanticManager {
         self.pending_plans.read().await.get(&plan_id).cloned()
     }
 
-    /// Execute a single action via OpsManager.
+    /// Execute a single action via `OpsManager`.
     async fn execute_action(&self, action: &ActionType) -> Result<ActionResult, String> {
         let ops = self
             .ops_manager

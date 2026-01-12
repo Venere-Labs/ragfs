@@ -34,6 +34,10 @@ pub enum Operation {
         #[serde(default)]
         append: bool,
     },
+    /// Create a directory
+    Mkdir { path: PathBuf },
+    /// Create a symbolic link
+    Symlink { target: PathBuf, link: PathBuf },
 }
 
 /// Batch operation request.
@@ -122,6 +126,66 @@ pub struct BatchResult {
     /// Whether a rollback was performed (for atomic batches)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rollback_performed: Option<bool>,
+    /// Details about rollback if it was attempted
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rollback_details: Option<RollbackDetails>,
+}
+
+/// Details about rollback execution for atomic batches.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RollbackDetails {
+    /// Number of operations rolled back successfully
+    pub rolled_back: usize,
+    /// Number of operations that failed to rollback
+    pub rollback_failures: usize,
+    /// Errors encountered during rollback
+    pub errors: Vec<RollbackError>,
+}
+
+/// Error encountered during a rollback operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RollbackError {
+    /// Index of the operation in the original batch
+    pub operation_index: usize,
+    /// Error message
+    pub error: String,
+}
+
+/// Data needed to rollback an operation.
+/// This is internal to batch operations and more detailed than UndoData.
+#[derive(Debug, Clone)]
+enum RollbackData {
+    /// Rollback a create by deleting the created file
+    Create { created_path: PathBuf },
+    /// Rollback a delete by restoring from trash or backup content
+    Delete {
+        original_path: PathBuf,
+        trash_id: Option<Uuid>,
+        content_backup: Option<Vec<u8>>,
+    },
+    /// Rollback a move by moving back
+    Move { src: PathBuf, dst: PathBuf },
+    /// Rollback a copy by deleting the copy
+    Copy { copied_path: PathBuf },
+    /// Rollback a write by restoring previous content
+    Write {
+        path: PathBuf,
+        previous_content: Option<Vec<u8>>,
+        file_existed: bool,
+    },
+    /// Rollback a mkdir by removing the directory
+    Mkdir { created_path: PathBuf },
+    /// Rollback a symlink by removing the link
+    Symlink { link_path: PathBuf },
+}
+
+/// Journal entry tracking an executed operation for potential rollback.
+#[derive(Debug, Clone)]
+struct JournalEntry {
+    /// Index of the operation in the batch
+    operation_index: usize,
+    /// Data needed to rollback this operation
+    rollback_data: RollbackData,
 }
 
 /// Operations manager for file operations with feedback.
@@ -235,6 +299,248 @@ impl OpsManager {
             && let Err(e) = store.update_file_path(from, to).await
         {
             warn!("Failed to update path in store {:?} -> {:?}: {e}", from, to);
+        }
+    }
+
+    /// Execute an operation and capture rollback data for atomic batches.
+    /// Returns (result, rollback_data) tuple.
+    async fn execute_with_rollback(&self, op: &Operation) -> (OperationResult, Option<RollbackData>) {
+        match op {
+            Operation::Create { path, content } => {
+                let resolved = self.resolve_path(path);
+                let result = self.create(path, content).await;
+                let rollback = if result.success {
+                    Some(RollbackData::Create { created_path: resolved })
+                } else {
+                    None
+                };
+                (result, rollback)
+            }
+            Operation::Delete { path } => {
+                let resolved = self.resolve_path(path);
+                // Capture content before delete for rollback (in case of hard delete)
+                let content_backup = if resolved.exists() && resolved.is_file() {
+                    fs::read(&resolved).ok()
+                } else {
+                    None
+                };
+
+                let result = self.delete(path).await;
+                let rollback = if result.success {
+                    Some(RollbackData::Delete {
+                        original_path: resolved,
+                        trash_id: result.undo_id, // From soft delete
+                        content_backup: if result.undo_id.is_none() { content_backup } else { None },
+                    })
+                } else {
+                    None
+                };
+                (result, rollback)
+            }
+            Operation::Move { src, dst } => {
+                let resolved_src = self.resolve_path(src);
+                let resolved_dst = self.resolve_path(dst);
+                let result = self.move_file(src, dst).await;
+                let rollback = if result.success {
+                    Some(RollbackData::Move {
+                        src: resolved_dst,
+                        dst: resolved_src,
+                    })
+                } else {
+                    None
+                };
+                (result, rollback)
+            }
+            Operation::Copy { src, dst } => {
+                let resolved_dst = self.resolve_path(dst);
+                let result = self.copy(src, dst).await;
+                let rollback = if result.success {
+                    Some(RollbackData::Copy { copied_path: resolved_dst })
+                } else {
+                    None
+                };
+                (result, rollback)
+            }
+            Operation::Write { path, content, append } => {
+                let resolved = self.resolve_path(path);
+                let file_existed = resolved.exists();
+                let previous_content = if file_existed {
+                    fs::read(&resolved).ok()
+                } else {
+                    None
+                };
+
+                let result = self.write(path, content, *append).await;
+                let rollback = if result.success {
+                    Some(RollbackData::Write {
+                        path: resolved,
+                        previous_content,
+                        file_existed,
+                    })
+                } else {
+                    None
+                };
+                (result, rollback)
+            }
+            Operation::Mkdir { path } => {
+                let resolved = self.resolve_path(path);
+                let result = self.mkdir(path).await;
+                let rollback = if result.success {
+                    Some(RollbackData::Mkdir { created_path: resolved })
+                } else {
+                    None
+                };
+                (result, rollback)
+            }
+            Operation::Symlink { target, link } => {
+                let resolved_link = self.resolve_path(link);
+                let result = self.symlink(target, link).await;
+                let rollback = if result.success {
+                    Some(RollbackData::Symlink { link_path: resolved_link })
+                } else {
+                    None
+                };
+                (result, rollback)
+            }
+        }
+    }
+
+    /// Rollback a single operation.
+    async fn rollback_operation(&self, rollback_data: &RollbackData) -> Result<(), String> {
+        match rollback_data {
+            RollbackData::Create { created_path } => {
+                // Undo create by deleting the file
+                if created_path.exists() {
+                    fs::remove_file(created_path)
+                        .map_err(|e| format!("Failed to rollback create: {e}"))?;
+                    // Remove from vector store
+                    self.delete_from_store(created_path).await;
+                }
+                Ok(())
+            }
+            RollbackData::Delete {
+                original_path,
+                trash_id,
+                content_backup,
+            } => {
+                // Try to restore from trash first
+                if let Some(id) = trash_id {
+                    if let Some(ref safety) = self.safety_manager {
+                        return safety
+                            .restore(*id)
+                            .await
+                            .map(|_| ())
+                            .map_err(|e| format!("Failed to restore from trash: {e}"));
+                    }
+                }
+                // Fall back to content backup
+                if let Some(content) = content_backup {
+                    if let Some(parent) = original_path.parent() {
+                        fs::create_dir_all(parent)
+                            .map_err(|e| format!("Failed to create parent dir: {e}"))?;
+                    }
+                    fs::write(original_path, content)
+                        .map_err(|e| format!("Failed to restore content: {e}"))?;
+                    self.trigger_reindex(original_path).await;
+                    Ok(())
+                } else {
+                    Err("Cannot rollback delete: no trash entry or content backup".into())
+                }
+            }
+            RollbackData::Move { src, dst } => {
+                // Move back (src is current location, dst is original location)
+                if src.exists() {
+                    if let Some(parent) = dst.parent() {
+                        fs::create_dir_all(parent)
+                            .map_err(|e| format!("Failed to create parent dir: {e}"))?;
+                    }
+                    fs::rename(src, dst).map_err(|e| format!("Failed to rollback move: {e}"))?;
+                    self.update_store_path(src, dst).await;
+                }
+                Ok(())
+            }
+            RollbackData::Copy { copied_path } => {
+                // Delete the copy
+                if copied_path.exists() {
+                    fs::remove_file(copied_path)
+                        .map_err(|e| format!("Failed to rollback copy: {e}"))?;
+                    self.delete_from_store(copied_path).await;
+                }
+                Ok(())
+            }
+            RollbackData::Write {
+                path,
+                previous_content,
+                file_existed,
+            } => {
+                if *file_existed {
+                    if let Some(content) = previous_content {
+                        fs::write(path, content)
+                            .map_err(|e| format!("Failed to rollback write: {e}"))?;
+                    } else {
+                        return Err("Cannot rollback write: no previous content saved".into());
+                    }
+                } else {
+                    // File didn't exist before, delete it
+                    if path.exists() {
+                        fs::remove_file(path)
+                            .map_err(|e| format!("Failed to rollback write (delete): {e}"))?;
+                        self.delete_from_store(path).await;
+                    }
+                }
+                self.trigger_reindex(path).await;
+                Ok(())
+            }
+            RollbackData::Mkdir { created_path } => {
+                // Undo mkdir by removing the directory (only if empty)
+                if created_path.exists() && created_path.is_dir() {
+                    fs::remove_dir(created_path)
+                        .map_err(|e| format!("Failed to rollback mkdir: {e}"))?;
+                }
+                Ok(())
+            }
+            RollbackData::Symlink { link_path } => {
+                // Undo symlink by removing the link
+                if link_path.exists() || link_path.symlink_metadata().is_ok() {
+                    fs::remove_file(link_path)
+                        .map_err(|e| format!("Failed to rollback symlink: {e}"))?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Perform rollback of journal entries in reverse order.
+    async fn perform_rollback(&self, journal: &[JournalEntry]) -> RollbackDetails {
+        let mut rolled_back = 0;
+        let mut rollback_failures = 0;
+        let mut errors = Vec::new();
+
+        // Rollback in reverse order
+        for entry in journal.iter().rev() {
+            match self.rollback_operation(&entry.rollback_data).await {
+                Ok(()) => {
+                    rolled_back += 1;
+                    info!("Rolled back operation index {}", entry.operation_index);
+                }
+                Err(e) => {
+                    rollback_failures += 1;
+                    warn!(
+                        "Failed to rollback operation index {}: {}",
+                        entry.operation_index, e
+                    );
+                    errors.push(RollbackError {
+                        operation_index: entry.operation_index,
+                        error: e,
+                    });
+                }
+            }
+        }
+
+        RollbackDetails {
+            rolled_back,
+            rollback_failures,
+            errors,
         }
     }
 
@@ -557,6 +863,96 @@ impl OpsManager {
         }
     }
 
+    /// Create a directory.
+    pub async fn mkdir(&self, path: &PathBuf) -> OperationResult {
+        let resolved = self.resolve_path(path);
+        debug!("ops::mkdir {:?}", resolved);
+
+        if resolved.exists() {
+            return OperationResult::failure(
+                "mkdir",
+                path.clone(),
+                "Path already exists".into(),
+            );
+        }
+
+        match fs::create_dir_all(&resolved) {
+            Ok(()) => {
+                info!("Created directory: {:?}", resolved);
+
+                // Note: Directories are not indexed, so we pass false
+                let mut result = OperationResult::success("mkdir", path.clone(), false);
+                // mkdir undo_id refers to the operation, not trash
+                result.undo_id = Some(Uuid::new_v4());
+
+                *self.last_result.write().await = Some(result.clone());
+                result
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to create directory: {e}");
+                let result = OperationResult::failure("mkdir", path.clone(), error_msg);
+                *self.last_result.write().await = Some(result.clone());
+                result
+            }
+        }
+    }
+
+    /// Create a symbolic link.
+    #[cfg(unix)]
+    pub async fn symlink(&self, target: &PathBuf, link: &PathBuf) -> OperationResult {
+        let resolved_target = self.resolve_path(target);
+        let resolved_link = self.resolve_path(link);
+        debug!("ops::symlink {:?} -> {:?}", resolved_link, resolved_target);
+
+        if resolved_link.exists() {
+            return OperationResult::failure(
+                "symlink",
+                link.clone(),
+                "Link path already exists".into(),
+            );
+        }
+
+        // Ensure parent directory exists
+        if let Some(parent) = resolved_link.parent()
+            && !parent.exists()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            return OperationResult::failure(
+                "symlink",
+                link.clone(),
+                format!("Failed to create parent directory: {e}"),
+            );
+        }
+
+        match std::os::unix::fs::symlink(&resolved_target, &resolved_link) {
+            Ok(()) => {
+                info!("Created symlink: {:?} -> {:?}", resolved_link, resolved_target);
+
+                let mut result = OperationResult::success("symlink", link.clone(), false);
+                result.undo_id = Some(Uuid::new_v4());
+
+                *self.last_result.write().await = Some(result.clone());
+                result
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to create symlink: {e}");
+                let result = OperationResult::failure("symlink", link.clone(), error_msg);
+                *self.last_result.write().await = Some(result.clone());
+                result
+            }
+        }
+    }
+
+    /// Create a symbolic link (non-Unix fallback - not supported).
+    #[cfg(not(unix))]
+    pub async fn symlink(&self, _target: &PathBuf, link: &PathBuf) -> OperationResult {
+        OperationResult::failure(
+            "symlink",
+            link.clone(),
+            "Symlinks are not supported on this platform".into(),
+        )
+    }
+
     /// Execute a single operation.
     pub async fn execute_operation(&self, op: &Operation) -> OperationResult {
         match op {
@@ -569,6 +965,8 @@ impl OpsManager {
                 content,
                 append,
             } => self.write(path, content, *append).await,
+            Operation::Mkdir { path } => self.mkdir(path).await,
+            Operation::Symlink { target, link } => self.symlink(target, link).await,
         }
     }
 
@@ -579,6 +977,7 @@ impl OpsManager {
         let mut results = Vec::with_capacity(total);
         let mut succeeded = 0;
         let mut failed = 0;
+        let mut journal: Vec<JournalEntry> = Vec::new();
 
         debug!(
             "ops::batch {} operations (atomic={}, dry_run={})",
@@ -596,21 +995,81 @@ impl OpsManager {
                 }
                 results.push(result);
             }
-        } else {
-            // Execute operations
-            for op in &request.operations {
-                let result = self.execute_operation(op).await;
-                if result.success {
-                    succeeded += 1;
-                } else {
-                    failed += 1;
-                    if request.atomic {
-                        // Stop on first failure for atomic batches
-                        // TODO: Implement rollback of already-executed operations
-                        break;
+
+            let batch_result = BatchResult {
+                id: batch_id,
+                success: failed == 0,
+                total,
+                succeeded,
+                failed,
+                results,
+                timestamp: Utc::now(),
+                rollback_performed: None,
+                rollback_details: None,
+            };
+
+            *self.last_batch_result.write().await = Some(batch_result.clone());
+            return batch_result;
+        }
+
+        // Execute operations with journal for atomic rollback
+        for (index, op) in request.operations.iter().enumerate() {
+            let (result, rollback_data) = self.execute_with_rollback(op).await;
+
+            if result.success {
+                succeeded += 1;
+                // Record in journal for potential rollback
+                if request.atomic {
+                    if let Some(rd) = rollback_data {
+                        journal.push(JournalEntry {
+                            operation_index: index,
+                            rollback_data: rd,
+                        });
                     }
                 }
                 results.push(result);
+            } else {
+                failed += 1;
+                results.push(result);
+
+                if request.atomic && !journal.is_empty() {
+                    // Perform rollback of all previously successful operations
+                    info!("Batch failed at operation {}, rolling back {} operations", index, journal.len());
+                    let rollback_details = self.perform_rollback(&journal).await;
+                    let rollback_success = rollback_details.rollback_failures == 0;
+
+                    let batch_result = BatchResult {
+                        id: batch_id,
+                        success: false,
+                        total,
+                        succeeded,
+                        failed,
+                        results,
+                        timestamp: Utc::now(),
+                        rollback_performed: Some(rollback_success),
+                        rollback_details: Some(rollback_details),
+                    };
+
+                    *self.last_batch_result.write().await = Some(batch_result.clone());
+                    return batch_result;
+                } else if request.atomic {
+                    // First operation failed, no rollback needed
+                    let batch_result = BatchResult {
+                        id: batch_id,
+                        success: false,
+                        total,
+                        succeeded,
+                        failed,
+                        results,
+                        timestamp: Utc::now(),
+                        rollback_performed: None,
+                        rollback_details: None,
+                    };
+
+                    *self.last_batch_result.write().await = Some(batch_result.clone());
+                    return batch_result;
+                }
+                // Non-atomic: continue with next operation
             }
         }
 
@@ -622,11 +1081,8 @@ impl OpsManager {
             failed,
             results,
             timestamp: Utc::now(),
-            rollback_performed: if request.atomic && failed > 0 {
-                Some(false) // TODO: Implement actual rollback
-            } else {
-                None
-            },
+            rollback_performed: None,
+            rollback_details: None,
         };
 
         *self.last_batch_result.write().await = Some(batch_result.clone());
@@ -695,6 +1151,30 @@ impl OpsManager {
             Operation::Write { path, .. } => {
                 // Write can always succeed (creates file if not exists)
                 OperationResult::success("write", path.clone(), false)
+            }
+            Operation::Mkdir { path } => {
+                let resolved = self.resolve_path(path);
+                if resolved.exists() {
+                    OperationResult::failure(
+                        "mkdir",
+                        path.clone(),
+                        "Path already exists".into(),
+                    )
+                } else {
+                    OperationResult::success("mkdir", path.clone(), false)
+                }
+            }
+            Operation::Symlink { target: _, link } => {
+                let resolved_link = self.resolve_path(link);
+                if resolved_link.exists() {
+                    OperationResult::failure(
+                        "symlink",
+                        link.clone(),
+                        "Link path already exists".into(),
+                    )
+                } else {
+                    OperationResult::success("symlink", link.clone(), false)
+                }
             }
         }
     }
@@ -797,6 +1277,7 @@ impl OpsManager {
                 )],
                 timestamp: Utc::now(),
                 rollback_performed: None,
+                rollback_details: None,
             },
         }
     }
@@ -1022,5 +1503,288 @@ mod tests {
         assert!(!result.success);
         assert!(result.error.is_some());
         assert!(result.undo_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_atomic_batch_rollback_on_failure() {
+        let (manager, temp) = create_test_manager();
+
+        // Create a file that will cause the second create to fail
+        fs::write(temp.path().join("existing.txt"), "exists").unwrap();
+
+        let request = BatchRequest {
+            operations: vec![
+                Operation::Create {
+                    path: PathBuf::from("new.txt"),
+                    content: "content".to_string(),
+                },
+                Operation::Create {
+                    path: PathBuf::from("existing.txt"), // Will fail
+                    content: "content".to_string(),
+                },
+            ],
+            atomic: true,
+            dry_run: false,
+        };
+
+        let result = manager.batch(request).await;
+
+        assert!(!result.success);
+        assert_eq!(result.succeeded, 1);
+        assert_eq!(result.failed, 1);
+        assert_eq!(result.rollback_performed, Some(true));
+        assert!(result.rollback_details.is_some());
+        let details = result.rollback_details.unwrap();
+        assert_eq!(details.rolled_back, 1);
+        assert_eq!(details.rollback_failures, 0);
+        // First file should be rolled back (deleted)
+        assert!(!temp.path().join("new.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_atomic_batch_rollback_move_operations() {
+        let (manager, temp) = create_test_manager();
+
+        fs::write(temp.path().join("file1.txt"), "content1").unwrap();
+
+        let request = BatchRequest {
+            operations: vec![
+                Operation::Move {
+                    src: PathBuf::from("file1.txt"),
+                    dst: PathBuf::from("moved1.txt"),
+                },
+                Operation::Delete {
+                    path: PathBuf::from("nonexistent.txt"), // Will fail
+                },
+            ],
+            atomic: true,
+            dry_run: false,
+        };
+
+        let result = manager.batch(request).await;
+
+        assert!(!result.success);
+        assert_eq!(result.rollback_performed, Some(true));
+        // Move should be rolled back
+        assert!(temp.path().join("file1.txt").exists());
+        assert!(!temp.path().join("moved1.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_atomic_batch_rollback_write_restores_content() {
+        let (manager, temp) = create_test_manager();
+
+        fs::write(temp.path().join("existing.txt"), "original content").unwrap();
+
+        let request = BatchRequest {
+            operations: vec![
+                Operation::Write {
+                    path: PathBuf::from("existing.txt"),
+                    content: "modified content".to_string(),
+                    append: false,
+                },
+                Operation::Delete {
+                    path: PathBuf::from("nonexistent.txt"), // Will fail
+                },
+            ],
+            atomic: true,
+            dry_run: false,
+        };
+
+        let result = manager.batch(request).await;
+
+        assert!(!result.success);
+        assert_eq!(result.rollback_performed, Some(true));
+        // Content should be restored
+        let content = fs::read_to_string(temp.path().join("existing.txt")).unwrap();
+        assert_eq!(content, "original content");
+    }
+
+    #[tokio::test]
+    async fn test_non_atomic_batch_no_rollback() {
+        let (manager, temp) = create_test_manager();
+
+        let request = BatchRequest {
+            operations: vec![
+                Operation::Create {
+                    path: PathBuf::from("file1.txt"),
+                    content: "content".to_string(),
+                },
+                Operation::Delete {
+                    path: PathBuf::from("nonexistent.txt"), // Will fail
+                },
+                Operation::Create {
+                    path: PathBuf::from("file2.txt"),
+                    content: "content".to_string(),
+                },
+            ],
+            atomic: false, // Non-atomic
+            dry_run: false,
+        };
+
+        let result = manager.batch(request).await;
+
+        assert!(!result.success);
+        assert!(result.rollback_performed.is_none());
+        // Both files should exist (no rollback)
+        assert!(temp.path().join("file1.txt").exists());
+        assert!(temp.path().join("file2.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_atomic_batch_first_op_fails_no_rollback_needed() {
+        let (manager, temp) = create_test_manager();
+
+        // Create a file that will cause the first create to fail
+        fs::write(temp.path().join("existing.txt"), "exists").unwrap();
+
+        let request = BatchRequest {
+            operations: vec![
+                Operation::Create {
+                    path: PathBuf::from("existing.txt"), // Will fail immediately
+                    content: "content".to_string(),
+                },
+                Operation::Create {
+                    path: PathBuf::from("new.txt"),
+                    content: "content".to_string(),
+                },
+            ],
+            atomic: true,
+            dry_run: false,
+        };
+
+        let result = manager.batch(request).await;
+
+        assert!(!result.success);
+        assert_eq!(result.succeeded, 0);
+        assert_eq!(result.failed, 1);
+        // No rollback needed since first operation failed
+        assert!(result.rollback_performed.is_none());
+        assert!(result.rollback_details.is_none());
+        // Second operation should not have been attempted
+        assert!(!temp.path().join("new.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_atomic_batch_copy_rollback() {
+        let (manager, temp) = create_test_manager();
+
+        fs::write(temp.path().join("source.txt"), "source content").unwrap();
+
+        let request = BatchRequest {
+            operations: vec![
+                Operation::Copy {
+                    src: PathBuf::from("source.txt"),
+                    dst: PathBuf::from("copied.txt"),
+                },
+                Operation::Delete {
+                    path: PathBuf::from("nonexistent.txt"), // Will fail
+                },
+            ],
+            atomic: true,
+            dry_run: false,
+        };
+
+        let result = manager.batch(request).await;
+
+        assert!(!result.success);
+        assert_eq!(result.rollback_performed, Some(true));
+        // Copy should be rolled back (deleted)
+        assert!(temp.path().join("source.txt").exists());
+        assert!(!temp.path().join("copied.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_mkdir() {
+        let (manager, temp) = create_test_manager();
+        let path = PathBuf::from("new_directory");
+
+        let result = manager.mkdir(&path).await;
+
+        assert!(result.success);
+        assert_eq!(result.operation, "mkdir");
+        assert!(temp.path().join("new_directory").is_dir());
+    }
+
+    #[tokio::test]
+    async fn test_mkdir_nested() {
+        let (manager, temp) = create_test_manager();
+        let path = PathBuf::from("parent/child/grandchild");
+
+        let result = manager.mkdir(&path).await;
+
+        assert!(result.success);
+        assert!(temp.path().join("parent/child/grandchild").is_dir());
+    }
+
+    #[tokio::test]
+    async fn test_mkdir_already_exists() {
+        let (manager, temp) = create_test_manager();
+        let path = PathBuf::from("existing_dir");
+        fs::create_dir(temp.path().join("existing_dir")).unwrap();
+
+        let result = manager.mkdir(&path).await;
+
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("already exists"));
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_symlink() {
+        let (manager, temp) = create_test_manager();
+        let target = PathBuf::from("target_file.txt");
+        let link = PathBuf::from("link_to_target");
+
+        // Create target file
+        fs::write(temp.path().join("target_file.txt"), "content").unwrap();
+
+        let result = manager.symlink(&target, &link).await;
+
+        assert!(result.success);
+        assert_eq!(result.operation, "symlink");
+        let link_path = temp.path().join("link_to_target");
+        assert!(link_path.symlink_metadata().is_ok());
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_symlink_already_exists() {
+        let (manager, temp) = create_test_manager();
+        let target = PathBuf::from("target.txt");
+        let link = PathBuf::from("existing_link");
+
+        // Create existing link path
+        fs::write(temp.path().join("existing_link"), "content").unwrap();
+
+        let result = manager.symlink(&target, &link).await;
+
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("already exists"));
+    }
+
+    #[tokio::test]
+    async fn test_atomic_batch_mkdir_rollback() {
+        let (manager, temp) = create_test_manager();
+
+        let request = BatchRequest {
+            operations: vec![
+                Operation::Mkdir {
+                    path: PathBuf::from("new_dir"),
+                },
+                Operation::Delete {
+                    path: PathBuf::from("nonexistent.txt"), // Will fail
+                },
+            ],
+            atomic: true,
+            dry_run: false,
+        };
+
+        let result = manager.batch(request).await;
+
+        assert!(!result.success);
+        assert_eq!(result.rollback_performed, Some(true));
+        // Directory should be rolled back (removed)
+        assert!(!temp.path().join("new_dir").exists());
     }
 }

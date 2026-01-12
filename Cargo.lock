@@ -6099,6 +6099,7 @@ dependencies = [
  "ragfs-core",
  "ragfs-embed",
  "ragfs-extract",
+ "ragfs-fuse",
  "ragfs-index",
  "ragfs-query",
  "ragfs-store",

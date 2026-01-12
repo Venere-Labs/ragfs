@@ -1,0 +1,144 @@
+name: Pre-release Validation
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*-rc*', 'v*-beta*', 'v*-alpha*']
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  validate-versions:
+    name: Validate Version Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version consistency
+        run: |
+          CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+          PYTHON_VERSION=$(grep '^version' crates/ragfs-python/pyproject.toml | cut -d'"' -f2)
+          MCP_VERSION=$(grep '^version' crates/ragfs-mcp/pyproject.toml | cut -d'"' -f2)
+
+          echo "Cargo version: $CARGO_VERSION"
+          echo "Python version: $PYTHON_VERSION"
+          echo "MCP version: $MCP_VERSION"
+
+          if [ "$CARGO_VERSION" != "$PYTHON_VERSION" ]; then
+            echo "::error::Version mismatch: Cargo=$CARGO_VERSION Python=$PYTHON_VERSION"
+            exit 1
+          fi
+
+          echo "Version consistency check passed"
+
+  validate-changelog:
+    name: Validate Changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check changelog entry
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+
+          if ! grep -q "## \[$VERSION\]" CHANGELOG.md; then
+            echo "::warning::Missing changelog entry for $VERSION"
+            echo "Consider adding a changelog entry before release"
+          else
+            echo "Changelog entry found for $VERSION"
+          fi
+
+  validate-tests:
+    name: Validate Tests Pass
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
+      - name: Run all tests
+        run: cargo test --all --all-features
+
+  validate-python:
+    name: Validate Python Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
+          pip install maturin pytest pytest-asyncio
+      - name: Build and test
+        run: |
+          cd crates/ragfs-python
+          maturin develop --features "candle,lancedb"
+          pytest tests/ -v -m "not slow and not requires_model"
+
+  validate-clippy:
+    name: Validate No Warnings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  summary:
+    name: Pre-release Summary
+    needs: [validate-versions, validate-changelog, validate-tests, validate-python, validate-clippy, security-audit]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          echo "## Pre-release Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.validate-versions.result }}" == "success" ]; then
+            echo "✅ Version consistency: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Version consistency: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.validate-tests.result }}" == "success" ]; then
+            echo "✅ Rust tests: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Rust tests: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.validate-python.result }}" == "success" ]; then
+            echo "✅ Python tests: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Python tests: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.validate-clippy.result }}" == "success" ]; then
+            echo "✅ Clippy: No warnings" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Clippy: Has warnings" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.security-audit.result }}" == "success" ]; then
+            echo "✅ Security audit: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Security audit: Has advisories" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -68,7 +68,13 @@ impl RagFs {
             None,
             safety_manager.clone(),
         ));
-        let semantic_manager = Arc::new(SemanticManager::new(source.clone(), None, None, None));
+        let semantic_manager = Arc::new(SemanticManager::with_ops(
+            source.clone(),
+            None,
+            None,
+            None,
+            ops_manager.clone(),
+        ));
         Self {
             source,
             inodes: Arc::new(RwLock::new(InodeTable::new())),
@@ -105,11 +111,12 @@ impl RagFs {
             reindex_sender.clone(),
             safety_manager.clone(),
         ));
-        let semantic_manager = Arc::new(SemanticManager::new(
+        let semantic_manager = Arc::new(SemanticManager::with_ops(
             source.clone(),
             Some(store.clone()),
             Some(embedder.clone()),
             None,
+            ops_manager.clone(),
         ));
 
         Self {

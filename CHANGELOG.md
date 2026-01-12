@@ -14,6 +14,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Async support via `pyo3-async-runtimes`
   - Framework adapters for LangChain, LlamaIndex, Haystack
   - Build with `maturin build`
+- **FUSE capabilities exposed to Python** (Propose-Review-Apply pattern for AI agents):
+  - `RagfsSafetyManager`: Soft delete, trash, history, undo operations
+  - `RagfsSemanticManager`: AI-powered file organization, similar/duplicate detection
+  - `RagfsOpsManager`: Structured file operations with JSON feedback
+  - `OrganizeStrategy`, `OrganizeRequest`, `SemanticPlan`, `PlanAction` types
+- **LlamaIndex FUSE-aware integration**:
+  - `RagfsSafeVectorStore`: VectorStore with safety layer integration
+  - `RagfsOrganizer`: Semantic organizer with Propose-Review-Apply workflow
+- **Haystack FUSE-aware integration**:
+  - `RagfsSafeDocumentStore`: DocumentStore with soft delete and undo
+  - `RagfsOrganizer`: Haystack component for AI-powered file organization
+- **MCP Server with complete FUSE capabilities** (18 tools):
+  - Safety Layer: `ragfs_delete_to_trash`, `ragfs_list_trash`, `ragfs_restore_from_trash`, `ragfs_get_history`, `ragfs_undo`
+  - Semantic Operations: `ragfs_find_duplicates`, `ragfs_analyze_cleanup`
+  - Approval Workflow: `ragfs_propose_organization`, `ragfs_propose_cleanup`, `ragfs_list_pending_plans`, `ragfs_get_plan`, `ragfs_approve_plan`, `ragfs_reject_plan`
+  - Batch Operations: `ragfs_batch_operations`
+- **CI/CD Python support**:
+  - Python tests for all integrations (3.10-3.13)
+  - Pre-release validation workflow
+  - Python release workflow for PyPI publishing
+- **Security hardening**:
+  - `SECURITY.md` with vulnerability reporting guidelines
+  - `deny.toml` for cargo-deny license and advisory checks
 - **VectorStore iteration**: New methods for bulk operations
   - `get_all_chunks()`: Returns all chunks in the store
   - `get_all_files()`: Returns all file records in the store
@@ -42,6 +65,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Virtual `.ragfs/.help` file**: Usage documentation accessible via FUSE mount
 - **NoopEmbedder**: Testing embedder available without Candle dependency
 - **MemoryStore**: In-memory vector store available without LanceDB dependency
+- **Atomic batch rollback**: Batch operations with `atomic: true` now automatically roll back on failure
+  - All successful operations are undone if any operation fails
+  - Rollback details included in batch result (`rollback_performed`, `rollback_details`)
+- **Mkdir and Symlink operations**: New operation types in OpsManager
+  - `mkdir`: Create directories via `.ops/` interface
+  - `symlink`: Create symbolic links (Unix-only)
+- **Semantic plan persistence**: Plans are saved to disk and survive restarts
+  - Plans stored in `~/.local/share/ragfs/plans/{index_hash}/`
+  - Automatic cleanup of expired plans (configurable retention)
+- **Semantic plan execution**: Approved plans are now executed automatically
+  - Actions run sequentially via OpsManager
+  - Each action generates an undo_id for manual reversal if needed
+  - Plan status reflects execution result (Completed/Failed)
 
 ### Changed
 - **BREAKING**: Feature flags restructured for optional ML backends

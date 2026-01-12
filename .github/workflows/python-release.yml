@@ -40,7 +40,7 @@ jobs:
         run: |
           cd crates/ragfs-python
           maturin build --release --features "candle,lancedb" -o dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: wheel-${{ matrix.os }}-${{ matrix.python-version }}
           path: crates/ragfs-python/dist/*.whl
@@ -59,7 +59,7 @@ jobs:
         run: |
           cd crates/ragfs-python
           maturin sdist -o dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: sdist
           path: crates/ragfs-python/dist/*.tar.gz
@@ -78,7 +78,7 @@ jobs:
         run: |
           cd crates/ragfs-mcp
           python -m build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: mcp-package
           path: crates/ragfs-mcp/dist/*

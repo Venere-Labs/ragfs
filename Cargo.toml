@@ -38,7 +38,7 @@ pyo3 = { version = "0.27", features = ["extension-module"] }
 pyo3-async-runtimes = { version = "0.27", features = ["tokio-runtime"] }
 
 # Async runtime
-tokio = { version = "1.43", features = ["full"] }
+tokio = { version = "1.49", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["fs"] }
 async-trait = "0.1"
 futures = "0.3"
@@ -47,8 +47,8 @@ futures = "0.3"
 fuser = "0.16"
 
 # File watching
-notify = "7.0"
-notify-debouncer-full = "0.4"
+notify = "8.2"
+notify-debouncer-full = "0.6"
 
 # Vector store
 lancedb = "0.15"
@@ -60,8 +60,8 @@ arrow-schema = "53"
 candle-core = "0.8"
 candle-nn = "0.8"
 candle-transformers = "0.8"
-hf-hub = { version = "0.4", features = ["tokio"] }
-tokenizers = "0.21"
+hf-hub = { version = "0.4.3", features = ["tokio"] }
+tokenizers = "0.22"
 
 # PDF parsing
 # pdf_oxide = "0.2"  # TODO: verify availability
@@ -75,7 +75,7 @@ flate2 = "1.1"
 image = "0.25"
 
 # Code parsing
-tree-sitter = "0.26"
+tree-sitter = "0.26.3"
 
 # Tokenization
 tiktoken-rs = "0.6"
@@ -96,9 +96,9 @@ anyhow = "1.0"
 daemonize = "0.5"
 
 # Utilities
-uuid = { version = "1.11", features = ["v4", "serde"] }
+uuid = { version = "1.19", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-blake3 = "1.5"
+blake3 = "1.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 directories = "5.0"

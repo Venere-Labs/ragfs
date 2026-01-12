@@ -1,0 +1,63 @@
+[package]
+name = "ragfs-python"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Python bindings for RAGFS - semantic search and RAG pipeline"
+
+[lib]
+name = "ragfs"
+crate-type = ["cdylib"]
+
+[features]
+default = ["candle", "lancedb"]
+full = ["candle", "lancedb", "vision"]
+candle = [
+    "ragfs-embed/candle",
+    "ragfs-index/candle",
+    "ragfs-query/candle",
+]
+lancedb = [
+    "ragfs-store/lancedb",
+    "ragfs-index/lancedb",
+    "ragfs-query/lancedb",
+]
+vision = [
+    "ragfs-extract/vision",
+    "ragfs-index/vision",
+]
+
+[dependencies]
+# PyO3 for Python bindings
+pyo3 = { version = "0.23", features = ["extension-module"] }
+pyo3-async-runtimes = { version = "0.23", features = ["tokio-runtime"] }
+
+# Internal crates
+ragfs-core.workspace = true
+ragfs-embed.workspace = true
+ragfs-store.workspace = true
+ragfs-extract.workspace = true
+ragfs-chunker.workspace = true
+ragfs-index.workspace = true
+ragfs-query.workspace = true
+
+# Async runtime
+tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+
+# Utilities
+tracing.workspace = true
+directories.workspace = true
+mime_guess.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+
+[lints]
+workspace = true

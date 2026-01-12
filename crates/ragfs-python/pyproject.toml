@@ -1,0 +1,52 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "ragfs"
+version = "0.2.0"
+description = "Python bindings for RAGFS - local semantic search and RAG pipeline"
+readme = "README.md"
+license = { text = "MIT OR Apache-2.0" }
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Indexing",
+]
+keywords = ["rag", "embeddings", "vector-search", "langchain", "llama-index"]
+
+[project.optional-dependencies]
+# Framework adapters
+langchain = ["langchain-core>=0.2", "langchain-text-splitters>=0.2"]
+llamaindex = ["llama-index-core>=0.10"]
+haystack = ["haystack-ai>=2.0"]
+
+# LLM providers (for RAG chain examples)
+openai = ["langchain-openai>=0.1"]
+anthropic = ["langchain-anthropic>=0.1"]
+ollama = ["langchain-ollama>=0.1"]
+
+# Convenience bundles
+all-llm = ["ragfs[langchain,openai,anthropic,ollama]"]
+all = ["ragfs[langchain,llamaindex,haystack,openai,anthropic,ollama]"]
+
+[project.urls]
+Homepage = "https://github.com/Venere-Labs/ragfs"
+Documentation = "https://github.com/Venere-Labs/ragfs"
+Repository = "https://github.com/Venere-Labs/ragfs"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "ragfs._core"

@@ -13,3 +13,17 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "ci"
+
+  - package-ecosystem: "pip"
+    directory: "/crates/ragfs-python"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(python)"
+
+  - package-ecosystem: "pip"
+    directory: "/crates/ragfs-mcp"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(mcp)"

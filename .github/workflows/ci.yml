@@ -34,6 +34,26 @@ jobs:
       - name: Format check
         run: cargo fmt --all -- --check
 
+  cargo-deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  python-lint:
+    name: Python Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ruff
+        run: pip install ruff
+      - name: Check Python code
+        run: ruff check crates/ragfs-python crates/ragfs-mcp
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

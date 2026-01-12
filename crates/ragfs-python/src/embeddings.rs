@@ -1,7 +1,7 @@
 //! Python wrapper for RAGFS embeddings.
 
-use pyo3::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
 use pyo3_async_runtimes::tokio::future_into_py;
 use ragfs_core::{Embedder, EmbeddingConfig};
 use ragfs_embed::CandleEmbedder;
@@ -42,13 +42,11 @@ impl RagfsEmbeddings {
     #[new]
     #[pyo3(signature = (model_path=None, batch_size=32, normalize=true))]
     fn new(model_path: Option<String>, batch_size: usize, normalize: bool) -> Self {
-        let model_path = model_path
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                directories::ProjectDirs::from("", "", "ragfs")
-                    .map(|dirs| dirs.data_dir().join("models"))
-                    .unwrap_or_else(|| PathBuf::from(".ragfs/models"))
-            });
+        let model_path = model_path.map(PathBuf::from).unwrap_or_else(|| {
+            directories::ProjectDirs::from("", "", "ragfs")
+                .map(|dirs| dirs.data_dir().join("models"))
+                .unwrap_or_else(|| PathBuf::from(".ragfs/models"))
+        });
 
         Self {
             embedder: Arc::new(RwLock::new(None)),
@@ -107,9 +105,10 @@ impl RagfsEmbeddings {
             };
 
             let text_refs: Vec<&str> = texts.iter().map(String::as_str).collect();
-            let results = embedder.embed_text(&text_refs, &config).await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Embedding failed: {e}"))
-            })?;
+            let results = embedder
+                .embed_text(&text_refs, &config)
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Embedding failed: {e}")))?;
 
             let embeddings: Vec<Vec<f32>> = results.into_iter().map(|r| r.embedding).collect();
             Ok(embeddings)
@@ -139,9 +138,10 @@ impl RagfsEmbeddings {
                 batch_size: 1,
             };
 
-            let result = embedder.embed_query(&text, &config).await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Embedding failed: {e}"))
-            })?;
+            let result = embedder
+                .embed_query(&text, &config)
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Embedding failed: {e}")))?;
 
             Ok(result.embedding)
         })

@@ -15,8 +15,8 @@ use ragfs_core::{Embedder, VectorStore};
 use ragfs_embed::CandleEmbedder;
 use ragfs_fuse::semantic::{
     ActionType, CleanupAnalysis, CleanupCandidate, CleanupReason, DuplicateEntry, DuplicateGroup,
-    DuplicateGroups, OrganizeRequest, OrganizeStrategy, PlanAction, PlanImpact,
-    PlanStatus, SemanticConfig, SemanticManager, SemanticPlan, SimilarFile, SimilarFilesResult,
+    DuplicateGroups, OrganizeRequest, OrganizeStrategy, PlanAction, PlanImpact, PlanStatus,
+    SemanticConfig, SemanticManager, SemanticPlan, SimilarFile, SimilarFilesResult,
 };
 use ragfs_store::LanceStore;
 use std::path::PathBuf;
@@ -522,7 +522,11 @@ impl From<&DuplicateGroup> for PyDuplicateGroup {
         Self {
             id: group.id.to_string(),
             representative: group.representative.to_string_lossy().to_string(),
-            duplicates: group.duplicates.iter().map(PyDuplicateEntry::from).collect(),
+            duplicates: group
+                .duplicates
+                .iter()
+                .map(PyDuplicateEntry::from)
+                .collect(),
             wasted_bytes: group.wasted_bytes,
         }
     }
@@ -602,9 +606,16 @@ impl PyCleanupCandidate {
 impl From<&CleanupCandidate> for PyCleanupCandidate {
     fn from(candidate: &CleanupCandidate) -> Self {
         let (reason_type, reason_details) = match &candidate.reason {
-            CleanupReason::Duplicate { similar_to, similarity } => (
+            CleanupReason::Duplicate {
+                similar_to,
+                similarity,
+            } => (
                 "duplicate".to_string(),
-                Some(format!("similar to {} ({}%)", similar_to.display(), (similarity * 100.0) as u32)),
+                Some(format!(
+                    "similar to {} ({}%)",
+                    similar_to.display(),
+                    (similarity * 100.0) as u32
+                )),
             ),
             CleanupReason::Stale { last_accessed } => (
                 "stale".to_string(),
@@ -663,7 +674,11 @@ impl From<&CleanupAnalysis> for PyCleanupAnalysis {
         Self {
             analyzed_at: analysis.analyzed_at.to_rfc3339(),
             total_files: analysis.total_files,
-            candidates: analysis.candidates.iter().map(PyCleanupCandidate::from).collect(),
+            candidates: analysis
+                .candidates
+                .iter()
+                .map(PyCleanupCandidate::from)
+                .collect(),
             potential_savings_bytes: analysis.potential_savings_bytes,
         }
     }
@@ -742,13 +757,11 @@ impl RagfsSemanticManager {
         duplicate_threshold: f32,
         similar_limit: usize,
     ) -> Self {
-        let model_path = model_path
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                directories::ProjectDirs::from("", "", "ragfs")
-                    .map(|dirs| dirs.data_dir().join("models"))
-                    .unwrap_or_else(|| PathBuf::from(".ragfs/models"))
-            });
+        let model_path = model_path.map(PathBuf::from).unwrap_or_else(|| {
+            directories::ProjectDirs::from("", "", "ragfs")
+                .map(|dirs| dirs.data_dir().join("models"))
+                .unwrap_or_else(|| PathBuf::from(".ragfs/models"))
+        });
 
         let data_dir = directories::ProjectDirs::from("", "", "ragfs")
             .map(|dirs| dirs.data_local_dir().to_path_buf())
@@ -801,19 +814,16 @@ impl RagfsSemanticManager {
             };
 
             // Initialize store
-            store.init().await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Failed to initialize store: {e}"))
-            })?;
+            store
+                .init()
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to initialize store: {e}")))?;
 
             let store_arc: Arc<dyn VectorStore> = store;
 
             // Create semantic manager
-            let semantic_manager = SemanticManager::new(
-                source_path,
-                Some(store_arc),
-                Some(embedder),
-                Some(config),
-            );
+            let semantic_manager =
+                SemanticManager::new(source_path, Some(store_arc), Some(embedder), Some(config));
 
             *manager_lock.write().await = Some(semantic_manager);
 
@@ -827,7 +837,9 @@ impl RagfsSemanticManager {
 
         future_into_py(py, async move {
             let guard = manager_lock.read().await;
-            Ok(guard.as_ref().is_some_and(ragfs_fuse::SemanticManager::is_available))
+            Ok(guard
+                .as_ref()
+                .is_some_and(ragfs_fuse::SemanticManager::is_available))
         })
     }
 
@@ -883,9 +895,10 @@ impl RagfsSemanticManager {
                 PyRuntimeError::new_err("Manager not initialized. Call init() first.")
             })?;
 
-            let analysis = manager.analyze_cleanup().await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Failed to analyze cleanup: {e}"))
-            })?;
+            let analysis = manager
+                .analyze_cleanup()
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to analyze cleanup: {e}")))?;
 
             Ok(PyCleanupAnalysis::from(&analysis))
         })
@@ -904,9 +917,10 @@ impl RagfsSemanticManager {
                 PyRuntimeError::new_err("Manager not initialized. Call init() first.")
             })?;
 
-            let groups = manager.find_duplicates().await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Failed to find duplicates: {e}"))
-            })?;
+            let groups = manager
+                .find_duplicates()
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to find duplicates: {e}")))?;
 
             Ok(PyDuplicateGroups::from(&groups))
         })
@@ -933,9 +947,10 @@ impl RagfsSemanticManager {
             })?;
 
             let rust_request = OrganizeRequest::from(&request);
-            let plan = manager.create_organize_plan(rust_request).await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Failed to create plan: {e}"))
-            })?;
+            let plan = manager
+                .create_organize_plan(rust_request)
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to create plan: {e}")))?;
 
             Ok(PySemanticPlan::from(&plan))
         })
@@ -1007,9 +1022,10 @@ impl RagfsSemanticManager {
             let uuid = uuid::Uuid::parse_str(&plan_id)
                 .map_err(|e| PyRuntimeError::new_err(format!("Invalid plan ID: {e}")))?;
 
-            let plan = manager.approve_plan(uuid).await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Failed to approve plan: {e}"))
-            })?;
+            let plan = manager
+                .approve_plan(uuid)
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to approve plan: {e}")))?;
 
             Ok(PySemanticPlan::from(&plan))
         })
@@ -1034,9 +1050,10 @@ impl RagfsSemanticManager {
             let uuid = uuid::Uuid::parse_str(&plan_id)
                 .map_err(|e| PyRuntimeError::new_err(format!("Invalid plan ID: {e}")))?;
 
-            let plan = manager.reject_plan(uuid).await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Failed to reject plan: {e}"))
-            })?;
+            let plan = manager
+                .reject_plan(uuid)
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to reject plan: {e}")))?;
 
             Ok(PySemanticPlan::from(&plan))
         })

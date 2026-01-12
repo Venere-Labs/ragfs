@@ -8,7 +8,7 @@
 
 use pyo3::prelude::*;
 use pyo3_async_runtimes::tokio::future_into_py;
-use ragfs_fuse::ops::{BatchRequest, BatchResult, OpsManager, Operation, OperationResult};
+use ragfs_fuse::ops::{BatchRequest, BatchResult, Operation, OperationResult, OpsManager};
 use ragfs_fuse::safety::SafetyManager;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -126,13 +126,25 @@ impl PyOperation {
                 format!("Operation.delete(path='{}')", path.display())
             }
             Operation::Move { src, dst } => {
-                format!("Operation.move(src='{}', dst='{}')", src.display(), dst.display())
+                format!(
+                    "Operation.move(src='{}', dst='{}')",
+                    src.display(),
+                    dst.display()
+                )
             }
             Operation::Copy { src, dst } => {
-                format!("Operation.copy(src='{}', dst='{}')", src.display(), dst.display())
+                format!(
+                    "Operation.copy(src='{}', dst='{}')",
+                    src.display(),
+                    dst.display()
+                )
             }
             Operation::Write { path, append, .. } => {
-                format!("Operation.write(path='{}', append={})", path.display(), append)
+                format!(
+                    "Operation.write(path='{}', append={})",
+                    path.display(),
+                    append
+                )
             }
             Operation::Mkdir { path } => {
                 format!("Operation.mkdir(path='{}')", path.display())

@@ -1,7 +1,7 @@
 //! Python wrapper for RAGFS document loader.
 
-use pyo3::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
 use pyo3_async_runtimes::tokio::future_into_py;
 use ragfs_core::ContentExtractor;
 use ragfs_extract::{ExtractorRegistry, ImageExtractor, PdfExtractor, TextExtractor};
@@ -44,25 +44,27 @@ impl RagfsDocumentLoader {
         let mut registry = ExtractorRegistry::new();
         let mut supported_mimes = Vec::new();
 
-        let enabled = extractors.unwrap_or_else(|| {
-            vec!["text".to_string(), "pdf".to_string(), "image".to_string()]
-        });
+        let enabled = extractors
+            .unwrap_or_else(|| vec!["text".to_string(), "pdf".to_string(), "image".to_string()]);
 
         for ext in enabled {
             match ext.as_str() {
                 "text" => {
                     let extractor = TextExtractor::new();
-                    supported_mimes.extend(extractor.supported_types().iter().map(|s| (*s).to_string()));
+                    supported_mimes
+                        .extend(extractor.supported_types().iter().map(|s| (*s).to_string()));
                     registry.register("text", extractor);
                 }
                 "pdf" => {
                     let extractor = PdfExtractor::new();
-                    supported_mimes.extend(extractor.supported_types().iter().map(|s| (*s).to_string()));
+                    supported_mimes
+                        .extend(extractor.supported_types().iter().map(|s| (*s).to_string()));
                     registry.register("pdf", extractor);
                 }
                 "image" => {
                     let extractor = ImageExtractor::new();
-                    supported_mimes.extend(extractor.supported_types().iter().map(|s| (*s).to_string()));
+                    supported_mimes
+                        .extend(extractor.supported_types().iter().map(|s| (*s).to_string()));
                     registry.register("image", extractor);
                 }
                 _ => {} // Ignore unknown extractors
@@ -98,9 +100,11 @@ impl RagfsDocumentLoader {
                 })?;
 
                 let mut entries = entries;
-                while let Some(entry) = entries.next_entry().await.map_err(|e| {
-                    PyRuntimeError::new_err(format!("Failed to read entry: {e}"))
-                })? {
+                while let Some(entry) = entries
+                    .next_entry()
+                    .await
+                    .map_err(|e| PyRuntimeError::new_err(format!("Failed to read entry: {e}")))?
+                {
                     let entry_path = entry.path();
                     if entry_path.is_file()
                         && let Ok(docs) = load_file(&registry, &entry_path).await
@@ -140,10 +144,7 @@ impl RagfsDocumentLoader {
     }
 }
 
-async fn load_file(
-    registry: &ExtractorRegistry,
-    path: &PathBuf,
-) -> PyResult<Vec<Document>> {
+async fn load_file(registry: &ExtractorRegistry, path: &PathBuf) -> PyResult<Vec<Document>> {
     let mime = mime_guess::from_path(path)
         .first_or_octet_stream()
         .to_string();
@@ -156,9 +157,10 @@ async fn load_file(
         ))
     })?;
 
-    let content = extractor.extract(path).await.map_err(|e| {
-        PyRuntimeError::new_err(format!("Extraction failed: {e}"))
-    })?;
+    let content = extractor
+        .extract(path)
+        .await
+        .map_err(|e| PyRuntimeError::new_err(format!("Extraction failed: {e}")))?;
 
     let mut documents = Vec::new();
     let mut metadata = HashMap::new();
@@ -194,11 +196,13 @@ async fn load_file(
                 let lang = language.unwrap_or_else(|| "unknown".to_string());
                 (code, format!("code_{lang}"))
             }
-            ragfs_core::ContentElement::Paragraph { text, .. } => {
-                (text, "paragraph".to_string())
-            }
+            ragfs_core::ContentElement::Paragraph { text, .. } => (text, "paragraph".to_string()),
             ragfs_core::ContentElement::List { items, ordered, .. } => {
-                let list_type = if ordered { "ordered_list" } else { "unordered_list" };
+                let list_type = if ordered {
+                    "ordered_list"
+                } else {
+                    "unordered_list"
+                };
                 (items.join("\n"), list_type.to_string())
             }
             ragfs_core::ContentElement::Table { headers, rows, .. } => {

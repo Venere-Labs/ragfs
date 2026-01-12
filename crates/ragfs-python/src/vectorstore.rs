@@ -60,7 +60,12 @@ impl SearchResultPy {
             "SearchResult(score={:.4}, chunk_id='{}', content='{}...')",
             self.score,
             self.chunk_id,
-            &self.document.page_content.chars().take(50).collect::<String>()
+            &self
+                .document
+                .page_content
+                .chars()
+                .take(50)
+                .collect::<String>()
         )
     }
 }
@@ -261,9 +266,10 @@ impl RagfsVectorStore {
         let store = self.store.clone();
 
         future_into_py(py, async move {
-            store.init().await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Failed to initialize store: {e}"))
-            })?;
+            store
+                .init()
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to initialize store: {e}")))?;
             Ok(())
         })
     }
@@ -296,15 +302,19 @@ impl RagfsVectorStore {
                 metric: DistanceMetric::Cosine,
             };
 
-            let results = store.search(query).await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Search failed: {e}"))
-            })?;
+            let results = store
+                .search(query)
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Search failed: {e}")))?;
 
             let py_results: Vec<SearchResultPy> = results
                 .into_iter()
                 .map(|r| {
                     let mut metadata = r.metadata;
-                    metadata.insert("file_path".to_string(), r.file_path.to_string_lossy().to_string());
+                    metadata.insert(
+                        "file_path".to_string(),
+                        r.file_path.to_string_lossy().to_string(),
+                    );
                     metadata.insert("start_byte".to_string(), r.byte_range.start.to_string());
                     metadata.insert("end_byte".to_string(), r.byte_range.end.to_string());
                     if let Some(ref lr) = r.line_range {
@@ -357,15 +367,19 @@ impl RagfsVectorStore {
                 metric: DistanceMetric::Cosine,
             };
 
-            let results = store.hybrid_search(query).await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Hybrid search failed: {e}"))
-            })?;
+            let results = store
+                .hybrid_search(query)
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Hybrid search failed: {e}")))?;
 
             let py_results: Vec<SearchResultPy> = results
                 .into_iter()
                 .map(|r| {
                     let mut metadata = r.metadata;
-                    metadata.insert("file_path".to_string(), r.file_path.to_string_lossy().to_string());
+                    metadata.insert(
+                        "file_path".to_string(),
+                        r.file_path.to_string_lossy().to_string(),
+                    );
 
                     SearchResultPy {
                         document: Document {
@@ -391,9 +405,10 @@ impl RagfsVectorStore {
         let store = self.store.clone();
 
         future_into_py(py, async move {
-            let stats = store.stats().await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Failed to get stats: {e}"))
-            })?;
+            let stats = store
+                .stats()
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to get stats: {e}")))?;
 
             let result: HashMap<String, u64> = HashMap::from([
                 ("total_chunks".to_string(), stats.total_chunks),
@@ -410,7 +425,11 @@ impl RagfsVectorStore {
     /// # Arguments
     ///
     /// * `file_path` - Path to the file to delete.
-    fn delete_by_path<'py>(&self, py: Python<'py>, file_path: String) -> PyResult<Bound<'py, PyAny>> {
+    fn delete_by_path<'py>(
+        &self,
+        py: Python<'py>,
+        file_path: String,
+    ) -> PyResult<Bound<'py, PyAny>> {
         let store = self.store.clone();
 
         future_into_py(py, async move {
@@ -448,9 +467,10 @@ impl RagfsVectorStore {
 
             let count = core_chunks.len();
 
-            store.upsert_chunks(&core_chunks).await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Upsert failed: {e}"))
-            })?;
+            store
+                .upsert_chunks(&core_chunks)
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Upsert failed: {e}")))?;
 
             Ok(count)
         })

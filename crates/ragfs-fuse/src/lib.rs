@@ -141,8 +141,10 @@ pub mod semantic;
 
 pub use filesystem::RagFs;
 pub use inode::{InodeKind, InodeTable};
-pub use ops::{BatchRequest, BatchResult, OpsManager, Operation, OperationResult};
-pub use safety::{HistoryEntry, HistoryOperation, SafetyConfig, SafetyManager, TrashEntry, UndoData};
+pub use ops::{BatchRequest, BatchResult, Operation, OperationResult, OpsManager};
+pub use safety::{
+    HistoryEntry, HistoryOperation, SafetyConfig, SafetyManager, TrashEntry, UndoData,
+};
 pub use semantic::{
     CleanupAnalysis, DuplicateGroups, OrganizeRequest, OrganizeStrategy, SemanticConfig,
     SemanticManager, SemanticPlan, SimilarFilesResult,

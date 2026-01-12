@@ -1,10 +1,10 @@
 //! Python wrapper for RAGFS text splitter.
 
-use pyo3::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
 use pyo3_async_runtimes::tokio::future_into_py;
 use ragfs_chunker::{ChunkerRegistry, CodeChunker, FixedSizeChunker, SemanticChunker};
-use ragfs_core::{ChunkConfig, ContentType, ExtractedContent, ContentMetadataInfo};
+use ragfs_core::{ChunkConfig, ContentMetadataInfo, ContentType, ExtractedContent};
 use std::sync::Arc;
 
 use crate::vectorstore::Document;
@@ -116,13 +116,16 @@ impl RagfsTextSplitter {
                 ContentType::Text
             };
 
-            let chunker = registry.get_for_content_type(&effective_content_type).ok_or_else(|| {
-                PyRuntimeError::new_err("No chunker available for content type".to_string())
-            })?;
+            let chunker = registry
+                .get_for_content_type(&effective_content_type)
+                .ok_or_else(|| {
+                    PyRuntimeError::new_err("No chunker available for content type".to_string())
+                })?;
 
-            let outputs = chunker.chunk(&content, &config).await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Chunking failed: {e}"))
-            })?;
+            let outputs = chunker
+                .chunk(&content, &config)
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Chunking failed: {e}")))?;
 
             let chunks: Vec<String> = outputs.into_iter().map(|o| o.content).collect();
             Ok(chunks)
@@ -189,18 +192,24 @@ impl RagfsTextSplitter {
                     ContentType::Text
                 };
 
-                let chunker = registry.get_for_content_type(&effective_content_type).ok_or_else(|| {
-                    PyRuntimeError::new_err("No chunker available for content type".to_string())
-                })?;
+                let chunker = registry
+                    .get_for_content_type(&effective_content_type)
+                    .ok_or_else(|| {
+                        PyRuntimeError::new_err("No chunker available for content type".to_string())
+                    })?;
 
-                let outputs = chunker.chunk(&content, &config).await.map_err(|e| {
-                    PyRuntimeError::new_err(format!("Chunking failed: {e}"))
-                })?;
+                let outputs = chunker
+                    .chunk(&content, &config)
+                    .await
+                    .map_err(|e| PyRuntimeError::new_err(format!("Chunking failed: {e}")))?;
 
                 for (i, output) in outputs.into_iter().enumerate() {
                     let mut metadata = doc.metadata.clone();
                     metadata.insert("chunk_index".to_string(), i.to_string());
-                    metadata.insert("start_byte".to_string(), output.byte_range.start.to_string());
+                    metadata.insert(
+                        "start_byte".to_string(),
+                        output.byte_range.start.to_string(),
+                    );
                     metadata.insert("end_byte".to_string(), output.byte_range.end.to_string());
                     if let Some(ref lr) = output.line_range {
                         metadata.insert("start_line".to_string(), lr.start.to_string());

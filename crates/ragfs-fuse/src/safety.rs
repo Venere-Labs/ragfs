@@ -38,12 +38,29 @@ pub struct TrashEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HistoryOperation {
-    Create { path: PathBuf },
-    Delete { path: PathBuf, trash_id: Option<Uuid> },
-    Move { src: PathBuf, dst: PathBuf },
-    Copy { src: PathBuf, dst: PathBuf },
-    Write { path: PathBuf, append: bool },
-    Restore { trash_id: Uuid, path: PathBuf },
+    Create {
+        path: PathBuf,
+    },
+    Delete {
+        path: PathBuf,
+        trash_id: Option<Uuid>,
+    },
+    Move {
+        src: PathBuf,
+        dst: PathBuf,
+    },
+    Copy {
+        src: PathBuf,
+        dst: PathBuf,
+    },
+    Write {
+        path: PathBuf,
+        append: bool,
+    },
+    Restore {
+        trash_id: Uuid,
+        path: PathBuf,
+    },
 }
 
 /// Entry in the history log.
@@ -133,7 +150,10 @@ impl SafetyManager {
             .collect::<String>();
 
         let trash_dir = config.data_dir.join("trash").join(&index_hash);
-        let history_file = config.data_dir.join("history").join(format!("{index_hash}.jsonl"));
+        let history_file = config
+            .data_dir
+            .join("history")
+            .join(format!("{index_hash}.jsonl"));
 
         // Ensure directories exist
         if let Err(e) = fs::create_dir_all(&trash_dir) {
@@ -314,7 +334,12 @@ impl SafetyManager {
 
     /// Get a specific trash entry.
     pub async fn get_trash_entry(&self, id: Uuid) -> Option<TrashEntry> {
-        self.trash_cache.read().await.iter().find(|e| e.id == id).cloned()
+        self.trash_cache
+            .read()
+            .await
+            .iter()
+            .find(|e| e.id == id)
+            .cloned()
     }
 
     /// Get trash content by ID.
@@ -331,7 +356,8 @@ impl SafetyManager {
         let now = Utc::now();
         let expired: Vec<Uuid> = {
             let cache = self.trash_cache.read().await;
-            cache.iter()
+            cache
+                .iter()
                 .filter(|e| e.expires_at < now)
                 .map(|e| e.id)
                 .collect()
@@ -447,30 +473,33 @@ impl SafetyManager {
 
     /// Find an operation by ID for undo.
     pub fn find_operation(&self, id: Uuid) -> Option<HistoryEntry> {
-        self.read_history(None)
-            .into_iter()
-            .find(|e| e.id == id)
+        self.read_history(None).into_iter().find(|e| e.id == id)
     }
 
     /// Undo an operation.
     pub async fn undo(&self, operation_id: Uuid) -> Result<String, String> {
-        let entry = self.find_operation(operation_id)
+        let entry = self
+            .find_operation(operation_id)
             .ok_or_else(|| "Operation not found".to_string())?;
 
         if !entry.reversible {
             return Err("Operation is not reversible".into());
         }
 
-        let undo_data = entry.undo_data.ok_or_else(|| "No undo data available".to_string())?;
+        let undo_data = entry
+            .undo_data
+            .ok_or_else(|| "No undo data available".to_string())?;
 
         match undo_data {
             UndoData::Create { path } => {
                 // Undo create by deleting the file
                 if path.exists() {
-                    fs::remove_file(&path)
-                        .map_err(|e| format!("Failed to undo create: {e}"))?;
+                    fs::remove_file(&path).map_err(|e| format!("Failed to undo create: {e}"))?;
                     self.log_success(
-                        HistoryOperation::Delete { path: path.clone(), trash_id: None },
+                        HistoryOperation::Delete {
+                            path: path.clone(),
+                            trash_id: None,
+                        },
                         None,
                     );
                     Ok(format!("Undone: deleted {}", path.display()))
@@ -486,11 +515,16 @@ impl SafetyManager {
             UndoData::Move { src, dst } => {
                 // Undo move by moving back
                 if dst.exists() {
-                    fs::rename(&dst, &src)
-                        .map_err(|e| format!("Failed to undo move: {e}"))?;
+                    fs::rename(&dst, &src).map_err(|e| format!("Failed to undo move: {e}"))?;
                     self.log_success(
-                        HistoryOperation::Move { src: dst.clone(), dst: src.clone() },
-                        Some(UndoData::Move { src: src.clone(), dst }),
+                        HistoryOperation::Move {
+                            src: dst.clone(),
+                            dst: src.clone(),
+                        },
+                        Some(UndoData::Move {
+                            src: src.clone(),
+                            dst,
+                        }),
                     );
                     Ok(format!("Undone: moved back to {}", src.display()))
                 } else {
@@ -500,10 +534,12 @@ impl SafetyManager {
             UndoData::Copy { path } => {
                 // Undo copy by deleting the copy
                 if path.exists() {
-                    fs::remove_file(&path)
-                        .map_err(|e| format!("Failed to undo copy: {e}"))?;
+                    fs::remove_file(&path).map_err(|e| format!("Failed to undo copy: {e}"))?;
                     self.log_success(
-                        HistoryOperation::Delete { path: path.clone(), trash_id: None },
+                        HistoryOperation::Delete {
+                            path: path.clone(),
+                            trash_id: None,
+                        },
                         None,
                     );
                     Ok(format!("Undone: deleted copy {}", path.display()))
@@ -583,7 +619,9 @@ mod tests {
     async fn test_soft_delete_nonexistent() {
         let (manager, _source_dir, _data_dir) = create_test_manager();
 
-        let result = manager.soft_delete(&PathBuf::from("/nonexistent.txt")).await;
+        let result = manager
+            .soft_delete(&PathBuf::from("/nonexistent.txt"))
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
     }
@@ -602,12 +640,19 @@ mod tests {
 
         // Log some operations
         manager.log_success(
-            HistoryOperation::Create { path: PathBuf::from("/test.txt") },
-            Some(UndoData::Create { path: PathBuf::from("/test.txt") }),
+            HistoryOperation::Create {
+                path: PathBuf::from("/test.txt"),
+            },
+            Some(UndoData::Create {
+                path: PathBuf::from("/test.txt"),
+            }),
         );
 
         manager.log_failure(
-            HistoryOperation::Delete { path: PathBuf::from("/fail.txt"), trash_id: None },
+            HistoryOperation::Delete {
+                path: PathBuf::from("/fail.txt"),
+                trash_id: None,
+            },
             "Permission denied".to_string(),
         );
 
@@ -625,7 +670,9 @@ mod tests {
         let (manager, _source_dir, _data_dir) = create_test_manager();
 
         manager.log_success(
-            HistoryOperation::Create { path: PathBuf::from("/test.txt") },
+            HistoryOperation::Create {
+                path: PathBuf::from("/test.txt"),
+            },
             None,
         );
 
@@ -645,7 +692,10 @@ mod tests {
         let entry = manager.soft_delete(&test_file).await.unwrap();
 
         let content = manager.get_trash_content(entry.id).unwrap();
-        assert_eq!(String::from_utf8(content).unwrap(), "Test content for trash");
+        assert_eq!(
+            String::from_utf8(content).unwrap(),
+            "Test content for trash"
+        );
     }
 
     #[test]
@@ -677,11 +727,15 @@ mod tests {
     fn test_history_entry_serialization() {
         let entry = HistoryEntry {
             id: Uuid::new_v4(),
-            operation: HistoryOperation::Create { path: PathBuf::from("/test.txt") },
+            operation: HistoryOperation::Create {
+                path: PathBuf::from("/test.txt"),
+            },
             timestamp: Utc::now(),
             success: true,
             reversible: true,
-            undo_data: Some(UndoData::Create { path: PathBuf::from("/test.txt") }),
+            undo_data: Some(UndoData::Create {
+                path: PathBuf::from("/test.txt"),
+            }),
             error: None,
         };
 

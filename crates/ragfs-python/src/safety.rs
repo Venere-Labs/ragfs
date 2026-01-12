@@ -8,9 +8,7 @@
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3_async_runtimes::tokio::future_into_py;
-use ragfs_fuse::safety::{
-    HistoryEntry, HistoryOperation, SafetyConfig, SafetyManager, TrashEntry,
-};
+use ragfs_fuse::safety::{HistoryEntry, HistoryOperation, SafetyConfig, SafetyManager, TrashEntry};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -112,19 +110,25 @@ impl PyHistoryOperation {
     fn __repr__(&self) -> String {
         match self.operation_type.as_str() {
             "create" | "delete" | "write" => {
-                format!("HistoryOperation(type='{}', path='{}')",
+                format!(
+                    "HistoryOperation(type='{}', path='{}')",
                     self.operation_type,
-                    self.path.as_deref().unwrap_or(""))
+                    self.path.as_deref().unwrap_or("")
+                )
             }
             "move" | "copy" => {
-                format!("HistoryOperation(type='{}', src='{}', dst='{}')",
+                format!(
+                    "HistoryOperation(type='{}', src='{}', dst='{}')",
                     self.operation_type,
                     self.src.as_deref().unwrap_or(""),
-                    self.dst.as_deref().unwrap_or(""))
+                    self.dst.as_deref().unwrap_or("")
+                )
             }
             "restore" => {
-                format!("HistoryOperation(type='restore', trash_id='{}')",
-                    self.trash_id.as_deref().unwrap_or(""))
+                format!(
+                    "HistoryOperation(type='restore', trash_id='{}')",
+                    self.trash_id.as_deref().unwrap_or("")
+                )
             }
             _ => format!("HistoryOperation(type='{}')", self.operation_type),
         }
@@ -217,7 +221,10 @@ impl PyHistoryEntry {
     fn __repr__(&self) -> String {
         format!(
             "HistoryEntry(id='{}', operation={}, success={}, reversible={})",
-            self.id, self.operation.__repr__(), self.success, self.reversible
+            self.id,
+            self.operation.__repr__(),
+            self.success,
+            self.reversible
         )
     }
 
@@ -307,13 +314,11 @@ impl RagfsSafetyManager {
         soft_delete_enabled: bool,
     ) -> Self {
         let config = SafetyConfig {
-            data_dir: data_dir
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
-                    directories::ProjectDirs::from("", "", "ragfs")
-                        .map(|dirs| dirs.data_local_dir().to_path_buf())
-                        .unwrap_or_else(|| PathBuf::from(".ragfs"))
-                }),
+            data_dir: data_dir.map(PathBuf::from).unwrap_or_else(|| {
+                directories::ProjectDirs::from("", "", "ragfs")
+                    .map(|dirs| dirs.data_local_dir().to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from(".ragfs"))
+            }),
             trash_retention_days,
             soft_delete: soft_delete_enabled,
         };
@@ -361,7 +366,8 @@ impl RagfsSafetyManager {
 
         future_into_py(py, async move {
             let entries = manager.list_trash().await;
-            let py_entries: Vec<PyTrashEntry> = entries.into_iter().map(PyTrashEntry::from).collect();
+            let py_entries: Vec<PyTrashEntry> =
+                entries.into_iter().map(PyTrashEntry::from).collect();
             Ok(py_entries)
         })
     }
@@ -516,7 +522,10 @@ impl RagfsSafetyManager {
         let uuid = uuid::Uuid::parse_str(&operation_id)
             .map_err(|e| PyRuntimeError::new_err(format!("Invalid operation ID: {e}")))?;
 
-        Ok(self.manager.find_operation(uuid).is_some_and(|e| e.reversible))
+        Ok(self
+            .manager
+            .find_operation(uuid)
+            .is_some_and(|e| e.reversible))
     }
 
     /// Check if soft delete is enabled.

@@ -9,13 +9,15 @@
 //! All operations follow a Propose-Review-Apply pattern for safety.
 
 use chrono::{DateTime, Utc};
-use ragfs_core::{Chunk, DistanceMetric, Embedder, EmbeddingConfig, FileRecord, SearchQuery, VectorStore};
+use ragfs_core::{
+    Chunk, DistanceMetric, Embedder, EmbeddingConfig, FileRecord, SearchQuery, VectorStore,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use std::fs;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -175,7 +177,10 @@ pub struct CleanupCandidate {
 #[serde(rename_all = "snake_case")]
 pub enum CleanupReason {
     /// File appears to be a duplicate
-    Duplicate { similar_to: PathBuf, similarity: f32 },
+    Duplicate {
+        similar_to: PathBuf,
+        similarity: f32,
+    },
     /// File hasn't been accessed in a long time
     Stale { last_accessed: DateTime<Utc> },
     /// Temporary file pattern
@@ -390,16 +395,17 @@ impl SemanticManager {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "json")
-                && let Ok(content) = fs::read_to_string(&path) {
-                    match serde_json::from_str::<SemanticPlan>(&content) {
-                        Ok(plan) => {
-                            plans.insert(plan.id, plan);
-                        }
-                        Err(e) => {
-                            warn!("Failed to parse plan file {:?}: {e}", path);
-                        }
+                && let Ok(content) = fs::read_to_string(&path)
+            {
+                match serde_json::from_str::<SemanticPlan>(&content) {
+                    Ok(plan) => {
+                        plans.insert(plan.id, plan);
+                    }
+                    Err(e) => {
+                        warn!("Failed to parse plan file {:?}: {e}", path);
                     }
                 }
+            }
         }
 
         plans
@@ -486,8 +492,8 @@ impl SemanticManager {
         debug!("Finding files similar to: {}", full_path.display());
 
         // Read the file content
-        let content = std::fs::read_to_string(&full_path)
-            .map_err(|e| format!("Failed to read file: {e}"))?;
+        let content =
+            std::fs::read_to_string(&full_path).map_err(|e| format!("Failed to read file: {e}"))?;
 
         // Generate embedding for the content
         let config = EmbeddingConfig::default();
@@ -545,7 +551,10 @@ impl SemanticManager {
         debug!("Analyzing files for cleanup candidates");
 
         // Get all file records from the store
-        let stats = store.stats().await.map_err(|e| format!("Failed to get stats: {e}"))?;
+        let stats = store
+            .stats()
+            .await
+            .map_err(|e| format!("Failed to get stats: {e}"))?;
 
         let mut candidates = Vec::new();
         let mut potential_savings: u64 = 0;
@@ -636,19 +645,15 @@ impl SemanticManager {
         }
 
         // Build file info map
-        let file_info: HashMap<PathBuf, &FileRecord> = all_files
-            .iter()
-            .map(|f| (f.path.clone(), f))
-            .collect();
+        let file_info: HashMap<PathBuf, &FileRecord> =
+            all_files.iter().map(|f| (f.path.clone(), f)).collect();
 
         // Calculate average embedding for each file
         let file_embeddings: HashMap<PathBuf, Vec<f32>> = file_chunks
             .iter()
             .filter_map(|(path, chunks)| {
-                let embeddings: Vec<&Vec<f32>> = chunks
-                    .iter()
-                    .filter_map(|c| c.embedding.as_ref())
-                    .collect();
+                let embeddings: Vec<&Vec<f32>> =
+                    chunks.iter().filter_map(|c| c.embedding.as_ref()).collect();
 
                 if embeddings.is_empty() {
                     return None;
@@ -716,7 +721,10 @@ impl SemanticManager {
             };
 
             // Check if representative already has a group
-            if let Some(group) = groups.iter_mut().find(|g| g.representative == representative) {
+            if let Some(group) = groups
+                .iter_mut()
+                .find(|g| g.representative == representative)
+            {
                 group.duplicates.push(DuplicateEntry {
                     path: duplicate.clone(),
                     similarity: dup_similarity,
@@ -775,7 +783,10 @@ impl SemanticManager {
         let store = self.store.as_ref().ok_or("Vector store not available")?;
         let _embedder = self.embedder.as_ref().ok_or("Embedder not available")?;
 
-        debug!("Creating organization plan for: {}", request.scope.display());
+        debug!(
+            "Creating organization plan for: {}",
+            request.scope.display()
+        );
 
         // Get all chunks and files
         let all_chunks = store
@@ -830,10 +841,8 @@ impl SemanticManager {
         let file_embeddings: HashMap<PathBuf, Vec<f32>> = file_chunks
             .iter()
             .filter_map(|(path, chunks)| {
-                let embeddings: Vec<&Vec<f32>> = chunks
-                    .iter()
-                    .filter_map(|c| c.embedding.as_ref())
-                    .collect();
+                let embeddings: Vec<&Vec<f32>> =
+                    chunks.iter().filter_map(|c| c.embedding.as_ref()).collect();
 
                 if embeddings.is_empty() {
                     return None;
@@ -865,22 +874,27 @@ impl SemanticManager {
 
         // Generate actions based on strategy
         let (actions, description) = match &request.strategy {
-            OrganizeStrategy::ByTopic => {
-                self.plan_by_topic(&file_embeddings, &scope_path, request.max_groups, request.similarity_threshold)
-            }
-            OrganizeStrategy::ByType => {
-                self.plan_by_type(&scoped_files, &scope_path)
-            }
-            OrganizeStrategy::ByProject => {
-                self.plan_by_project(&scoped_files, &scope_path)
-            }
+            OrganizeStrategy::ByTopic => self.plan_by_topic(
+                &file_embeddings,
+                &scope_path,
+                request.max_groups,
+                request.similarity_threshold,
+            ),
+            OrganizeStrategy::ByType => self.plan_by_type(&scoped_files, &scope_path),
+            OrganizeStrategy::ByProject => self.plan_by_project(&scoped_files, &scope_path),
             OrganizeStrategy::Custom { categories } => {
                 self.plan_by_custom(&file_embeddings, &scope_path, categories)
             }
         };
 
-        let dirs_created = actions.iter().filter(|a| matches!(a.action, ActionType::Mkdir { .. })).count();
-        let files_moved = actions.iter().filter(|a| matches!(a.action, ActionType::Move { .. })).count();
+        let dirs_created = actions
+            .iter()
+            .filter(|a| matches!(a.action, ActionType::Mkdir { .. }))
+            .count();
+        let files_moved = actions
+            .iter()
+            .filter(|a| matches!(a.action, ActionType::Move { .. }))
+            .count();
 
         let plan = SemanticPlan {
             id: Uuid::new_v4(),
@@ -901,14 +915,21 @@ impl SemanticManager {
         };
 
         // Store the plan in memory
-        self.pending_plans.write().await.insert(plan.id, plan.clone());
+        self.pending_plans
+            .write()
+            .await
+            .insert(plan.id, plan.clone());
 
         // Persist to disk
         if let Err(e) = self.save_plan(&plan) {
             warn!("Failed to persist plan {}: {e}", plan.id);
         }
 
-        info!("Created organization plan: {} with {} actions", plan.id, plan.actions.len());
+        info!(
+            "Created organization plan: {} with {} actions",
+            plan.id,
+            plan.actions.len()
+        );
         Ok(plan)
     }
 
@@ -930,7 +951,11 @@ impl SemanticManager {
         let num_clusters = max_groups.min(num_files);
 
         // Initialize clusters with k random files (here we use evenly spaced indices)
-        let step = if num_files > num_clusters { num_files / num_clusters } else { 1 };
+        let step = if num_files > num_clusters {
+            num_files / num_clusters
+        } else {
+            1
+        };
         let mut centroids: Vec<Vec<f32>> = (0..num_clusters)
             .map(|i| file_embeddings[file_paths[i * step.min(num_files - 1)]].clone())
             .collect();
@@ -1027,7 +1052,10 @@ impl SemanticManager {
                         to: new_path,
                     },
                     confidence,
-                    reason: format!("Move to topic cluster {} based on content similarity", cluster_idx + 1),
+                    reason: format!(
+                        "Move to topic cluster {} based on content similarity",
+                        cluster_idx + 1
+                    ),
                 });
             }
         }
@@ -1113,9 +1141,10 @@ impl SemanticManager {
         for file in files {
             // Use the first directory component after scope as "project"
             let relative = file.path.strip_prefix(scope_path).unwrap_or(&file.path);
-            let project = relative
-                .components()
-                .next().map_or_else(|| "root".to_string(), |c| c.as_os_str().to_string_lossy().to_string());
+            let project = relative.components().next().map_or_else(
+                || "root".to_string(),
+                |c| c.as_os_str().to_string_lossy().to_string(),
+            );
 
             if project_dirs.insert(project.clone()) && !project.contains('.') {
                 actions.push(PlanAction {
@@ -1227,7 +1256,11 @@ impl SemanticManager {
             return Err(format!("Plan is not pending: {:?}", plan.status));
         }
 
-        info!("Approving plan: {} with {} actions", plan_id, plan.actions.len());
+        info!(
+            "Approving plan: {} with {} actions",
+            plan_id,
+            plan.actions.len()
+        );
         plan.status = PlanStatus::Approved;
 
         // Execute actions sequentially, stopping on first failure
@@ -1235,13 +1268,19 @@ impl SemanticManager {
         let mut completed_actions = 0;
 
         // Clone actions to avoid holding lock during execution
-        let actions_to_execute: Vec<ActionType> = plan.actions.iter().map(|a| a.action.clone()).collect();
+        let actions_to_execute: Vec<ActionType> =
+            plan.actions.iter().map(|a| a.action.clone()).collect();
 
         // Release write lock during execution to avoid deadlock
         drop(plans);
 
         for (idx, action) in actions_to_execute.iter().enumerate() {
-            debug!("Executing action {}/{}: {:?}", idx + 1, total_actions, action);
+            debug!(
+                "Executing action {}/{}: {:?}",
+                idx + 1,
+                total_actions,
+                action
+            );
 
             match self.execute_action(action).await {
                 Ok(result) if result.success => {
@@ -1256,12 +1295,7 @@ impl SemanticManager {
                 Ok(result) => {
                     // Action failed
                     let error_msg = result.error.unwrap_or_else(|| "Unknown error".to_string());
-                    warn!(
-                        "Action {}/{} failed: {}",
-                        idx + 1,
-                        total_actions,
-                        error_msg
-                    );
+                    warn!("Action {}/{} failed: {}", idx + 1, total_actions, error_msg);
 
                     // Update plan status to failed
                     let mut plans = self.pending_plans.write().await;
@@ -1285,7 +1319,12 @@ impl SemanticManager {
                 }
                 Err(e) => {
                     // Execution error (OpsManager issue)
-                    warn!("Failed to execute action {}/{}: {}", idx + 1, total_actions, e);
+                    warn!(
+                        "Failed to execute action {}/{}: {}",
+                        idx + 1,
+                        total_actions,
+                        e
+                    );
 
                     let mut plans = self.pending_plans.write().await;
                     if let Some(plan) = plans.get_mut(&plan_id) {

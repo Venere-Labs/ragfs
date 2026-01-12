@@ -6,9 +6,9 @@
 use chrono::{DateTime, Utc};
 use ragfs_core::VectorStore;
 use serde::{Deserialize, Serialize};
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::fs;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -304,13 +304,18 @@ impl OpsManager {
 
     /// Execute an operation and capture rollback data for atomic batches.
     /// Returns (result, `rollback_data`) tuple.
-    async fn execute_with_rollback(&self, op: &Operation) -> (OperationResult, Option<RollbackData>) {
+    async fn execute_with_rollback(
+        &self,
+        op: &Operation,
+    ) -> (OperationResult, Option<RollbackData>) {
         match op {
             Operation::Create { path, content } => {
                 let resolved = self.resolve_path(path);
                 let result = self.create(path, content).await;
                 let rollback = if result.success {
-                    Some(RollbackData::Create { created_path: resolved })
+                    Some(RollbackData::Create {
+                        created_path: resolved,
+                    })
                 } else {
                     None
                 };
@@ -330,7 +335,11 @@ impl OpsManager {
                     Some(RollbackData::Delete {
                         original_path: resolved,
                         trash_id: result.undo_id, // From soft delete
-                        content_backup: if result.undo_id.is_none() { content_backup } else { None },
+                        content_backup: if result.undo_id.is_none() {
+                            content_backup
+                        } else {
+                            None
+                        },
                     })
                 } else {
                     None
@@ -355,13 +364,19 @@ impl OpsManager {
                 let resolved_dst = self.resolve_path(dst);
                 let result = self.copy(src, dst).await;
                 let rollback = if result.success {
-                    Some(RollbackData::Copy { copied_path: resolved_dst })
+                    Some(RollbackData::Copy {
+                        copied_path: resolved_dst,
+                    })
                 } else {
                     None
                 };
                 (result, rollback)
             }
-            Operation::Write { path, content, append } => {
+            Operation::Write {
+                path,
+                content,
+                append,
+            } => {
                 let resolved = self.resolve_path(path);
                 let file_existed = resolved.exists();
                 let previous_content = if file_existed {
@@ -386,7 +401,9 @@ impl OpsManager {
                 let resolved = self.resolve_path(path);
                 let result = self.mkdir(path).await;
                 let rollback = if result.success {
-                    Some(RollbackData::Mkdir { created_path: resolved })
+                    Some(RollbackData::Mkdir {
+                        created_path: resolved,
+                    })
                 } else {
                     None
                 };
@@ -396,7 +413,9 @@ impl OpsManager {
                 let resolved_link = self.resolve_path(link);
                 let result = self.symlink(target, link).await;
                 let rollback = if result.success {
-                    Some(RollbackData::Symlink { link_path: resolved_link })
+                    Some(RollbackData::Symlink {
+                        link_path: resolved_link,
+                    })
                 } else {
                     None
                 };
@@ -425,13 +444,14 @@ impl OpsManager {
             } => {
                 // Try to restore from trash first
                 if let Some(id) = trash_id
-                    && let Some(ref safety) = self.safety_manager {
-                        return safety
-                            .restore(*id)
-                            .await
-                            .map(|_| ())
-                            .map_err(|e| format!("Failed to restore from trash: {e}"));
-                    }
+                    && let Some(ref safety) = self.safety_manager
+                {
+                    return safety
+                        .restore(*id)
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| format!("Failed to restore from trash: {e}"));
+                }
                 // Fall back to content backup
                 if let Some(content) = content_backup {
                     if let Some(parent) = original_path.parent() {
@@ -574,7 +594,9 @@ impl OpsManager {
 
                 // Log to history
                 self.log_to_history(
-                    HistoryOperation::Create { path: resolved.clone() },
+                    HistoryOperation::Create {
+                        path: resolved.clone(),
+                    },
                     Some(UndoData::Create { path: resolved }),
                 );
 
@@ -868,11 +890,7 @@ impl OpsManager {
         debug!("ops::mkdir {:?}", resolved);
 
         if resolved.exists() {
-            return OperationResult::failure(
-                "mkdir",
-                path.clone(),
-                "Path already exists".into(),
-            );
+            return OperationResult::failure("mkdir", path.clone(), "Path already exists".into());
         }
 
         match fs::create_dir_all(&resolved) {
@@ -925,7 +943,10 @@ impl OpsManager {
 
         match std::os::unix::fs::symlink(&resolved_target, &resolved_link) {
             Ok(()) => {
-                info!("Created symlink: {:?} -> {:?}", resolved_link, resolved_target);
+                info!(
+                    "Created symlink: {:?} -> {:?}",
+                    resolved_link, resolved_target
+                );
 
                 let mut result = OperationResult::success("symlink", link.clone(), false);
                 result.undo_id = Some(Uuid::new_v4());
@@ -1019,12 +1040,13 @@ impl OpsManager {
                 succeeded += 1;
                 // Record in journal for potential rollback
                 if request.atomic
-                    && let Some(rd) = rollback_data {
-                        journal.push(JournalEntry {
-                            operation_index: index,
-                            rollback_data: rd,
-                        });
-                    }
+                    && let Some(rd) = rollback_data
+                {
+                    journal.push(JournalEntry {
+                        operation_index: index,
+                        rollback_data: rd,
+                    });
+                }
                 results.push(result);
             } else {
                 failed += 1;
@@ -1032,7 +1054,11 @@ impl OpsManager {
 
                 if request.atomic && !journal.is_empty() {
                     // Perform rollback of all previously successful operations
-                    info!("Batch failed at operation {}, rolling back {} operations", index, journal.len());
+                    info!(
+                        "Batch failed at operation {}, rolling back {} operations",
+                        index,
+                        journal.len()
+                    );
                     let rollback_details = self.perform_rollback(&journal).await;
                     let rollback_success = rollback_details.rollback_failures == 0;
 
@@ -1093,11 +1119,7 @@ impl OpsManager {
             Operation::Create { path, .. } => {
                 let resolved = self.resolve_path(path);
                 if resolved.exists() {
-                    OperationResult::failure(
-                        "create",
-                        path.clone(),
-                        "File already exists".into(),
-                    )
+                    OperationResult::failure("create", path.clone(), "File already exists".into())
                 } else {
                     OperationResult::success("create", path.clone(), false)
                 }
@@ -1153,11 +1175,7 @@ impl OpsManager {
             Operation::Mkdir { path } => {
                 let resolved = self.resolve_path(path);
                 if resolved.exists() {
-                    OperationResult::failure(
-                        "mkdir",
-                        path.clone(),
-                        "Path already exists".into(),
-                    )
+                    OperationResult::failure("mkdir", path.clone(), "Path already exists".into())
                 } else {
                     OperationResult::success("mkdir", path.clone(), false)
                 }

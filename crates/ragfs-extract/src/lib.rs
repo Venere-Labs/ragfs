@@ -64,6 +64,6 @@ pub use image::ImageExtractor;
 pub use pdf::PdfExtractor;
 pub use registry::ExtractorRegistry;
 pub use text::TextExtractor;
-pub use vision::{CaptionConfig, CaptionError, ImageCaptioner, PlaceholderCaptioner};
 #[cfg(feature = "vision")]
 pub use vision::BlipCaptioner;
+pub use vision::{CaptionConfig, CaptionError, ImageCaptioner, PlaceholderCaptioner};

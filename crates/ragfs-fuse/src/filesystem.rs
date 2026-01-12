@@ -4,7 +4,7 @@ use fuser::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty,
     ReplyEntry, ReplyOpen, ReplyWrite, Request, TimeOrNow,
 };
-use libc::{EEXIST, EINVAL, EIO, EISDIR, ENOENT, ENOTEMPTY, ENOSYS, ENOTDIR, EPERM};
+use libc::{EEXIST, EINVAL, EIO, EISDIR, ENOENT, ENOSYS, ENOTDIR, ENOTEMPTY, EPERM};
 use ragfs_core::{Embedder, VectorStore};
 use ragfs_query::QueryExecutor;
 use std::collections::HashMap;
@@ -504,7 +504,9 @@ impl Filesystem for RagFs {
                     return;
                 }
                 ".similar" => {
-                    let content = self.runtime.block_on(self.semantic_manager.get_similar_json());
+                    let content = self
+                        .runtime
+                        .block_on(self.semantic_manager.get_similar_json());
                     let attr = self.make_attr(
                         SIMILAR_OPS_FILE_INO,
                         FileType::RegularFile,
@@ -516,7 +518,9 @@ impl Filesystem for RagFs {
                     return;
                 }
                 ".cleanup" => {
-                    let content = self.runtime.block_on(self.semantic_manager.get_cleanup_json());
+                    let content = self
+                        .runtime
+                        .block_on(self.semantic_manager.get_cleanup_json());
                     let attr = self.make_attr(
                         CLEANUP_FILE_INO,
                         FileType::RegularFile,
@@ -528,7 +532,9 @@ impl Filesystem for RagFs {
                     return;
                 }
                 ".dedupe" => {
-                    let content = self.runtime.block_on(self.semantic_manager.get_dedupe_json());
+                    let content = self
+                        .runtime
+                        .block_on(self.semantic_manager.get_dedupe_json());
                     let attr = self.make_attr(
                         DEDUPE_FILE_INO,
                         FileType::RegularFile,
@@ -633,11 +639,8 @@ impl Filesystem for RagFs {
                 }
                 ".result" => {
                     let content = self.runtime.block_on(self.ops_manager.get_last_result());
-                    let attr = self.make_attr(
-                        OPS_RESULT_INO,
-                        FileType::RegularFile,
-                        content.len() as u64,
-                    );
+                    let attr =
+                        self.make_attr(OPS_RESULT_INO, FileType::RegularFile, content.len() as u64);
                     let mut cache = self.runtime.block_on(self.content_cache.write());
                     cache.insert(OPS_RESULT_INO, content);
                     reply.entry(&TTL, &attr, 0);
@@ -779,7 +782,9 @@ impl Filesystem for RagFs {
                 reply.attr(&TTL, &attr);
             }
             SIMILAR_OPS_FILE_INO => {
-                let content = self.runtime.block_on(self.semantic_manager.get_similar_json());
+                let content = self
+                    .runtime
+                    .block_on(self.semantic_manager.get_similar_json());
                 let size = content.len() as u64;
                 let mut cache = self.runtime.block_on(self.content_cache.write());
                 cache.insert(SIMILAR_OPS_FILE_INO, content);
@@ -787,7 +792,9 @@ impl Filesystem for RagFs {
                 reply.attr(&TTL, &attr);
             }
             CLEANUP_FILE_INO => {
-                let content = self.runtime.block_on(self.semantic_manager.get_cleanup_json());
+                let content = self
+                    .runtime
+                    .block_on(self.semantic_manager.get_cleanup_json());
                 let size = content.len() as u64;
                 let mut cache = self.runtime.block_on(self.content_cache.write());
                 cache.insert(CLEANUP_FILE_INO, content);
@@ -795,7 +802,9 @@ impl Filesystem for RagFs {
                 reply.attr(&TTL, &attr);
             }
             DEDUPE_FILE_INO => {
-                let content = self.runtime.block_on(self.semantic_manager.get_dedupe_json());
+                let content = self
+                    .runtime
+                    .block_on(self.semantic_manager.get_dedupe_json());
                 let size = content.len() as u64;
                 let mut cache = self.runtime.block_on(self.content_cache.write());
                 cache.insert(DEDUPE_FILE_INO, content);
@@ -937,7 +946,9 @@ impl Filesystem for RagFs {
             }
             // .semantic/ read-only files
             SIMILAR_OPS_FILE_INO => {
-                let content = self.runtime.block_on(self.semantic_manager.get_similar_json());
+                let content = self
+                    .runtime
+                    .block_on(self.semantic_manager.get_similar_json());
                 let offset = offset as usize;
                 let size = size as usize;
                 if offset >= content.len() {
@@ -949,7 +960,9 @@ impl Filesystem for RagFs {
                 return;
             }
             CLEANUP_FILE_INO => {
-                let content = self.runtime.block_on(self.semantic_manager.get_cleanup_json());
+                let content = self
+                    .runtime
+                    .block_on(self.semantic_manager.get_cleanup_json());
                 let offset = offset as usize;
                 let size = size as usize;
                 if offset >= content.len() {
@@ -961,7 +974,9 @@ impl Filesystem for RagFs {
                 return;
             }
             DEDUPE_FILE_INO => {
-                let content = self.runtime.block_on(self.semantic_manager.get_dedupe_json());
+                let content = self
+                    .runtime
+                    .block_on(self.semantic_manager.get_dedupe_json());
                 let offset = offset as usize;
                 let size = size as usize;
                 if offset >= content.len() {
@@ -1110,7 +1125,8 @@ impl Filesystem for RagFs {
                 let trash = self.runtime.block_on(self.safety_manager.list_trash());
                 for entry in trash {
                     // Use a dynamic inode (starting from a high number to avoid conflicts)
-                    let entry_ino = FIRST_REAL_INO + 500_000 + (entry.id.as_u128() % 100_000) as u64;
+                    let entry_ino =
+                        FIRST_REAL_INO + 500_000 + (entry.id.as_u128() % 100_000) as u64;
                     entries.push((entry_ino, FileType::RegularFile, entry.id.to_string()));
                 }
 
@@ -1369,9 +1385,9 @@ impl Filesystem for RagFs {
             let data_str = String::from_utf8_lossy(data).trim().to_string();
             if let Ok(operation_id) = uuid::Uuid::parse_str(&data_str) {
                 let safety_manager = self.safety_manager.clone();
-                let result = self.runtime.block_on(async move {
-                    safety_manager.undo(operation_id).await
-                });
+                let result = self
+                    .runtime
+                    .block_on(async move { safety_manager.undo(operation_id).await });
                 match result {
                     Ok(msg) => info!("Undo successful: {}", msg),
                     Err(e) => warn!("Undo failed: {}", e),
@@ -1406,9 +1422,9 @@ impl Filesystem for RagFs {
             let data_str = String::from_utf8_lossy(data).trim().to_string();
             let path = PathBuf::from(&data_str);
             let semantic_manager = self.semantic_manager.clone();
-            let result = self.runtime.block_on(async move {
-                semantic_manager.find_similar(&path).await
-            });
+            let result = self
+                .runtime
+                .block_on(async move { semantic_manager.find_similar(&path).await });
             match result {
                 Ok(r) => info!("Found {} similar files to {}", r.similar.len(), data_str),
                 Err(e) => warn!("Failed to find similar files: {}", e),
@@ -1422,9 +1438,9 @@ impl Filesystem for RagFs {
             let data_str = String::from_utf8_lossy(data).trim().to_string();
             if let Ok(plan_id) = uuid::Uuid::parse_str(&data_str) {
                 let semantic_manager = self.semantic_manager.clone();
-                let result = self.runtime.block_on(async move {
-                    semantic_manager.approve_plan(plan_id).await
-                });
+                let result = self
+                    .runtime
+                    .block_on(async move { semantic_manager.approve_plan(plan_id).await });
                 match result {
                     Ok(plan) => info!("Approved plan: {}", plan.id),
                     Err(e) => warn!("Failed to approve plan: {}", e),
@@ -1441,9 +1457,9 @@ impl Filesystem for RagFs {
             let data_str = String::from_utf8_lossy(data).trim().to_string();
             if let Ok(plan_id) = uuid::Uuid::parse_str(&data_str) {
                 let semantic_manager = self.semantic_manager.clone();
-                let result = self.runtime.block_on(async move {
-                    semantic_manager.reject_plan(plan_id).await
-                });
+                let result = self
+                    .runtime
+                    .block_on(async move { semantic_manager.reject_plan(plan_id).await });
                 match result {
                     Ok(plan) => info!("Rejected plan: {}", plan.id),
                     Err(e) => warn!("Failed to reject plan: {}", e),
@@ -1496,7 +1512,10 @@ impl Filesystem for RagFs {
         reply: ReplyCreate,
     ) {
         let name_str = name.to_string_lossy();
-        debug!("create: parent={}, name={}, mode={:o}", parent, name_str, mode);
+        debug!(
+            "create: parent={}, name={}, mode={:o}",
+            parent, name_str, mode
+        );
 
         // Prevent creating files in virtual directories
         if parent < FIRST_REAL_INO && parent != ROOT_INO {
@@ -1593,9 +1612,9 @@ impl Filesystem for RagFs {
         if let Some(ref store) = self.store {
             let store = store.clone();
             let path_for_delete = file_path.clone();
-            let result = self.runtime.block_on(async move {
-                store.delete_by_file_path(&path_for_delete).await
-            });
+            let result = self
+                .runtime
+                .block_on(async move { store.delete_by_file_path(&path_for_delete).await });
             if let Err(e) = result {
                 warn!("Failed to delete from store {:?}: {}", file_path, e);
                 // Continue with file deletion anyway
@@ -1630,7 +1649,10 @@ impl Filesystem for RagFs {
         reply: ReplyEntry,
     ) {
         let name_str = name.to_string_lossy();
-        debug!("mkdir: parent={}, name={}, mode={:o}", parent, name_str, mode);
+        debug!(
+            "mkdir: parent={}, name={}, mode={:o}",
+            parent, name_str, mode
+        );
 
         // Prevent creating directories in virtual directories
         if parent < FIRST_REAL_INO && parent != ROOT_INO {
@@ -1791,11 +1813,14 @@ impl Filesystem for RagFs {
                     let store = store.clone();
                     let src = src_path.clone();
                     let dst = dst_path.clone();
-                    let result = self.runtime.block_on(async move {
-                        store.update_file_path(&src, &dst).await
-                    });
+                    let result = self
+                        .runtime
+                        .block_on(async move { store.update_file_path(&src, &dst).await });
                     if let Err(e) = result {
-                        warn!("Failed to update store path {:?} -> {:?}: {}", src_path, dst_path, e);
+                        warn!(
+                            "Failed to update store path {:?} -> {:?}: {}",
+                            src_path, dst_path, e
+                        );
                     }
                 }
 

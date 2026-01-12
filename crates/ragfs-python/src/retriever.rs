@@ -1,7 +1,7 @@
 //! Python wrapper for RAGFS retriever.
 
-use pyo3::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
 use pyo3_async_runtimes::tokio::future_into_py;
 use ragfs_core::{Embedder, EmbeddingConfig, VectorStore};
 use ragfs_embed::CandleEmbedder;
@@ -54,13 +54,11 @@ impl RagfsRetriever {
         k: usize,
         dimension: usize,
     ) -> Self {
-        let model_path = model_path
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                directories::ProjectDirs::from("", "", "ragfs")
-                    .map(|dirs| dirs.data_dir().join("models"))
-                    .unwrap_or_else(|| PathBuf::from(".ragfs/models"))
-            });
+        let model_path = model_path.map(PathBuf::from).unwrap_or_else(|| {
+            directories::ProjectDirs::from("", "", "ragfs")
+                .map(|dirs| dirs.data_dir().join("models"))
+                .unwrap_or_else(|| PathBuf::from(".ragfs/models"))
+        });
 
         let store = LanceStore::new(PathBuf::from(db_path), dimension);
 
@@ -93,9 +91,10 @@ impl RagfsRetriever {
             }
 
             // Initialize store
-            store.init().await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Failed to initialize store: {e}"))
-            })?;
+            store
+                .init()
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to initialize store: {e}")))?;
 
             Ok(())
         })
@@ -130,9 +129,10 @@ impl RagfsRetriever {
             })?;
 
             let config = EmbeddingConfig::default();
-            let embedding_output = embedder.embed_query(&query, &config).await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Embedding failed: {e}"))
-            })?;
+            let embedding_output = embedder
+                .embed_query(&query, &config)
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Embedding failed: {e}")))?;
 
             // Search
             let search_query = ragfs_core::SearchQuery {
@@ -147,16 +147,18 @@ impl RagfsRetriever {
                 store.hybrid_search(search_query).await
             } else {
                 store.search(search_query).await
-            }.map_err(|e| {
-                PyRuntimeError::new_err(format!("Search failed: {e}"))
-            })?;
+            }
+            .map_err(|e| PyRuntimeError::new_err(format!("Search failed: {e}")))?;
 
             // Convert to documents
             let documents: Vec<Document> = results
                 .into_iter()
                 .map(|r| {
                     let mut metadata: HashMap<String, String> = r.metadata;
-                    metadata.insert("file_path".to_string(), r.file_path.to_string_lossy().to_string());
+                    metadata.insert(
+                        "file_path".to_string(),
+                        r.file_path.to_string_lossy().to_string(),
+                    );
                     metadata.insert("score".to_string(), r.score.to_string());
                     metadata.insert("chunk_id".to_string(), r.chunk_id.to_string());
 
@@ -200,13 +202,18 @@ impl RagfsRetriever {
             })?;
 
             let config = EmbeddingConfig::default();
-            let embedding_output = embedder.embed_query(&query, &config).await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Embedding failed: {e}"))
-            })?;
+            let embedding_output = embedder
+                .embed_query(&query, &config)
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Embedding failed: {e}")))?;
 
             let search_query = ragfs_core::SearchQuery {
                 embedding: embedding_output.embedding,
-                text: if use_hybrid { Some(query.clone()) } else { None },
+                text: if use_hybrid {
+                    Some(query.clone())
+                } else {
+                    None
+                },
                 limit: k,
                 filters: vec![],
                 metric: ragfs_core::DistanceMetric::Cosine,
@@ -216,15 +223,17 @@ impl RagfsRetriever {
                 store.hybrid_search(search_query).await
             } else {
                 store.search(search_query).await
-            }.map_err(|e| {
-                PyRuntimeError::new_err(format!("Search failed: {e}"))
-            })?;
+            }
+            .map_err(|e| PyRuntimeError::new_err(format!("Search failed: {e}")))?;
 
             let py_results: Vec<SearchResultPy> = results
                 .into_iter()
                 .map(|r| {
                     let mut metadata = r.metadata;
-                    metadata.insert("file_path".to_string(), r.file_path.to_string_lossy().to_string());
+                    metadata.insert(
+                        "file_path".to_string(),
+                        r.file_path.to_string_lossy().to_string(),
+                    );
 
                     SearchResultPy {
                         document: Document {
@@ -246,9 +255,10 @@ impl RagfsRetriever {
         let store = self.store.clone();
 
         future_into_py(py, async move {
-            let stats = store.stats().await.map_err(|e| {
-                PyRuntimeError::new_err(format!("Failed to get stats: {e}"))
-            })?;
+            let stats = store
+                .stats()
+                .await
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to get stats: {e}")))?;
 
             let result: HashMap<String, u64> = HashMap::from([
                 ("total_chunks".to_string(), stats.total_chunks),

@@ -33,9 +33,9 @@ use clap::{Parser, Subcommand};
 use daemonize::Daemonize;
 use ragfs_chunker::{ChunkerRegistry, CodeChunker, FixedSizeChunker, SemanticChunker};
 use ragfs_core::{ChunkConfig, Embedder, EmbeddingConfig, Indexer, VectorStore};
-use ragfs_embed::EmbedderPool;
 #[cfg(feature = "candle")]
 use ragfs_embed::CandleEmbedder;
+use ragfs_embed::EmbedderPool;
 use ragfs_extract::{ExtractorRegistry, ImageExtractor, PdfExtractor, TextExtractor};
 use ragfs_index::{IndexerConfig, IndexerService};
 use ragfs_query::QueryExecutor;

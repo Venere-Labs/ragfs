@@ -8,7 +8,9 @@
 
 use async_trait::async_trait;
 use chrono::Utc;
-use ragfs_core::{Chunk, FileRecord, SearchQuery, SearchResult, StoreError, StoreStats, VectorStore};
+use ragfs_core::{
+    Chunk, FileRecord, SearchQuery, SearchResult, StoreError, StoreStats, VectorStore,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -263,8 +265,18 @@ mod tests {
 
         let file_id = Uuid::new_v4();
         let chunks = vec![
-            create_test_chunk(Uuid::new_v4(), file_id, "/test/file.txt", vec![1.0, 0.0, 0.0]),
-            create_test_chunk(Uuid::new_v4(), file_id, "/test/file.txt", vec![0.0, 1.0, 0.0]),
+            create_test_chunk(
+                Uuid::new_v4(),
+                file_id,
+                "/test/file.txt",
+                vec![1.0, 0.0, 0.0],
+            ),
+            create_test_chunk(
+                Uuid::new_v4(),
+                file_id,
+                "/test/file.txt",
+                vec![0.0, 1.0, 0.0],
+            ),
         ];
 
         store.upsert_chunks(&chunks).await.unwrap();
@@ -282,8 +294,18 @@ mod tests {
         let chunk1_id = Uuid::new_v4();
         let chunks = vec![
             create_test_chunk(chunk1_id, file_id, "/test/file.txt", vec![1.0, 0.0, 0.0]),
-            create_test_chunk(Uuid::new_v4(), file_id, "/test/file.txt", vec![0.0, 1.0, 0.0]),
-            create_test_chunk(Uuid::new_v4(), file_id, "/test/file.txt", vec![0.0, 0.0, 1.0]),
+            create_test_chunk(
+                Uuid::new_v4(),
+                file_id,
+                "/test/file.txt",
+                vec![0.0, 1.0, 0.0],
+            ),
+            create_test_chunk(
+                Uuid::new_v4(),
+                file_id,
+                "/test/file.txt",
+                vec![0.0, 0.0, 1.0],
+            ),
         ];
 
         store.upsert_chunks(&chunks).await.unwrap();
@@ -308,8 +330,18 @@ mod tests {
         store.init().await.unwrap();
 
         let chunks = vec![
-            create_test_chunk(Uuid::new_v4(), Uuid::new_v4(), "/test/file1.txt", vec![1.0, 0.0, 0.0]),
-            create_test_chunk(Uuid::new_v4(), Uuid::new_v4(), "/test/file2.txt", vec![0.0, 1.0, 0.0]),
+            create_test_chunk(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                "/test/file1.txt",
+                vec![1.0, 0.0, 0.0],
+            ),
+            create_test_chunk(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                "/test/file2.txt",
+                vec![0.0, 1.0, 0.0],
+            ),
         ];
 
         store.upsert_chunks(&chunks).await.unwrap();
@@ -331,8 +363,18 @@ mod tests {
 
         let file_id = Uuid::new_v4();
         let chunks = vec![
-            create_test_chunk(Uuid::new_v4(), file_id, "/test/file.txt", vec![1.0, 0.0, 0.0]),
-            create_test_chunk(Uuid::new_v4(), file_id, "/test/file.txt", vec![0.0, 1.0, 0.0]),
+            create_test_chunk(
+                Uuid::new_v4(),
+                file_id,
+                "/test/file.txt",
+                vec![1.0, 0.0, 0.0],
+            ),
+            create_test_chunk(
+                Uuid::new_v4(),
+                file_id,
+                "/test/file.txt",
+                vec![0.0, 1.0, 0.0],
+            ),
         ];
 
         store.upsert_chunks(&chunks).await.unwrap();

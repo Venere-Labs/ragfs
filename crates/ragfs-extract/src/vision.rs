@@ -141,6 +141,7 @@ impl Default for CaptionConfig {
 
 /// BLIP model identifier on HuggingFace Hub.
 #[cfg(feature = "vision")]
+#[allow(clippy::doc_markdown)]
 const BLIP_MODEL_ID: &str = "Salesforce/blip-image-captioning-base";
 
 /// Image size for BLIP preprocessing.
@@ -149,9 +150,10 @@ const BLIP_IMAGE_SIZE: u32 = 384;
 
 /// BLIP-based image captioner using Candle.
 ///
-/// Uses the Salesforce/blip-image-captioning-base model from HuggingFace Hub.
+/// Uses the `Salesforce/blip-image-captioning-base` model from HuggingFace Hub.
 /// Requires the `vision` feature to be enabled.
 #[cfg(feature = "vision")]
+#[allow(clippy::doc_markdown)]
 pub struct BlipCaptioner {
     /// Device to run inference on (CPU or CUDA)
     device: Device,
@@ -219,8 +221,10 @@ impl BlipCaptioner {
         let img = img.to_rgb8();
         let (width, height) = (img.width() as usize, img.height() as usize);
 
-        // CLIP normalization values
+        // CLIP normalization values (standard ImageNet values, kept as-is for reference)
+        #[allow(clippy::excessive_precision, clippy::unreadable_literal)]
         let mean = [0.48145466f32, 0.4578275, 0.40821073];
+        #[allow(clippy::excessive_precision, clippy::unreadable_literal)]
         let std = [0.26862954f32, 0.26130258, 0.27577711];
 
         // Convert to tensor [C, H, W] format with normalization
@@ -229,7 +233,7 @@ impl BlipCaptioner {
             let x = x as usize;
             let y = y as usize;
             for c in 0..3 {
-                let val = pixel[c] as f32 / 255.0;
+                let val = f32::from(pixel[c]) / 255.0;
                 let normalized = (val - mean[c]) / std[c];
                 data[c * height * width + y * width + x] = normalized;
             }
@@ -247,9 +251,7 @@ impl BlipCaptioner {
     async fn generate_caption(&self, image_tensor: &Tensor) -> Result<String, CaptionError> {
         // Use write lock since text_decoder may need mutable access
         let mut model_guard = self.model.write().await;
-        let model = model_guard
-            .as_mut()
-            .ok_or(CaptionError::NotInitialized)?;
+        let model = model_guard.as_mut().ok_or(CaptionError::NotInitialized)?;
 
         let tokenizer_guard = self.tokenizer.read().await;
         let tokenizer = tokenizer_guard
@@ -263,9 +265,7 @@ impl BlipCaptioner {
             .map_err(|e| CaptionError::Generation(format!("Vision forward failed: {e}")))?;
 
         // Initialize with BOS token
-        let mut token_ids = vec![tokenizer
-            .token_to_id("[CLS]")
-            .unwrap_or(101)]; // Default BERT [CLS] id
+        let mut token_ids = vec![tokenizer.token_to_id("[CLS]").unwrap_or(101)]; // Default BERT [CLS] id
 
         let eos_token_id = tokenizer.token_to_id("[SEP]").unwrap_or(102);
         let max_tokens = self.config.max_tokens;
@@ -283,7 +283,8 @@ impl BlipCaptioner {
                 .map_err(|e| CaptionError::Generation(format!("Text decoder failed: {e}")))?;
 
             // Get next token (greedy decoding)
-            let seq_len = logits.dim(1)
+            let seq_len = logits
+                .dim(1)
                 .map_err(|e| CaptionError::Generation(format!("Dim failed: {e}")))?;
             let next_token_logits = logits
                 .i((.., seq_len - 1, ..))
@@ -365,7 +366,11 @@ impl ImageCaptioner for BlipCaptioner {
 
         // Load model weights
         debug!("Loading model weights...");
-        let dtype = if self.config.quantized { DType::BF16 } else { DType::F32 };
+        let dtype = if self.config.quantized {
+            DType::BF16
+        } else {
+            DType::F32
+        };
 
         // SAFETY: The safetensors file is downloaded from HuggingFace Hub and is trusted.
         #[allow(unsafe_code)]

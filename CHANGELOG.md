@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Python bindings**: New `ragfs-python` crate with PyO3 bindings
+  - `RAGFSIndex` class for indexing and querying
+  - `RAGFSStore` for direct vector store access
+  - Async support via `pyo3-async-runtimes`
+  - Framework adapters for LangChain, LlamaIndex, Haystack
+  - Build with `maturin build`
+- **VectorStore iteration**: New methods for bulk operations
+  - `get_all_chunks()`: Returns all chunks in the store
+  - `get_all_files()`: Returns all file records in the store
+- **BlipCaptioner**: BLIP-based image captioning using Candle ML
+  - Auto-download from HuggingFace Hub (`Salesforce/blip-image-captioning-base`)
+  - Image preprocessing with CLIP normalization
+  - Autoregressive caption generation
+  - Requires `vision` feature flag
+- **Semantic organization**: AI-powered file management features
+  - `find_duplicates()`: Detect similar files using embedding cosine similarity
+  - `suggest_organization()`: AI-powered folder structure suggestions
+  - Configurable similarity thresholds
 - **Daemonization**: `ragfs mount` now properly forks to background when run without `--foreground`
   - PID file stored in `$XDG_RUNTIME_DIR/ragfs/` or `~/.cache/ragfs/run/`
   - Logs written to `~/.cache/ragfs/logs/`
@@ -21,13 +39,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Supports JPEG (DCTDecode), PNG (FlateDecode), JPEG2000 (JPXDecode)
   - CMYK to RGB conversion
   - Memory limits: 100 images max, 50MB total, 50px minimum dimension
-- **Vision captioning infrastructure**: `ImageCaptioner` trait for future BLIP integration
-  - `PlaceholderCaptioner` no-op implementation
-  - Optional captioner in `ImageExtractor`
 - **Virtual `.ragfs/.help` file**: Usage documentation accessible via FUSE mount
+- **NoopEmbedder**: Testing embedder available without Candle dependency
+- **MemoryStore**: In-memory vector store available without LanceDB dependency
 
 ### Changed
-- N/A
+- **BREAKING**: Feature flags restructured for optional ML backends
+  - `candle` feature (default): Enables `CandleEmbedder` in ragfs-embed
+  - `lancedb` feature (default): Enables `LanceStore` in ragfs-store
+  - `vision` feature: Enables `BlipCaptioner` for image captioning
+  - `full` feature: Enables all optional features
+  - Build profiles: `cargo build` (default), `--features full`, `--no-default-features` (minimal)
 
 ### Fixed
 - N/A

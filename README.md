@@ -19,6 +19,9 @@ A FUSE filesystem for RAG (Retrieval-Augmented Generation) architectures. RAGFS 
 - **Code-aware Chunking** - Syntax-aware splitting using tree-sitter for source code
 - **Hybrid Search** - Combine vector similarity with full-text search
 - **JSON Output** - Machine-readable output for scripting and integration
+- **Agent File Operations** - Structured file ops with JSON feedback via `.ops/` interface
+- **Safety Layer** - Soft delete, audit logging, and undo support via `.safety/`
+- **Semantic File Management** - AI-powered organization, deduplication, and cleanup via `.semantic/`
 - **Comprehensive Testing** - 294 tests across all crates ensuring reliability
 
 ## Requirements
@@ -80,6 +83,24 @@ ragfs mount ~/Documents ~/ragfs-mount --foreground
 
 ```bash
 ragfs status ~/Documents
+```
+
+### Agent file operations (via FUSE mount)
+
+```bash
+# Create a file with feedback
+echo -e "docs/new.md\n# New Document" > ~/ragfs-mount/.ragfs/.ops/.create
+cat ~/ragfs-mount/.ragfs/.ops/.result  # JSON with undo_id
+
+# Delete a file (soft delete to trash)
+echo "docs/old.md" > ~/ragfs-mount/.ragfs/.ops/.delete
+
+# Find similar files
+echo "src/main.rs" > ~/ragfs-mount/.ragfs/.semantic/.similar
+cat ~/ragfs-mount/.ragfs/.semantic/.similar
+
+# Undo an operation
+echo "<undo_id>" > ~/ragfs-mount/.ragfs/.safety/.undo
 ```
 
 ## CLI Reference

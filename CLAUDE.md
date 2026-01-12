@@ -52,7 +52,13 @@ File → Extraction → Chunking → Embedding → Storage → Search
 - `ragfs-store` - Vector storage with LanceDB
 - `ragfs-index` - Pipeline orchestration and file watching
 - `ragfs-query` - Query execution
-- `ragfs-fuse` - FUSE filesystem
+- `ragfs-fuse` - FUSE filesystem with agent operations, safety layer, and semantic features
+
+**ragfs-fuse modules:**
+- `filesystem.rs` - Main FUSE handler, inode management, virtual directory routing
+- `ops.rs` - `OpsManager` for file operations with JSON feedback (`.ops/`)
+- `safety.rs` - `SafetyManager` for soft delete, audit logging, undo (`.safety/`)
+- `semantic.rs` - `SemanticManager` for AI-powered file operations (`.semantic/`)
 
 **Key abstractions in ragfs-core:**
 - `ContentExtractor` trait - Extract content from files
@@ -60,7 +66,24 @@ File → Extraction → Chunking → Embedding → Storage → Search
 - `Embedder` trait - Generate vector embeddings
 - `VectorStore` trait - Store and search vectors
 
-**Extension points:** Add new extractors/chunkers by implementing the trait and registering with the appropriate registry.
+**Extension points:**
+- Add new extractors/chunkers by implementing the trait and registering with the appropriate registry
+- Add new file operations by extending `Operation` enum in `ops.rs`
+- Add new organization strategies by extending `OrganizeStrategy` in `semantic.rs`
+- Add new virtual files by extending `InodeKind` in `inode.rs`
+
+**Virtual directory structure (`.ragfs/`):**
+```
+.ragfs/
+├── .query/<text>        # Semantic search
+├── .ops/                # File operations with JSON feedback
+│   ├── .create, .delete, .move, .batch, .result
+├── .safety/             # Trash, history, undo
+│   ├── .trash/, .history, .undo
+└── .semantic/           # AI-powered operations
+    ├── .organize, .similar, .cleanup, .dedupe
+    ├── .pending/, .approve, .reject
+```
 
 ## Key Details
 

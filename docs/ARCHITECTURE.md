@@ -249,20 +249,105 @@ Query parsing and execution.
 
 ### ragfs-fuse
 
-FUSE filesystem implementation for mounting indexed directories.
+FUSE filesystem implementation for mounting indexed directories with agent operation support.
 
 **Components:**
 - `RagFs` - Main FUSE filesystem handler
 - `InodeTable` - Virtual inode management
+- `OpsManager` - Structured file operations with JSON feedback
+- `SafetyManager` - Soft delete, audit logging, and undo support
+- `SemanticManager` - AI-powered file organization
 
 **Virtual Structure:**
-- Pass-through access to source files
-- Special `.ragfs/` control directory:
-  - `.index` - Index statistics (JSON)
-  - `.config` - Current configuration (JSON)
-  - `.query/<text>` - Execute query, returns results (JSON)
-  - `.reindex` - Write path to trigger reindexing
-  - `.help` - Usage documentation
+```
+.ragfs/
+├── .query/<text>          # Semantic query → JSON results
+├── .search/<text>         # Search results
+├── .similar/<path>        # Find similar files
+├── .index                 # Index statistics (JSON)
+├── .config                # Current configuration (JSON)
+├── .reindex               # Write path to trigger reindex
+├── .help                  # Usage documentation
+│
+├── .ops/                  # Agent file operations
+│   ├── .create            # Write: "path\ncontent"
+│   ├── .delete            # Write: "path"
+│   ├── .move              # Write: "src\ndst"
+│   ├── .batch             # Write: JSON BatchRequest
+│   └── .result            # Read: JSON OperationResult
+│
+├── .safety/               # Protection layer
+│   ├── .trash/            # Soft-deleted files (recoverable)
+│   ├── .history           # Audit log (JSONL)
+│   └── .undo              # Write: operation_id to undo
+│
+└── .semantic/             # AI-powered operations
+    ├── .organize          # Write: OrganizeRequest JSON
+    ├── .similar           # Write: path → find similar
+    ├── .cleanup           # Read: CleanupAnalysis JSON
+    ├── .dedupe            # Read: DuplicateGroups JSON
+    ├── .pending/          # Proposed plans directory
+    ├── .approve           # Write: plan_id to execute
+    └── .reject            # Write: plan_id to cancel
+```
+
+### Agent Operations Architecture
+
+RAGFS provides a filesystem-based API for AI agents to manage files safely and autonomously.
+
+**OpsManager (`.ops/`):**
+
+Provides structured file operations with JSON feedback for agents:
+- **Operations**: Create, Delete, Move, Copy, Write (overwrite/append)
+- **Batch Support**: Atomic multi-operation execution with `dry_run` mode
+- **Feedback**: Every operation returns JSON with `success`, `path`, `indexed`, and `undo_id`
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant O as OpsManager
+    participant F as Filesystem
+    participant I as Indexer
+    participant S as SafetyManager
+
+    A->>O: Write to .ops/.create
+    O->>F: Create file
+    O->>S: Log to history
+    O->>I: Trigger reindex
+    O->>A: JSON result via .ops/.result
+```
+
+**SafetyManager (`.safety/`):**
+
+Provides protection against destructive operations:
+- **Soft Delete**: Files go to `~/.local/share/ragfs/trash/` instead of being deleted
+- **Audit Log**: Append-only JSONL history of all operations
+- **Undo Support**: Reversible operations can be undone by `operation_id`
+- **Retention**: Trash entries expire after 7 days (configurable)
+
+**SemanticManager (`.semantic/`):**
+
+Provides AI-powered file operations using vector embeddings:
+- **Similar Files**: Find semantically similar files to a given path
+- **Organization**: Propose file reorganization by topic/similarity
+- **Cleanup Analysis**: Identify cleanup candidates (duplicates, stale files)
+- **Dedupe Detection**: Find duplicate file groups
+- **Propose-Review-Apply**: All destructive operations require explicit approval
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant S as SemanticManager
+    participant V as VectorStore
+
+    A->>S: Write OrganizeRequest to .organize
+    S->>V: Analyze file embeddings
+    S->>S: Generate plan
+    S->>A: Plan available in .pending/<id>
+    A->>A: Review plan
+    A->>S: Write plan_id to .approve
+    S->>S: Execute plan actions
+```
 
 ## Key Design Decisions
 

@@ -474,7 +474,7 @@ impl QueryExecutor {
 
 ## ragfs-fuse
 
-FUSE filesystem implementation.
+FUSE filesystem implementation with agent file operations, safety features, and semantic operations.
 
 ### `RagFs`
 
@@ -501,20 +501,40 @@ impl RagFs {
 
 ```
 /mountpoint/
-├── .ragfs/                    # Virtual control directory
-│   ├── .index                 # Index statistics (JSON)
-│   ├── .config                # Configuration (JSON)
-│   ├── .reindex               # Write path to trigger reindex
-│   ├── .query/                # Query interface
-│   │   └── <query>            # Read returns search results (JSON)
-│   ├── .search/               # Search interface (symlinks)
-│   ├── .similar/              # Similar files
-│   └── .help                  # Usage documentation
-├── real_dir/                  # Passthrough to source
-└── real_file.txt              # Passthrough to source
+├── real_files/                # Passthrough to source directory
+│
+└── .ragfs/                    # Virtual control directory
+    ├── .query/<text>          # Semantic query → JSON results
+    ├── .search/<text>         # Search results
+    ├── .similar/<path>        # Find similar files
+    ├── .index                 # Index statistics (JSON)
+    ├── .config                # Current configuration (JSON)
+    ├── .reindex               # Write path to trigger reindex
+    ├── .help                  # Usage documentation
+    │
+    ├── .ops/                  # Agent file operations
+    │   ├── .create            # Write: "path\ncontent"
+    │   ├── .delete            # Write: "path"
+    │   ├── .move              # Write: "src\ndst"
+    │   ├── .batch             # Write: JSON BatchRequest
+    │   └── .result            # Read: JSON OperationResult
+    │
+    ├── .safety/               # Protection layer
+    │   ├── .trash/            # Soft-deleted files (recoverable)
+    │   ├── .history           # Audit log (JSONL)
+    │   └── .undo              # Write: operation_id to undo
+    │
+    └── .semantic/             # AI-powered operations
+        ├── .organize          # Write: OrganizeRequest JSON
+        ├── .similar           # Write: path → find similar
+        ├── .cleanup           # Read: CleanupAnalysis JSON
+        ├── .dedupe            # Read: DuplicateGroups JSON
+        ├── .pending/          # Proposed plans directory
+        ├── .approve           # Write: plan_id to execute
+        └── .reject            # Write: plan_id to cancel
 ```
 
-### Usage
+### Basic Usage
 
 ```bash
 # Query via filesystem
@@ -526,6 +546,280 @@ cat /mnt/ragfs/.ragfs/.index
 # Trigger reindex
 echo "/path/to/file" > /mnt/ragfs/.ragfs/.reindex
 ```
+
+---
+
+### OpsManager (`.ops/`)
+
+Provides structured file operations with JSON feedback for AI agents.
+
+#### Types
+
+```rust
+/// File operation types
+pub enum Operation {
+    Create { path: String, content: String },
+    Delete { path: String },
+    Move { src: String, dst: String },
+    Copy { src: String, dst: String },
+    Write { path: String, content: String, mode: WriteMode },
+}
+
+/// Write mode for file operations
+pub enum WriteMode {
+    Overwrite,
+    Append,
+}
+
+/// Result of a file operation
+pub struct OperationResult {
+    pub success: bool,
+    pub operation: String,
+    pub path: String,
+    pub message: Option<String>,
+    pub indexed: bool,
+    pub undo_id: Option<Uuid>,
+}
+
+/// Batch request for multiple operations
+pub struct BatchRequest {
+    pub operations: Vec<Operation>,
+    pub atomic: bool,      // All-or-nothing execution
+    pub dry_run: bool,     // Validate without executing
+}
+
+/// Result of a batch operation
+pub struct BatchResult {
+    pub success: bool,
+    pub results: Vec<OperationResult>,
+    pub message: Option<String>,
+}
+```
+
+#### Usage
+
+```bash
+# Create a file
+echo -e "docs/new.md\n# New Document" > /mnt/ragfs/.ragfs/.ops/.create
+cat /mnt/ragfs/.ragfs/.ops/.result  # JSON result
+
+# Delete a file (soft delete)
+echo "docs/old.md" > /mnt/ragfs/.ragfs/.ops/.delete
+
+# Move/rename a file
+echo -e "old/path.txt\nnew/path.txt" > /mnt/ragfs/.ragfs/.ops/.move
+
+# Batch operations
+echo '{"operations":[{"Create":{"path":"a.txt","content":"A"}}],"atomic":true}' \
+    > /mnt/ragfs/.ragfs/.ops/.batch
+```
+
+---
+
+### SafetyManager (`.safety/`)
+
+Provides protection against destructive operations with soft delete, audit logging, and undo support.
+
+#### Configuration
+
+```rust
+pub struct SafetyConfig {
+    pub trash_dir: PathBuf,           // Default: ~/.local/share/ragfs/trash/
+    pub history_file: PathBuf,        // Default: ~/.local/share/ragfs/history.jsonl
+    pub retention_days: u64,          // Default: 7
+    pub max_trash_size_mb: u64,       // Default: 1024 (1GB)
+}
+```
+
+#### Types
+
+```rust
+/// Entry in the trash directory
+pub struct TrashEntry {
+    pub id: Uuid,
+    pub original_path: PathBuf,
+    pub deleted_at: DateTime<Utc>,
+    pub size: u64,
+    pub content_hash: String,
+}
+
+/// Operation recorded in history
+pub enum HistoryOperation {
+    Create { path: PathBuf },
+    Delete { path: PathBuf, trash_id: Uuid },
+    Move { src: PathBuf, dst: PathBuf },
+    Copy { src: PathBuf, dst: PathBuf },
+    Write { path: PathBuf, mode: WriteMode },
+}
+
+/// Entry in the audit log
+pub struct HistoryEntry {
+    pub id: Uuid,
+    pub timestamp: DateTime<Utc>,
+    pub operation: HistoryOperation,
+    pub undo_data: Option<UndoData>,
+}
+
+/// Data needed to undo an operation
+pub enum UndoData {
+    DeletedFile { trash_id: Uuid },
+    CreatedFile { path: PathBuf },
+    MovedFile { src: PathBuf, dst: PathBuf },
+    CopiedFile { path: PathBuf },
+    WrittenFile { path: PathBuf, previous_hash: Option<String> },
+}
+```
+
+#### Usage
+
+```bash
+# View operation history
+cat /mnt/ragfs/.ragfs/.safety/.history
+
+# List deleted files
+ls /mnt/ragfs/.ragfs/.safety/.trash/
+
+# View trash entry details
+cat /mnt/ragfs/.ragfs/.safety/.trash/<uuid>
+
+# Restore from trash
+echo "restore" > /mnt/ragfs/.ragfs/.safety/.trash/<uuid>
+
+# Undo an operation by ID
+echo "550e8400-e29b-41d4-a716-446655440000" > /mnt/ragfs/.ragfs/.safety/.undo
+```
+
+---
+
+### SemanticManager (`.semantic/`)
+
+Provides AI-powered file operations using vector embeddings.
+
+#### Configuration
+
+```rust
+pub struct SemanticConfig {
+    pub similarity_threshold: f32,    // Default: 0.7
+    pub max_results: usize,           // Default: 50
+    pub cluster_min_size: usize,      // Default: 2
+    pub stale_days: u64,              // Default: 90
+}
+```
+
+#### Types
+
+```rust
+/// Request for file organization
+pub struct OrganizeRequest {
+    pub scope: String,                // Directory to organize (e.g., "docs/")
+    pub strategy: OrganizeStrategy,
+    pub dry_run: bool,
+}
+
+/// Organization strategy
+pub enum OrganizeStrategy {
+    ByTopic,       // Group by semantic topic
+    ByType,        // Group by file type
+    ByDate,        // Group by modification date
+    Flatten,       // Flatten directory structure
+    Custom(String), // Custom grouping logic
+}
+
+/// Semantic plan for file operations
+pub struct SemanticPlan {
+    pub id: Uuid,
+    pub created_at: DateTime<Utc>,
+    pub description: String,
+    pub actions: Vec<PlannedAction>,
+    pub impact_summary: ImpactSummary,
+}
+
+/// Action in a semantic plan
+pub struct PlannedAction {
+    pub operation: Operation,
+    pub reason: String,
+    pub confidence: f32,
+}
+
+/// Summary of plan impact
+pub struct ImpactSummary {
+    pub files_affected: usize,
+    pub moves: usize,
+    pub deletes: usize,
+    pub creates: usize,
+}
+
+/// Result of similar file search
+pub struct SimilarFilesResult {
+    pub query_path: PathBuf,
+    pub similar: Vec<SimilarFile>,
+}
+
+pub struct SimilarFile {
+    pub path: PathBuf,
+    pub score: f32,
+    pub shared_topics: Vec<String>,
+}
+
+/// Cleanup analysis result
+pub struct CleanupAnalysis {
+    pub duplicates: Vec<DuplicateGroup>,
+    pub stale_files: Vec<StaleFile>,
+    pub empty_dirs: Vec<PathBuf>,
+    pub large_files: Vec<LargeFile>,
+}
+
+/// Group of duplicate files
+pub struct DuplicateGroups {
+    pub groups: Vec<DuplicateGroup>,
+    pub total_recoverable_bytes: u64,
+}
+
+pub struct DuplicateGroup {
+    pub hash: String,
+    pub files: Vec<PathBuf>,
+    pub size: u64,
+}
+```
+
+#### Usage
+
+```bash
+# Find similar files
+echo "src/main.rs" > /mnt/ragfs/.ragfs/.semantic/.similar
+cat /mnt/ragfs/.ragfs/.semantic/.similar  # JSON results
+
+# Request file organization
+echo '{"scope":"docs/","strategy":"ByTopic","dry_run":false}' \
+    > /mnt/ragfs/.ragfs/.semantic/.organize
+
+# List pending plans
+ls /mnt/ragfs/.ragfs/.semantic/.pending/
+
+# Review a plan
+cat /mnt/ragfs/.ragfs/.semantic/.pending/<plan_id>
+
+# Approve a plan
+echo "<plan_id>" > /mnt/ragfs/.ragfs/.semantic/.approve
+
+# Reject a plan
+echo "<plan_id>" > /mnt/ragfs/.ragfs/.semantic/.reject
+
+# View cleanup analysis
+cat /mnt/ragfs/.ragfs/.semantic/.cleanup
+
+# View duplicate detection
+cat /mnt/ragfs/.ragfs/.semantic/.dedupe
+```
+
+#### Propose-Review-Apply Workflow
+
+All semantic operations that modify files follow a safe workflow:
+
+1. **Propose**: Agent writes request (e.g., to `.organize`)
+2. **Review**: Plan appears in `.pending/<plan_id>` with full details
+3. **Approve/Reject**: Write plan ID to `.approve` or `.reject`
+4. **Execute**: On approval, operations execute with undo support
 
 ---
 

@@ -154,7 +154,10 @@ ragfs/
 │       └── src/
 │           ├── lib.rs
 │           ├── filesystem.rs
-│           └── inode.rs
+│           ├── inode.rs
+│           ├── ops.rs       # Agent file operations
+│           ├── safety.rs    # Safety layer (trash, undo)
+│           └── semantic.rs  # Semantic operations
 │
 └── docs/                # Documentation
 ```
@@ -248,6 +251,214 @@ impl Chunker for SemanticChunker {
 ```
 
 2. Export and register similarly to extractors.
+
+## Extending Agent Operations
+
+### Adding a New Operation Type
+
+To add a new file operation to OpsManager:
+
+1. Add the variant to the `Operation` enum in `crates/ragfs-fuse/src/ops.rs`:
+
+```rust
+pub enum Operation {
+    Create { path: String, content: String },
+    Delete { path: String },
+    Move { src: String, dst: String },
+    Copy { src: String, dst: String },
+    Write { path: String, content: String, mode: WriteMode },
+    // Add new operation:
+    Rename { path: String, new_name: String },
+}
+```
+
+2. Handle the operation in `OpsManager::execute_operation`:
+
+```rust
+fn execute_operation(&self, op: Operation) -> OperationResult {
+    match op {
+        Operation::Rename { path, new_name } => {
+            // 1. Validate the paths
+            // 2. Execute the operation
+            // 3. Log to safety history
+            // 4. Trigger reindex if needed
+            // 5. Return result with undo_id
+        }
+        // ... other cases
+    }
+}
+```
+
+3. Add the corresponding virtual file in `filesystem.rs` to handle writes to `.ops/.rename`.
+
+### Adding a New Virtual File
+
+To expose a new operation through the filesystem:
+
+1. Add an inode kind in `inode.rs`:
+
+```rust
+pub enum InodeKind {
+    // ...
+    OpsRename,
+}
+```
+
+2. Add to the inode table initialization in `filesystem.rs`:
+
+```rust
+// In RagFs::init_inode_table
+table.add_virtual(OPS_RENAME_INO, InodeKind::OpsRename);
+```
+
+3. Handle writes in `filesystem.rs`:
+
+```rust
+fn write(&mut self, ...) -> Result<...> {
+    match self.inodes.get(ino) {
+        Some(InodeKind::OpsRename) => {
+            let op = parse_rename_request(data)?;
+            self.ops_manager.execute_operation(op);
+        }
+        // ...
+    }
+}
+```
+
+## Extending the Safety Layer
+
+### Adding Undo Support for New Operations
+
+1. Add the undo data variant in `crates/ragfs-fuse/src/safety.rs`:
+
+```rust
+pub enum UndoData {
+    // ...
+    RenamedFile { old_name: String, new_name: String },
+}
+```
+
+2. Capture undo data when executing the operation:
+
+```rust
+fn execute_rename(&self, path: &str, new_name: &str) -> OperationResult {
+    let old_name = path.file_name().unwrap().to_string();
+
+    // Execute rename...
+
+    // Log with undo data
+    self.safety_manager.log_operation(
+        HistoryOperation::Rename { path, new_name },
+        Some(UndoData::RenamedFile { old_name, new_name }),
+    );
+}
+```
+
+3. Implement the undo handler:
+
+```rust
+fn undo(&self, entry: &HistoryEntry) -> Result<(), SafetyError> {
+    match &entry.undo_data {
+        Some(UndoData::RenamedFile { old_name, new_name }) => {
+            // Rename back to original name
+        }
+        // ...
+    }
+}
+```
+
+### Customizing Trash Retention
+
+The `SafetyConfig` allows customization:
+
+```rust
+let config = SafetyConfig {
+    trash_dir: PathBuf::from("~/.local/share/ragfs/trash"),
+    history_file: PathBuf::from("~/.local/share/ragfs/history.jsonl"),
+    retention_days: 30,        // Keep trash for 30 days
+    max_trash_size_mb: 2048,   // 2GB max trash size
+};
+```
+
+## Extending Semantic Operations
+
+### Adding a New Organization Strategy
+
+1. Add the strategy variant in `crates/ragfs-fuse/src/semantic.rs`:
+
+```rust
+pub enum OrganizeStrategy {
+    ByTopic,
+    ByType,
+    ByDate,
+    Flatten,
+    Custom(String),
+    // Add new strategy:
+    ByProject,  // Group files by detected project boundaries
+}
+```
+
+2. Implement the strategy logic:
+
+```rust
+impl SemanticManager {
+    fn plan_by_project(&self, scope: &str) -> Result<SemanticPlan, SemanticError> {
+        // 1. Analyze files in scope using embeddings
+        // 2. Detect project boundaries (package.json, Cargo.toml, etc.)
+        // 3. Cluster files by project association
+        // 4. Generate PlannedActions for the reorganization
+        // 5. Return plan with impact summary
+    }
+}
+```
+
+3. Handle in the dispatcher:
+
+```rust
+fn generate_plan(&self, request: &OrganizeRequest) -> Result<SemanticPlan, SemanticError> {
+    match request.strategy {
+        OrganizeStrategy::ByProject => self.plan_by_project(&request.scope),
+        // ...
+    }
+}
+```
+
+### Adding a New Analysis Type
+
+To add new analysis (e.g., finding outdated dependencies):
+
+1. Define the analysis result type:
+
+```rust
+pub struct DependencyAnalysis {
+    pub outdated: Vec<OutdatedDependency>,
+    pub unused: Vec<UnusedDependency>,
+}
+```
+
+2. Add a virtual file for reading the analysis:
+
+```rust
+// In inode.rs
+pub enum InodeKind {
+    // ...
+    SemanticDependencies,
+}
+```
+
+3. Implement the analysis logic:
+
+```rust
+impl SemanticManager {
+    pub fn analyze_dependencies(&self) -> DependencyAnalysis {
+        // Analyze package manifests in scope
+        // Use embeddings to find related code
+        // Identify unused dependencies
+    }
+}
+```
+
+4. Handle reads in `filesystem.rs` to return JSON analysis results.
 
 ## Debugging
 

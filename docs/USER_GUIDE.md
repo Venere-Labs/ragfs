@@ -11,6 +11,8 @@ This guide provides comprehensive documentation for using RAGFS.
 - [Output Formats](#output-formats)
 - [Storage Locations](#storage-locations)
 - [Troubleshooting](#troubleshooting)
+- [Agent File Operations](#agent-file-operations)
+- [Tips and Best Practices](#tips-and-best-practices)
 
 ## Installation
 
@@ -486,6 +488,284 @@ ragfs index /path/to/directory --force
 ragfs index /path/to/directory --watch
 ```
 
+## Agent File Operations
+
+RAGFS provides a filesystem-based API for AI agents to perform file operations safely and autonomously. These features are accessible through the `.ragfs/` virtual directory when using the FUSE mount.
+
+### Operations Interface (`.ops/`)
+
+The `.ops/` directory provides structured file operations with JSON feedback.
+
+#### Creating Files
+
+```bash
+# Write: "relative/path\ncontent"
+echo -e "docs/new-feature.md\n# New Feature\n\nDescription here..." > /mnt/ragfs/.ragfs/.ops/.create
+
+# Check the result
+cat /mnt/ragfs/.ragfs/.ops/.result
+```
+
+**Result:**
+```json
+{
+  "success": true,
+  "operation": "create",
+  "path": "docs/new-feature.md",
+  "message": null,
+  "indexed": true,
+  "undo_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+#### Deleting Files
+
+Files are soft-deleted (moved to trash) for safety:
+
+```bash
+# Write the path to delete
+echo "docs/old-file.md" > /mnt/ragfs/.ragfs/.ops/.delete
+
+# Check result
+cat /mnt/ragfs/.ragfs/.ops/.result
+```
+
+#### Moving/Renaming Files
+
+```bash
+# Write: "source\ndestination"
+echo -e "old/location.txt\nnew/location.txt" > /mnt/ragfs/.ragfs/.ops/.move
+
+cat /mnt/ragfs/.ragfs/.ops/.result
+```
+
+#### Batch Operations
+
+Execute multiple operations atomically:
+
+```bash
+# Prepare batch request
+cat << 'EOF' > /tmp/batch.json
+{
+  "operations": [
+    {"Create": {"path": "src/module_a.rs", "content": "// Module A"}},
+    {"Create": {"path": "src/module_b.rs", "content": "// Module B"}},
+    {"Move": {"src": "old/readme.md", "dst": "docs/readme.md"}}
+  ],
+  "atomic": true,
+  "dry_run": false
+}
+EOF
+
+# Execute batch
+cat /tmp/batch.json > /mnt/ragfs/.ragfs/.ops/.batch
+cat /mnt/ragfs/.ragfs/.ops/.result
+```
+
+**Dry run mode:**
+
+```bash
+# Set dry_run: true to validate without executing
+echo '{"operations":[...],"atomic":true,"dry_run":true}' > /mnt/ragfs/.ragfs/.ops/.batch
+```
+
+### Safety Features (`.safety/`)
+
+The safety layer protects against accidental data loss with soft delete, audit logging, and undo support.
+
+#### Viewing Operation History
+
+```bash
+# View all operations (JSONL format)
+cat /mnt/ragfs/.ragfs/.safety/.history
+
+# Parse with jq
+cat /mnt/ragfs/.ragfs/.safety/.history | jq -s '.'
+```
+
+**History entry format:**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2025-01-11T14:32:15Z",
+  "operation": {"Delete": {"path": "/docs/old.md", "trash_id": "..."}},
+  "undo_data": {"DeletedFile": {"trash_id": "..."}}
+}
+```
+
+#### Managing Trash
+
+```bash
+# List deleted files
+ls /mnt/ragfs/.ragfs/.safety/.trash/
+
+# View deleted file info
+cat /mnt/ragfs/.ragfs/.safety/.trash/<uuid>
+
+# Restore a file from trash
+echo "restore" > /mnt/ragfs/.ragfs/.safety/.trash/<uuid>
+```
+
+**Trash entry info:**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "original_path": "/home/user/docs/old-file.md",
+  "deleted_at": "2025-01-11T14:32:15Z",
+  "size": 1234,
+  "content_hash": "abc123..."
+}
+```
+
+#### Undoing Operations
+
+Most operations can be undone using the operation ID:
+
+```bash
+# Get the undo_id from the operation result or history
+echo "550e8400-e29b-41d4-a716-446655440000" > /mnt/ragfs/.ragfs/.safety/.undo
+
+cat /mnt/ragfs/.ragfs/.ops/.result
+```
+
+**Note:** Not all operations are undoable. Check `undo_data` in the history to see if an operation can be reversed.
+
+### Semantic Operations (`.semantic/`)
+
+AI-powered file operations using vector embeddings for intelligent file management.
+
+#### Finding Similar Files
+
+```bash
+# Write a file path to find similar files
+echo "src/auth/login.rs" > /mnt/ragfs/.ragfs/.semantic/.similar
+
+# Read results
+cat /mnt/ragfs/.ragfs/.semantic/.similar
+```
+
+**Result:**
+```json
+{
+  "query_path": "src/auth/login.rs",
+  "similar": [
+    {"path": "src/auth/oauth.rs", "score": 0.89, "shared_topics": ["authentication", "user session"]},
+    {"path": "src/middleware/auth.rs", "score": 0.82, "shared_topics": ["authentication"]},
+    {"path": "src/handlers/session.rs", "score": 0.75, "shared_topics": ["user session"]}
+  ]
+}
+```
+
+#### Organizing Files
+
+Request intelligent file organization:
+
+```bash
+# Request organization by topic
+echo '{"scope":"docs/","strategy":"ByTopic","dry_run":false}' \
+    > /mnt/ragfs/.ragfs/.semantic/.organize
+
+# A plan is created in .pending/
+ls /mnt/ragfs/.ragfs/.semantic/.pending/
+```
+
+**Organization strategies:**
+- `ByTopic` - Group files by semantic similarity/topic
+- `ByType` - Group by file type (code, docs, config, etc.)
+- `ByDate` - Group by modification date
+- `Flatten` - Flatten nested directories
+- `Custom` - Custom grouping logic (JSON description)
+
+#### Reviewing Plans
+
+All semantic operations that modify files go through a propose-review-apply workflow:
+
+```bash
+# List pending plans
+ls /mnt/ragfs/.ragfs/.semantic/.pending/
+
+# Review a specific plan
+cat /mnt/ragfs/.ragfs/.semantic/.pending/<plan_id>
+```
+
+**Plan format:**
+```json
+{
+  "id": "plan-uuid-here",
+  "created_at": "2025-01-11T14:32:15Z",
+  "description": "Organize docs/ by topic into 3 groups",
+  "actions": [
+    {
+      "operation": {"Move": {"src": "docs/api.md", "dst": "docs/api/api.md"}},
+      "reason": "Groups with other API documentation",
+      "confidence": 0.92
+    }
+  ],
+  "impact_summary": {
+    "files_affected": 12,
+    "moves": 10,
+    "deletes": 0,
+    "creates": 2
+  }
+}
+```
+
+#### Approving or Rejecting Plans
+
+```bash
+# Approve a plan (executes the actions)
+echo "<plan_id>" > /mnt/ragfs/.ragfs/.semantic/.approve
+
+# Reject a plan (discards it)
+echo "<plan_id>" > /mnt/ragfs/.ragfs/.semantic/.reject
+```
+
+#### Cleanup Analysis
+
+View suggestions for cleaning up your project:
+
+```bash
+cat /mnt/ragfs/.ragfs/.semantic/.cleanup
+```
+
+**Output:**
+```json
+{
+  "duplicates": [
+    {"hash": "abc123", "files": ["a.txt", "backup/a.txt"], "size": 1024}
+  ],
+  "stale_files": [
+    {"path": "old/unused.md", "last_modified": "2024-01-01T00:00:00Z", "days_stale": 376}
+  ],
+  "empty_dirs": ["src/deprecated/", "old/"],
+  "large_files": [
+    {"path": "data/dump.sql", "size": 52428800}
+  ]
+}
+```
+
+#### Duplicate Detection
+
+Find duplicate files by content:
+
+```bash
+cat /mnt/ragfs/.ragfs/.semantic/.dedupe
+```
+
+**Output:**
+```json
+{
+  "groups": [
+    {
+      "hash": "abc123def456...",
+      "files": ["src/utils.rs", "lib/utils.rs", "backup/utils.rs"],
+      "size": 2048
+    }
+  ],
+  "total_recoverable_bytes": 4096
+}
+```
+
 ## Tips and Best Practices
 
 ### Query Writing
@@ -500,6 +780,13 @@ ragfs index /path/to/directory --watch
 - Use `--force` sparingly; incremental indexing is more efficient
 - Keep index directories on fast storage (SSD recommended)
 
+### Agent Operations
+
+- Always check `.ops/.result` after operations for feedback
+- Use `dry_run: true` in batch operations to validate before executing
+- Review semantic plans before approving to verify the proposed changes
+- Keep the safety layer enabled to allow undo of accidental changes
+
 ### Integration
 
 ```bash
@@ -508,4 +795,8 @@ ragfs query ./src "error handling" -f json | jq -r '.results[].file' | xargs cod
 
 # Search and open in vim
 vim $(ragfs query ./src "config" -f json | jq -r '.results[0].file')
+
+# Agent workflow: create file and verify
+echo -e "docs/api.md\n# API Reference" > /mnt/ragfs/.ragfs/.ops/.create
+cat /mnt/ragfs/.ragfs/.ops/.result | jq '.success'
 ```

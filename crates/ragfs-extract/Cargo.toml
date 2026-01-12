@@ -19,7 +19,19 @@ flate2.workspace = true
 image.workspace = true
 mime_guess.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
+
+# Vision captioning (optional)
+candle-core = { workspace = true, optional = true }
+candle-nn = { workspace = true, optional = true }
+candle-transformers = { workspace = true, optional = true }
+hf-hub = { workspace = true, optional = true }
+tokenizers = { workspace = true, optional = true }
+
+[features]
+default = []
+vision = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "tokenizers"]
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -18,15 +18,18 @@ candle = [
     "ragfs-embed/candle",
     "ragfs-index/candle",
     "ragfs-query/candle",
+    "ragfs-fuse/candle",
 ]
 lancedb = [
     "ragfs-store/lancedb",
     "ragfs-index/lancedb",
     "ragfs-query/lancedb",
+    "ragfs-fuse/lancedb",
 ]
 vision = [
     "ragfs-extract/vision",
     "ragfs-index/vision",
+    "ragfs-fuse/vision",
 ]
 
 [dependencies]
@@ -42,6 +45,7 @@ ragfs-extract.workspace = true
 ragfs-chunker.workspace = true
 ragfs-index.workspace = true
 ragfs-query.workspace = true
+ragfs-fuse.workspace = true
 
 # Async runtime
 tokio.workspace = true

@@ -41,6 +41,13 @@ ollama = ["langchain-ollama>=0.1"]
 all-llm = ["ragfs[langchain,openai,anthropic,ollama]"]
 all = ["ragfs[langchain,llamaindex,haystack,openai,anthropic,ollama]"]
 
+# Development dependencies
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=4.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/Venere-Labs/ragfs"
 Documentation = "https://github.com/Venere-Labs/ragfs"
@@ -50,3 +57,21 @@ Repository = "https://github.com/Venere-Labs/ragfs"
 features = ["pyo3/extension-module"]
 python-source = "python"
 module-name = "ragfs._core"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks integration tests",
+    "requires_model: requires embedding model",
+]
+
+[tool.coverage.run]
+source = ["ragfs"]
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+fail_under = 75

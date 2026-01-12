@@ -10,6 +10,7 @@ Features:
 - Multi-format document loading (40+ text formats, PDF, images)
 - Code-aware text splitting with tree-sitter
 - Framework adapters for LangChain, LlamaIndex, and Haystack
+- **FUSE filesystem capabilities for AI agent operations**
 
 Quick Start:
     from ragfs import RagfsRetriever
@@ -28,17 +29,68 @@ Using with LangChain:
     await embeddings.init()
 
     vectorstore = RagfsVectorStore.from_embeddings(embeddings, "/path/to/db")
+
+Safety Layer (soft delete, undo, history):
+    from ragfs import RagfsSafetyManager
+
+    safety = RagfsSafetyManager("/path/to/source")
+    entry = await safety.delete_to_trash("/path/to/file.txt")
+    await safety.restore_from_trash(entry.id)
+
+AI-Powered Organization (Propose-Review-Apply pattern):
+    from ragfs import RagfsSemanticManager, OrganizeRequest, OrganizeStrategy
+
+    semantic = RagfsSemanticManager("/path/to/source", "/path/to/db")
+    await semantic.init()
+
+    # Create an organization plan (NOT executed until approved)
+    request = OrganizeRequest("./docs", OrganizeStrategy.by_topic())
+    plan = await semantic.create_organize_plan(request)
+
+    # Review the plan
+    for action in plan.actions:
+        print(f"{action.action} - {action.reason}")
+
+    # Approve or reject
+    await semantic.approve_plan(plan.id)  # Execute
+    # OR: await semantic.reject_plan(plan.id)  # Discard
 """
 
 from ragfs._core import (
+    # Core types
     Document,
     SearchResultPy as SearchResult,
     PyChunk,
+    # Core components
     RagfsEmbeddings,
     RagfsVectorStore,
     RagfsDocumentLoader,
     RagfsTextSplitter,
     RagfsRetriever,
+    # Safety layer (soft delete, undo, history)
+    RagfsSafetyManager,
+    PyTrashEntry as TrashEntry,
+    PyHistoryEntry as HistoryEntry,
+    PyHistoryOperation as HistoryOperation,
+    # Semantic operations (AI-powered file organization)
+    RagfsSemanticManager,
+    PyOrganizeStrategy as OrganizeStrategy,
+    PyOrganizeRequest as OrganizeRequest,
+    PySemanticPlan as SemanticPlan,
+    PyPlanAction as PlanAction,
+    PyPlanImpact as PlanImpact,
+    PySimilarFile as SimilarFile,
+    PySimilarFilesResult as SimilarFilesResult,
+    PyDuplicateEntry as DuplicateEntry,
+    PyDuplicateGroup as DuplicateGroup,
+    PyDuplicateGroups as DuplicateGroups,
+    PyCleanupCandidate as CleanupCandidate,
+    PyCleanupAnalysis as CleanupAnalysis,
+    # Operations manager (structured file ops with JSON feedback)
+    RagfsOpsManager,
+    PyOperation as Operation,
+    PyOperationResult as OperationResult,
+    PyBatchResult as BatchResult,
 )
 
 __all__ = [
@@ -46,12 +98,36 @@ __all__ = [
     "Document",
     "SearchResult",
     "PyChunk",
-    # Components
+    # Core components
     "RagfsEmbeddings",
     "RagfsVectorStore",
     "RagfsDocumentLoader",
     "RagfsTextSplitter",
     "RagfsRetriever",
+    # Safety layer
+    "RagfsSafetyManager",
+    "TrashEntry",
+    "HistoryEntry",
+    "HistoryOperation",
+    # Semantic operations
+    "RagfsSemanticManager",
+    "OrganizeStrategy",
+    "OrganizeRequest",
+    "SemanticPlan",
+    "PlanAction",
+    "PlanImpact",
+    "SimilarFile",
+    "SimilarFilesResult",
+    "DuplicateEntry",
+    "DuplicateGroup",
+    "DuplicateGroups",
+    "CleanupCandidate",
+    "CleanupAnalysis",
+    # Operations manager
+    "RagfsOpsManager",
+    "Operation",
+    "OperationResult",
+    "BatchResult",
 ]
 
 __version__ = "0.2.0"

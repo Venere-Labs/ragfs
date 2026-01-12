@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAGFS Documentation</title>
+    <style>
+        :root {
+            --bg-primary: #0f1419;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent-orange: #ffa657;
+            --accent-blue: #58a6ff;
+            --accent-cyan: #79c0ff;
+            --border-color: #30363d;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        header {
+            text-align: center;
+            padding: 3rem 0 2rem;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 2rem;
+        }
+        h1 {
+            color: var(--accent-orange);
+            font-size: 2.5rem;
+            margin: 0 0 0.5rem;
+            font-weight: 600;
+        }
+        .tagline {
+            color: var(--text-secondary);
+            font-size: 1.2rem;
+            margin: 0;
+        }
+        .badges {
+            margin-top: 1.5rem;
+        }
+        .badges a { margin: 0 4px; }
+        .badges img { vertical-align: middle; }
+        h2 {
+            color: var(--accent-cyan);
+            font-size: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+            margin-top: 2.5rem;
+        }
+        a { color: var(--accent-blue); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        code {
+            background: var(--bg-secondary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+            font-size: 0.9em;
+        }
+        pre {
+            background: var(--bg-secondary);
+            padding: 1.25rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+        }
+        pre code {
+            background: none;
+            padding: 0;
+        }
+        .crates {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .crate {
+            background: var(--bg-secondary);
+            padding: 1.25rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            transition: border-color 0.2s;
+        }
+        .crate:hover { border-color: var(--accent-blue); }
+        .crate h3 {
+            margin: 0 0 0.5rem;
+            font-size: 1.1rem;
+        }
+        .crate h3 a { color: var(--accent-orange); }
+        .crate p {
+            margin: 0;
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+        .architecture {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1.5rem;
+            text-align: center;
+            margin: 1rem 0;
+        }
+        .architecture pre {
+            margin: 0;
+            border: none;
+            background: none;
+            font-size: 0.95rem;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.75rem;
+            list-style: none;
+            padding: 0;
+            margin: 1rem 0;
+        }
+        .features li {
+            background: var(--bg-secondary);
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            border-left: 3px solid var(--accent-orange);
+        }
+        .links {
+            list-style: none;
+            padding: 0;
+        }
+        .links li {
+            padding: 0.5rem 0;
+        }
+        footer {
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border-color);
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>RAGFS</h1>
+            <p class="tagline">A FUSE filesystem for semantic search using vector embeddings</p>
+            <div class="badges">
+                <a href="https://github.com/Venere-Labs/ragfs/actions/workflows/ci.yml">
+                    <img src="https://github.com/Venere-Labs/ragfs/actions/workflows/ci.yml/badge.svg" alt="CI">
+                </a>
+                <a href="https://codecov.io/gh/Venere-Labs/ragfs">
+                    <img src="https://codecov.io/gh/Venere-Labs/ragfs/branch/main/graph/badge.svg" alt="Coverage">
+                </a>
+                <a href="https://github.com/Venere-Labs/ragfs">
+                    <img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg" alt="License">
+                </a>
+                <a href="https://www.rust-lang.org">
+                    <img src="https://img.shields.io/badge/rust-1.88%2B-orange.svg" alt="Rust">
+                </a>
+            </div>
+        </header>
+
+        <section>
+            <h2>Features</h2>
+            <ul class="features">
+                <li>Semantic Search</li>
+                <li>Local Embeddings</li>
+                <li>FUSE Integration</li>
+                <li>Real-time Indexing</li>
+                <li>Multimodal Support</li>
+                <li>Code-aware Chunking</li>
+                <li>Hybrid Search</li>
+                <li>JSON Output</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>Quick Start</h2>
+<pre><code><span style="color: #8b949e"># Index a directory</span>
+ragfs index ~/Documents
+
+<span style="color: #8b949e"># Semantic search</span>
+ragfs query ~/Documents "authentication logic"
+
+<span style="color: #8b949e"># Mount as filesystem</span>
+ragfs mount ~/Documents ~/mnt --foreground
+
+<span style="color: #8b949e"># Check index status</span>
+ragfs status ~/Documents</code></pre>
+        </section>
+
+        <section>
+            <h2>Architecture</h2>
+            <div class="architecture">
+<pre><code>File &rarr; <a href="ragfs_extract/index.html">Extractor</a> &rarr; <a href="ragfs_chunker/index.html">Chunker</a> &rarr; <a href="ragfs_embed/index.html">Embedder</a> &rarr; <a href="ragfs_store/index.html">LanceDB</a> &rarr; <a href="ragfs_query/index.html">Search</a></code></pre>
+            </div>
+        </section>
+
+        <section>
+            <h2>Crate Documentation</h2>
+            <div class="crates">
+                <div class="crate">
+                    <h3><a href="ragfs/index.html">ragfs</a></h3>
+                    <p>CLI application with <code>index</code>, <code>query</code>, <code>mount</code>, and <code>status</code> commands</p>
+                </div>
+                <div class="crate">
+                    <h3><a href="ragfs_core/index.html">ragfs-core</a></h3>
+                    <p>Core traits and types: <code>VectorStore</code>, <code>Embedder</code>, <code>Chunk</code></p>
+                </div>
+                <div class="crate">
+                    <h3><a href="ragfs_extract/index.html">ragfs-extract</a></h3>
+                    <p>Content extraction from text, code, PDF, and images</p>
+                </div>
+                <div class="crate">
+                    <h3><a href="ragfs_chunker/index.html">ragfs-chunker</a></h3>
+                    <p>Fixed-size, semantic, and code-aware chunking strategies</p>
+                </div>
+                <div class="crate">
+                    <h3><a href="ragfs_embed/index.html">ragfs-embed</a></h3>
+                    <p>Local embedding generation using Candle (<code>gte-small</code>, 384-dim)</p>
+                </div>
+                <div class="crate">
+                    <h3><a href="ragfs_store/index.html">ragfs-store</a></h3>
+                    <p>Vector storage with LanceDB and hybrid search</p>
+                </div>
+                <div class="crate">
+                    <h3><a href="ragfs_index/index.html">ragfs-index</a></h3>
+                    <p>Indexing pipeline and file watching</p>
+                </div>
+                <div class="crate">
+                    <h3><a href="ragfs_query/index.html">ragfs-query</a></h3>
+                    <p>Query parsing and execution</p>
+                </div>
+                <div class="crate">
+                    <h3><a href="ragfs_fuse/index.html">ragfs-fuse</a></h3>
+                    <p>FUSE filesystem implementation with virtual <code>.ragfs/</code> directory</p>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <h2>Resources</h2>
+            <ul class="links">
+                <li><a href="https://github.com/Venere-Labs/ragfs">GitHub Repository</a></li>
+                <li><a href="https://github.com/Venere-Labs/ragfs/blob/main/docs/USER_GUIDE.md">User Guide</a></li>
+                <li><a href="https://github.com/Venere-Labs/ragfs/blob/main/docs/ARCHITECTURE.md">Architecture Overview</a></li>
+                <li><a href="https://github.com/Venere-Labs/ragfs/blob/main/docs/API.md">API Reference</a></li>
+                <li><a href="https://github.com/Venere-Labs/ragfs/blob/main/CHANGELOG.md">Changelog</a></li>
+            </ul>
+        </section>
+
+        <footer>
+            <p>Licensed under MIT or Apache 2.0 &bull; Built with Rust</p>
+        </footer>
+    </div>
+</body>
+</html>

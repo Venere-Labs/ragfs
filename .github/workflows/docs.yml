@@ -28,8 +28,8 @@ jobs:
         run: cargo doc --no-deps --all-features --document-private-items
         env:
           RUSTDOCFLAGS: --enable-index-page -Zunstable-options
-      - name: Create index redirect
-        run: echo '<html><head><meta http-equiv="refresh" content="0; url=ragfs/index.html"></head></html>' > target/doc/index.html
+      - name: Copy landing page
+        run: cp docs/landing.html target/doc/index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:

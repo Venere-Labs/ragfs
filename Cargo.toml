@@ -59,6 +59,10 @@ tokenizers = "0.21"
 # PDF parsing
 # pdf_oxide = "0.2"  # TODO: verify availability
 pdf-extract = "0.10"
+lopdf = "0.38"
+
+# Compression
+flate2 = "1.1"
 
 # Image processing
 image = "0.25"

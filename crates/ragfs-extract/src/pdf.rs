@@ -1,13 +1,17 @@
 //! PDF content extractor.
 //!
-//! Uses pdf-extract to extract text content from PDF files.
+//! Uses pdf-extract to extract text content and lopdf for embedded images.
 
 use async_trait::async_trait;
+use flate2::read::ZlibDecoder;
+use lopdf::Document;
 use ragfs_core::{
     ContentElement, ContentExtractor, ContentMetadataInfo, ExtractError, ExtractedContent,
+    ExtractedImage,
 };
+use std::io::Read;
 use std::path::Path;
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Extractor for PDF files.
 pub struct PdfExtractor;
@@ -45,10 +49,18 @@ impl ContentExtractor for PdfExtractor {
         let bytes = tokio::fs::read(path).await?;
 
         // Extract text using pdf-extract (blocking operation)
-        let text = tokio::task::spawn_blocking(move || extract_pdf_text(&bytes))
+        let text = tokio::task::spawn_blocking({
+            let bytes = bytes.clone();
+            move || extract_pdf_text(&bytes)
+        })
+        .await
+        .map_err(|e| ExtractError::Failed(format!("Task join error: {e}")))?
+        .map_err(|e| ExtractError::Failed(format!("PDF extraction failed: {e}")))?;
+
+        // Extract images using lopdf (blocking operation)
+        let images = tokio::task::spawn_blocking(move || extract_pdf_images(&bytes))
             .await
-            .map_err(|e| ExtractError::Failed(format!("Task join error: {e}")))?
-            .map_err(|e| ExtractError::Failed(format!("PDF extraction failed: {e}")))?;
+            .map_err(|e| ExtractError::Failed(format!("Image extraction task error: {e}")))?;
 
         // Split into pages/paragraphs for elements
         let elements = build_elements(&text);
@@ -59,7 +71,7 @@ impl ContentExtractor for PdfExtractor {
         Ok(ExtractedContent {
             text,
             elements,
-            images: vec![], // TODO: Extract embedded images in future
+            images,
             metadata: ContentMetadataInfo {
                 page_count: Some(page_count),
                 ..Default::default()
@@ -71,6 +83,175 @@ impl ContentExtractor for PdfExtractor {
 /// Extract text from PDF bytes using pdf-extract.
 fn extract_pdf_text(bytes: &[u8]) -> Result<String, String> {
     pdf_extract::extract_text_from_mem(bytes).map_err(|e| e.to_string())
+}
+
+/// Configuration for image extraction limits.
+const MAX_IMAGES: usize = 100;
+const MAX_TOTAL_BYTES: usize = 50 * 1024 * 1024; // 50MB
+const MIN_DIMENSION: u32 = 50; // Skip tiny images (icons, etc.)
+
+/// Extract images from PDF document using lopdf.
+fn extract_pdf_images(bytes: &[u8]) -> Vec<ExtractedImage> {
+    let doc = match Document::load_mem(bytes) {
+        Ok(d) => d,
+        Err(e) => {
+            warn!("Failed to load PDF for image extraction: {}", e);
+            return vec![];
+        }
+    };
+
+    let mut images = Vec::new();
+    let mut total_bytes = 0usize;
+
+    let pages = doc.get_pages();
+    for (page_num, page_id) in pages {
+        if images.len() >= MAX_IMAGES {
+            debug!(
+                "Reached maximum image count ({}), stopping extraction",
+                MAX_IMAGES
+            );
+            break;
+        }
+
+        match doc.get_page_images(page_id) {
+            Ok(page_images) => {
+                for pdf_image in page_images {
+                    if images.len() >= MAX_IMAGES || total_bytes >= MAX_TOTAL_BYTES {
+                        break;
+                    }
+
+                    // Skip tiny images
+                    if pdf_image.width < i64::from(MIN_DIMENSION)
+                        || pdf_image.height < i64::from(MIN_DIMENSION)
+                    {
+                        debug!(
+                            "Skipping small image: {}x{}",
+                            pdf_image.width, pdf_image.height
+                        );
+                        continue;
+                    }
+
+                    if let Some(extracted) = decode_pdf_image(&pdf_image, page_num) {
+                        total_bytes += extracted.data.len();
+                        images.push(extracted);
+                    }
+                }
+            }
+            Err(e) => {
+                debug!("Failed to get images from page {}: {}", page_num, e);
+            }
+        }
+    }
+
+    debug!(
+        "Extracted {} images from PDF ({} bytes total)",
+        images.len(),
+        total_bytes
+    );
+    images
+}
+
+/// Decode a PDF image into `ExtractedImage` format.
+fn decode_pdf_image(pdf_image: &lopdf::xobject::PdfImage, page_num: u32) -> Option<ExtractedImage> {
+    let filters = pdf_image.filters.as_ref()?;
+
+    // Determine MIME type and decode based on filter
+    let (data, mime_type) = if filters.iter().any(|f| f == "DCTDecode") {
+        // JPEG - can use raw content directly
+        (pdf_image.content.to_vec(), "image/jpeg".to_string())
+    } else if filters.iter().any(|f| f == "FlateDecode") {
+        // Compressed raw image data - decompress and convert to PNG
+        match decode_flate_image(pdf_image) {
+            Ok((data, mime)) => (data, mime),
+            Err(e) => {
+                debug!("Failed to decode FlateDecode image: {}", e);
+                return None;
+            }
+        }
+    } else if filters.iter().any(|f| f == "JPXDecode") {
+        // JPEG 2000 - use raw content
+        (pdf_image.content.to_vec(), "image/jp2".to_string())
+    } else {
+        // Unsupported filter
+        debug!("Unsupported image filter: {:?}", filters);
+        return None;
+    };
+
+    Some(ExtractedImage {
+        data,
+        mime_type,
+        caption: None, // Will be filled by vision model in future
+        page: Some(page_num),
+    })
+}
+
+/// Decode `FlateDecode` compressed image to PNG.
+fn decode_flate_image(pdf_image: &lopdf::xobject::PdfImage) -> Result<(Vec<u8>, String), String> {
+    // Decompress the data
+    let mut decoder = ZlibDecoder::new(pdf_image.content);
+    let mut decompressed = Vec::new();
+    decoder
+        .read_to_end(&mut decompressed)
+        .map_err(|e| format!("Decompression failed: {e}"))?;
+
+    // Determine color space and create image
+    let color_space = pdf_image.color_space.as_deref().unwrap_or("DeviceRGB");
+    let width = pdf_image.width as u32;
+    let height = pdf_image.height as u32;
+
+    let img = match color_space {
+        "DeviceRGB" | "RGB" => image::RgbImage::from_raw(width, height, decompressed)
+            .map(image::DynamicImage::ImageRgb8),
+        "DeviceGray" | "Gray" => image::GrayImage::from_raw(width, height, decompressed)
+            .map(image::DynamicImage::ImageLuma8),
+        "DeviceCMYK" | "CMYK" => {
+            // Convert CMYK to RGB
+            let rgb_data = cmyk_to_rgb(&decompressed);
+            image::RgbImage::from_raw(width, height, rgb_data).map(image::DynamicImage::ImageRgb8)
+        }
+        _ => {
+            // Attempt RGB as fallback
+            debug!("Unknown color space '{}', attempting RGB", color_space);
+            image::RgbImage::from_raw(width, height, decompressed)
+                .map(image::DynamicImage::ImageRgb8)
+        }
+    };
+
+    let img = img.ok_or_else(|| "Failed to create image from raw data".to_string())?;
+
+    // Encode to PNG
+    let mut png_data = Vec::new();
+    img.write_to(
+        &mut std::io::Cursor::new(&mut png_data),
+        image::ImageFormat::Png,
+    )
+    .map_err(|e| format!("PNG encoding failed: {e}"))?;
+
+    Ok((png_data, "image/png".to_string()))
+}
+
+/// Convert CMYK bytes to RGB.
+#[allow(clippy::many_single_char_names)]
+fn cmyk_to_rgb(cmyk: &[u8]) -> Vec<u8> {
+    let mut rgb = Vec::with_capacity((cmyk.len() / 4) * 3);
+    for chunk in cmyk.chunks_exact(4) {
+        let c = f32::from(chunk[0]) / 255.0;
+        let m = f32::from(chunk[1]) / 255.0;
+        let y = f32::from(chunk[2]) / 255.0;
+        let k = f32::from(chunk[3]) / 255.0;
+
+        let r = 255.0 * (1.0 - c) * (1.0 - k);
+        let g = 255.0 * (1.0 - m) * (1.0 - k);
+        let b = 255.0 * (1.0 - y) * (1.0 - k);
+
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        {
+            rgb.push(r as u8);
+            rgb.push(g as u8);
+            rgb.push(b as u8);
+        }
+    }
+    rgb
 }
 
 /// Build `ContentElements` from extracted text.

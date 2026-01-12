@@ -1,12 +1,36 @@
 //! Configuration handling for RAGFS.
 //!
-//! These structs are prepared for TOML config file loading (future feature).
-
-#![allow(dead_code)]
+//! Supports loading from TOML config files with CLI override.
+//!
+//! ## Config File Location
+//!
+//! - Default: `~/.config/ragfs/config.toml`
+//! - Override with: `RAGFS_CONFIG_DIR` environment variable
+//! - Override with: `--config /path/to/config.toml` CLI flag
+//!
+//! ## Precedence
+//!
+//! Settings are applied in this order (later overrides earlier):
+//! 1. Built-in defaults
+//! 2. Config file (`config.toml`)
+//! 3. CLI arguments
 
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use thiserror::Error;
+
+/// Error type for configuration loading.
+#[derive(Debug, Error)]
+pub enum ConfigError {
+    /// Failed to read the config file.
+    #[error("failed to read config file: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// Failed to parse the config file.
+    #[error("failed to parse config file: {0}")]
+    Parse(#[from] toml::de::Error),
+}
 
 /// Main configuration structure.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -34,6 +58,46 @@ pub struct Config {
     /// Logging configuration
     #[serde(default)]
     pub logging: LoggingConfig,
+}
+
+impl Config {
+    /// Load configuration from the default config file.
+    ///
+    /// Returns `Ok(Config::default())` if the config file doesn't exist.
+    /// Returns an error if the file exists but is invalid.
+    pub fn load() -> Result<Self, ConfigError> {
+        Self::load_from(config_dir().map(|d| d.join("config.toml")))
+    }
+
+    /// Load configuration from a specific path.
+    ///
+    /// If `path` is `None`, returns defaults.
+    /// If the file doesn't exist, returns defaults.
+    /// If the file exists but is invalid, returns an error.
+    pub fn load_from(path: Option<PathBuf>) -> Result<Self, ConfigError> {
+        let Some(path) = path else {
+            return Ok(Self::default());
+        };
+
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+
+        let content = std::fs::read_to_string(&path)?;
+        let config: Config = toml::from_str(&content)?;
+        Ok(config)
+    }
+
+    /// Generate a sample config file content.
+    pub fn sample_toml() -> String {
+        toml::to_string_pretty(&Config::default())
+            .unwrap_or_else(|_| "# Failed to generate sample".to_string())
+    }
+
+    /// Get the config file path.
+    pub fn config_path() -> Option<PathBuf> {
+        config_dir().map(|d| d.join("config.toml"))
+    }
 }
 
 /// Mount-related configuration.
@@ -289,6 +353,7 @@ pub fn config_dir() -> Option<PathBuf> {
 }
 
 /// Get the XDG cache directory for RAGFS.
+#[allow(dead_code)]
 pub fn cache_dir() -> Option<PathBuf> {
     ProjectDirs::from("", "", "ragfs").map(|dirs| dirs.cache_dir().to_path_buf())
 }

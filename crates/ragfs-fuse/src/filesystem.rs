@@ -19,8 +19,8 @@ use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, info, warn};
 
 use crate::inode::{
-    CONFIG_FILE_INO, INDEX_FILE_INO, InodeKind, InodeTable, QUERY_DIR_INO, RAGFS_DIR_INO,
-    REINDEX_FILE_INO, ROOT_INO, SEARCH_DIR_INO, SIMILAR_DIR_INO,
+    CONFIG_FILE_INO, HELP_FILE_INO, INDEX_FILE_INO, InodeKind, InodeTable, QUERY_DIR_INO,
+    RAGFS_DIR_INO, REINDEX_FILE_INO, ROOT_INO, SEARCH_DIR_INO, SIMILAR_DIR_INO,
 };
 
 const TTL: Duration = Duration::from_secs(1);
@@ -260,6 +260,55 @@ impl RagFs {
             .unwrap_or_default()
             .into_bytes()
     }
+
+    /// Get help content for the virtual control directory.
+    fn get_help_content(&self) -> Vec<u8> {
+        r#"RAGFS Virtual Control Directory
+================================
+
+The .ragfs directory provides a virtual interface to RAGFS functionality.
+
+Available paths:
+
+  .index          Read to get index statistics (JSON)
+                  Shows file count, chunk count, and last update time.
+
+  .config         Read to get current configuration (JSON)
+                  Shows source directory and component status.
+
+  .reindex        Write a file path to trigger reindexing.
+                  Example: echo "src/main.rs" > .ragfs/.reindex
+
+  .query/<q>      Read to execute a semantic search query.
+                  The filename is the query string.
+                  Returns JSON with matching results.
+                  Example: cat .ragfs/.query/authentication
+
+  .search/        Directory for search results (symlinks).
+                  Access .search/<query>/ to get symlinks to matching files.
+
+  .similar/       Directory for finding similar files.
+                  Access .similar/<path>/ to get symlinks to similar files.
+
+  .help           This help file.
+
+Examples:
+
+  # Check index status
+  cat .ragfs/.index
+
+  # Search for files about authentication
+  cat ".ragfs/.query/how to authenticate users"
+
+  # Trigger reindex of a specific file
+  echo "src/lib.rs" > .ragfs/.reindex
+
+  # View configuration
+  cat .ragfs/.config
+"#
+        .as_bytes()
+        .to_vec()
+    }
 }
 
 impl Filesystem for RagFs {
@@ -353,6 +402,15 @@ impl Filesystem for RagFs {
                     reply.entry(&TTL, &attr, 0);
                     return;
                 }
+                ".help" => {
+                    let content = self.get_help_content();
+                    let attr =
+                        self.make_attr(HELP_FILE_INO, FileType::RegularFile, content.len() as u64);
+                    let mut cache = self.runtime.block_on(self.content_cache.write());
+                    cache.insert(HELP_FILE_INO, content);
+                    reply.entry(&TTL, &attr, 0);
+                    return;
+                }
                 _ => {}
             }
         }
@@ -439,6 +497,14 @@ impl Filesystem for RagFs {
                 let attr = self.make_attr(ino, FileType::RegularFile, 0);
                 reply.attr(&TTL, &attr);
             }
+            HELP_FILE_INO => {
+                let content = self.get_help_content();
+                let size = content.len() as u64;
+                let mut cache = self.runtime.block_on(self.content_cache.write());
+                cache.insert(HELP_FILE_INO, content);
+                let attr = self.make_attr(ino, FileType::RegularFile, size);
+                reply.attr(&TTL, &attr);
+            }
             _ => {
                 // Check if it's a cached query result
                 let cache = self.runtime.block_on(self.content_cache.read());
@@ -519,6 +585,18 @@ impl Filesystem for RagFs {
             }
             REINDEX_FILE_INO => {
                 reply.data(&[]);
+                return;
+            }
+            HELP_FILE_INO => {
+                let content = self.get_help_content();
+                let offset = offset as usize;
+                let size = size as usize;
+                if offset >= content.len() {
+                    reply.data(&[]);
+                } else {
+                    let end = (offset + size).min(content.len());
+                    reply.data(&content[offset..end]);
+                }
                 return;
             }
             _ => {}
@@ -613,6 +691,7 @@ impl Filesystem for RagFs {
                     (INDEX_FILE_INO, FileType::RegularFile, ".index"),
                     (CONFIG_FILE_INO, FileType::RegularFile, ".config"),
                     (REINDEX_FILE_INO, FileType::RegularFile, ".reindex"),
+                    (HELP_FILE_INO, FileType::RegularFile, ".help"),
                     (SIMILAR_DIR_INO, FileType::Directory, ".similar"),
                 ];
 

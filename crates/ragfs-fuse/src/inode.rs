@@ -12,6 +12,7 @@ pub const INDEX_FILE_INO: u64 = 5;
 pub const CONFIG_FILE_INO: u64 = 6;
 pub const REINDEX_FILE_INO: u64 = 7;
 pub const SIMILAR_DIR_INO: u64 = 8;
+pub const HELP_FILE_INO: u64 = 9;
 pub const FIRST_REAL_INO: u64 = 1000;
 
 /// Type of inode.
@@ -35,6 +36,8 @@ pub enum InodeKind {
     Config,
     /// .reindex trigger file
     Reindex,
+    /// .help documentation file
+    Help,
     /// .similar directory
     SimilarDir,
     /// Similar file lookup
@@ -163,6 +166,17 @@ impl InodeTable {
             },
         );
 
+        // .help file
+        self.inodes.insert(
+            HELP_FILE_INO,
+            InodeEntry {
+                ino: HELP_FILE_INO,
+                kind: InodeKind::Help,
+                parent: RAGFS_DIR_INO,
+                lookup_count: 0,
+            },
+        );
+
         // .similar directory
         self.inodes.insert(
             SIMILAR_DIR_INO,
@@ -284,6 +298,7 @@ mod tests {
         assert_eq!(CONFIG_FILE_INO, 6);
         assert_eq!(REINDEX_FILE_INO, 7);
         assert_eq!(SIMILAR_DIR_INO, 8);
+        assert_eq!(HELP_FILE_INO, 9);
         assert_eq!(FIRST_REAL_INO, 1000);
     }
 
@@ -297,6 +312,7 @@ mod tests {
         assert!(CONFIG_FILE_INO < FIRST_REAL_INO);
         assert!(REINDEX_FILE_INO < FIRST_REAL_INO);
         assert!(SIMILAR_DIR_INO < FIRST_REAL_INO);
+        assert!(HELP_FILE_INO < FIRST_REAL_INO);
     }
 
     // ========== InodeKind Tests ==========
@@ -465,6 +481,10 @@ mod tests {
         // SimilarDir
         let similar = table.get(SIMILAR_DIR_INO).expect("SimilarDir should exist");
         assert!(matches!(similar.kind, InodeKind::SimilarDir));
+
+        // Help
+        let help = table.get(HELP_FILE_INO).expect("HelpFile should exist");
+        assert!(matches!(help.kind, InodeKind::Help));
     }
 
     // ========== get() Tests ==========
@@ -662,6 +682,7 @@ mod tests {
         assert!(table.is_virtual(CONFIG_FILE_INO));
         assert!(table.is_virtual(REINDEX_FILE_INO));
         assert!(table.is_virtual(SIMILAR_DIR_INO));
+        assert!(table.is_virtual(HELP_FILE_INO));
     }
 
     #[test]

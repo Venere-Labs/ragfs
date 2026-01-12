@@ -11,6 +11,8 @@ async-trait.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 pdf-extract.workspace = true
+lopdf.workspace = true
+flate2.workspace = true
 image.workspace = true
 mime_guess.workspace = true
 serde.workspace = true

@@ -27,6 +27,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 directories.workspace = true
 anyhow.workspace = true
+thiserror.workspace = true
 fuser.workspace = true
 blake3.workspace = true
 chrono.workspace = true

@@ -47,7 +47,7 @@ use tracing_subscriber::FmtSubscriber;
 
 mod config;
 
-use config::data_dir;
+use config::{Config, data_dir};
 
 /// Embedding dimension for gte-small model.
 const EMBEDDING_DIM: usize = 384;
@@ -57,6 +57,10 @@ const EMBEDDING_DIM: usize = 384;
 #[command(about = "A FUSE filesystem for RAG architectures")]
 #[command(version)]
 struct Cli {
+    /// Path to config file (default: ~/.config/ragfs/config.toml)
+    #[arg(short, long, global = true)]
+    config: Option<PathBuf>,
+
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
@@ -127,6 +131,22 @@ enum Commands {
         /// Path to indexed directory
         path: PathBuf,
     },
+
+    /// Manage configuration
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Show current configuration
+    Show,
+    /// Print sample configuration file
+    Init,
+    /// Show config file path
+    Path,
 }
 
 /// Output structure for query results.
@@ -599,6 +619,45 @@ async fn main() -> Result<()> {
                     println!("  Chunks: {}", stats.total_chunks);
                     if let Some(last) = stats.last_updated {
                         println!("  Updated: {}", last.format("%Y-%m-%d %H:%M:%S"));
+                    }
+                }
+            }
+        }
+
+        Commands::Config { action } => {
+            // Load config from file or CLI-specified path
+            let config = if let Some(ref path) = cli.config {
+                Config::load_from(Some(path.clone()))
+                    .context(format!("Failed to load config from {}", path.display()))?
+            } else {
+                Config::load().context("Failed to load config")?
+            };
+
+            match action {
+                ConfigAction::Show => match cli.format {
+                    OutputFormat::Json => {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&config)
+                                .context("Failed to serialize config")?
+                        );
+                    }
+                    OutputFormat::Text => {
+                        println!(
+                            "{}",
+                            toml::to_string_pretty(&config)
+                                .context("Failed to serialize config")?
+                        );
+                    }
+                },
+                ConfigAction::Init => {
+                    println!("{}", Config::sample_toml());
+                }
+                ConfigAction::Path => {
+                    if let Some(path) = Config::config_path() {
+                        println!("{}", path.display());
+                    } else {
+                        println!("Could not determine config directory");
                     }
                 }
             }

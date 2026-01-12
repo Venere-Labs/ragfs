@@ -1,7 +1,9 @@
 //! Image content extractor.
 //!
 //! Extracts image files and prepares them for embedding.
+//! Optionally generates captions using a vision model.
 
+use crate::vision::ImageCaptioner;
 use async_trait::async_trait;
 use image::GenericImageView;
 use ragfs_core::{
@@ -9,16 +11,30 @@ use ragfs_core::{
     ExtractedImage,
 };
 use std::path::Path;
-use tracing::debug;
+use std::sync::Arc;
+use tracing::{debug, warn};
 
 /// Extractor for image files.
-pub struct ImageExtractor;
+///
+/// Optionally uses a vision captioner to generate descriptions.
+pub struct ImageExtractor {
+    /// Optional vision captioner for generating image descriptions.
+    captioner: Option<Arc<dyn ImageCaptioner>>,
+}
 
 impl ImageExtractor {
-    /// Create a new image extractor.
+    /// Create a new image extractor without captioning.
     #[must_use]
     pub fn new() -> Self {
-        Self
+        Self { captioner: None }
+    }
+
+    /// Create a new image extractor with vision captioning.
+    #[must_use]
+    pub fn with_captioner(captioner: Arc<dyn ImageCaptioner>) -> Self {
+        Self {
+            captioner: Some(captioner),
+        }
     }
 }
 
@@ -79,11 +95,29 @@ impl ContentExtractor for ImageExtractor {
             format
         );
 
+        // Generate caption if captioner is available
+        let caption = if let Some(ref captioner) = self.captioner {
+            if captioner.is_initialized().await {
+                match captioner.caption(&data).await {
+                    Ok(cap) => cap,
+                    Err(e) => {
+                        warn!("Caption generation failed for {:?}: {}", path, e);
+                        None
+                    }
+                }
+            } else {
+                debug!("Captioner not initialized, skipping caption generation");
+                None
+            }
+        } else {
+            None
+        };
+
         // Create the extracted image
         let extracted_image = ExtractedImage {
             data,
             mime_type: mime_type.clone(),
-            caption: None, // Will be filled by vision model in future
+            caption,
             page: None,
         };
 
@@ -187,7 +221,7 @@ mod tests {
 
     #[test]
     fn test_default_implementation() {
-        let extractor = ImageExtractor;
+        let extractor = ImageExtractor::default();
         assert!(!extractor.supported_types().is_empty());
     }
 

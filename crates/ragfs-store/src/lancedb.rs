@@ -656,6 +656,58 @@ impl VectorStore for LanceStore {
             last_updated: Some(Utc::now()),
         })
     }
+
+    async fn get_all_chunks(&self) -> Result<Vec<Chunk>, StoreError> {
+        debug!("Getting all chunks");
+
+        let table = self.get_chunks_table().await?;
+
+        let mut results = table
+            .query()
+            .only_if("file_path LIKE '%'")
+            .execute()
+            .await
+            .map_err(|e| StoreError::Query(format!("Failed to query all chunks: {e}")))?;
+
+        let mut chunks = Vec::new();
+
+        while let Some(batch) = results
+            .try_next()
+            .await
+            .map_err(|e| StoreError::Query(format!("Failed to fetch chunks: {e}")))?
+        {
+            chunks.extend(batch_to_chunks(&batch)?);
+        }
+
+        debug!("Retrieved {} chunks", chunks.len());
+        Ok(chunks)
+    }
+
+    async fn get_all_files(&self) -> Result<Vec<FileRecord>, StoreError> {
+        debug!("Getting all file records");
+
+        let table = self.get_files_table().await?;
+
+        let mut results = table
+            .query()
+            .only_if("size_bytes >= 0")
+            .execute()
+            .await
+            .map_err(|e| StoreError::Query(format!("Failed to query all files: {e}")))?;
+
+        let mut records = Vec::new();
+
+        while let Some(batch) = results
+            .try_next()
+            .await
+            .map_err(|e| StoreError::Query(format!("Failed to fetch files: {e}")))?
+        {
+            records.extend(batch_to_file_records(&batch)?);
+        }
+
+        debug!("Retrieved {} file records", records.len());
+        Ok(records)
+    }
 }
 
 // ============================================================================

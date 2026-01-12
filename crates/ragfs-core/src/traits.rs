@@ -164,6 +164,18 @@ pub trait VectorStore: Send + Sync {
 
     /// Get store statistics.
     async fn stats(&self) -> Result<StoreStats, StoreError>;
+
+    /// Get all chunks in the store.
+    ///
+    /// This is useful for operations that need to iterate over all indexed content,
+    /// such as duplicate detection or bulk analysis.
+    async fn get_all_chunks(&self) -> Result<Vec<Chunk>, StoreError>;
+
+    /// Get all file records in the store.
+    ///
+    /// This is useful for operations that need to iterate over all indexed files,
+    /// such as organization planning or cleanup analysis.
+    async fn get_all_files(&self) -> Result<Vec<FileRecord>, StoreError>;
 }
 
 // ============================================================================

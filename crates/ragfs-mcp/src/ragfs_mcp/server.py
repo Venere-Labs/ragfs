@@ -51,7 +51,7 @@ from mcp.server.fastmcp import FastMCP
 # Create the MCP server
 mcp = FastMCP(
     "ragfs",
-    description="Semantic search filesystem for AI assistants",
+    instructions="Semantic search filesystem for AI assistants. Provides tools for searching, organizing, and managing files with AI-powered features.",
 )
 
 # Default paths

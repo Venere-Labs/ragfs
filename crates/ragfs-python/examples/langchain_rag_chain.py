@@ -47,6 +47,14 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Optional
 
+# Load .env file if present (for API keys and defaults)
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed, use environment variables directly
+
 # LangChain imports
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
@@ -303,6 +311,11 @@ async def search_only(
 
 def main():
     """CLI entry point."""
+    # Get defaults from environment
+    default_db = os.environ.get("RAGFS_DB_PATH", "./ragfs_db")
+    default_provider = os.environ.get("RAGFS_DEFAULT_PROVIDER", "openai")
+    default_model = os.environ.get("RAGFS_DEFAULT_MODEL") or None
+
     parser = argparse.ArgumentParser(
         description="RAG chain example using ragfs and LangChain",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -321,8 +334,8 @@ def main():
     )
     index_parser.add_argument(
         "--db",
-        default="./ragfs_db",
-        help="Database path (default: ./ragfs_db)",
+        default=default_db,
+        help=f"Database path (default: {default_db})",
     )
     index_parser.add_argument(
         "--chunk-size",
@@ -354,17 +367,18 @@ def main():
     )
     query_parser.add_argument(
         "--db",
-        default="./ragfs_db",
-        help="Database path (default: ./ragfs_db)",
+        default=default_db,
+        help=f"Database path (default: {default_db})",
     )
     query_parser.add_argument(
         "--provider",
-        default="openai",
+        default=default_provider,
         choices=["openai", "anthropic", "ollama"],
-        help="LLM provider (default: openai)",
+        help=f"LLM provider (default: {default_provider})",
     )
     query_parser.add_argument(
         "--model",
+        default=default_model,
         help="Model name override",
     )
     query_parser.add_argument(
@@ -395,8 +409,8 @@ def main():
     )
     search_parser.add_argument(
         "--db",
-        default="./ragfs_db",
-        help="Database path (default: ./ragfs_db)",
+        default=default_db,
+        help=f"Database path (default: {default_db})",
     )
     search_parser.add_argument(
         "-k",

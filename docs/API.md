@@ -838,7 +838,36 @@ Each crate defines its own error type:
 
 ## Cargo Features
 
-Currently no optional features. All functionality is included by default.
+RAGFS uses feature flags to control optional ML backends:
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `candle` | Yes | Enables `CandleEmbedder` using GTE-small model (384 dimensions) |
+| `lancedb` | Yes | Enables `LanceStore` for vector storage with LanceDB |
+| `vision` | No | Enables `BlipCaptioner` for image caption extraction |
+| `full` | No | Enables all optional features |
+
+### Build Examples
+
+```bash
+# Default build (candle + lancedb)
+cargo build --release
+
+# Build with all features
+cargo build --release --features full
+
+# Minimal build (NoopEmbedder + MemoryStore only)
+cargo build --release --no-default-features
+
+# Add vision support
+cargo build --release --features vision
+```
+
+### Feature Dependencies
+
+- `candle` requires Candle ML framework and downloads `thenlper/gte-small` model on first use
+- `lancedb` requires LanceDB native libraries
+- `vision` requires BLIP model download (~400MB)
 
 ---
 

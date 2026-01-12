@@ -324,10 +324,11 @@ max_file_size = 52428800  # 50MB
 debounce_ms = 500
 
 [embedding]
-model = "jina-embeddings-v3"
-batch_size = 32
-use_gpu = true
-max_concurrent = 4
+# Model: thenlper/gte-small (384 dimensions, 512 max tokens)
+# Downloaded automatically on first use
+# GPU auto-detected by Candle framework
+# batch_size = 32       # Default, handled internally
+# max_concurrent = 4    # Default worker pool size
 
 [chunking]
 target_size = 512
@@ -569,6 +570,49 @@ cat /mnt/ragfs/.ragfs/.ops/.result
 echo '{"operations":[...],"atomic":true,"dry_run":true}' > /mnt/ragfs/.ragfs/.ops/.batch
 ```
 
+**Atomic rollback:**
+
+When `atomic: true` and an operation fails, all previously successful operations are automatically rolled back:
+
+```bash
+# This will fail on the second create (file already exists from first)
+echo '{"operations":[
+  {"Create": {"path": "test.txt", "content": "hello"}},
+  {"Create": {"path": "test.txt", "content": "duplicate"}}
+],"atomic":true}' > /mnt/ragfs/.ragfs/.ops/.batch
+
+# Result shows rollback happened
+cat /mnt/ragfs/.ragfs/.ops/.result
+```
+
+**Rollback result:**
+```json
+{
+  "success": false,
+  "operations_attempted": 2,
+  "operations_succeeded": 1,
+  "rollback_performed": true,
+  "rollback_details": {
+    "rolled_back": 1,
+    "rollback_failures": 0
+  }
+}
+```
+
+#### Creating Directories
+
+```bash
+# Create a directory (including nested paths)
+echo '{"operations":[{"Mkdir": {"path": "new/nested/dir"}}],"atomic":false}' > /mnt/ragfs/.ragfs/.ops/.batch
+```
+
+#### Creating Symlinks (Unix only)
+
+```bash
+# Create a symbolic link
+echo '{"operations":[{"Symlink": {"target": "original.txt", "link": "link.txt"}}],"atomic":false}' > /mnt/ragfs/.ragfs/.ops/.batch
+```
+
 ### Safety Features (`.safety/`)
 
 The safety layer protects against accidental data loss with soft delete, audit logging, and undo support.
@@ -688,6 +732,8 @@ ls /mnt/ragfs/.ragfs/.semantic/.pending/
 cat /mnt/ragfs/.ragfs/.semantic/.pending/<plan_id>
 ```
 
+**Note:** Plans are automatically persisted to disk and survive filesystem restarts. Pending plans will still be available after unmounting and remounting.
+
 **Plan format:**
 ```json
 {
@@ -713,12 +759,18 @@ cat /mnt/ragfs/.ragfs/.semantic/.pending/<plan_id>
 #### Approving or Rejecting Plans
 
 ```bash
-# Approve a plan (executes the actions)
+# Approve a plan (executes ALL actions automatically)
 echo "<plan_id>" > /mnt/ragfs/.ragfs/.semantic/.approve
 
-# Reject a plan (discards it)
+# Reject a plan (discards without execution)
 echo "<plan_id>" > /mnt/ragfs/.ragfs/.semantic/.reject
 ```
+
+**Execution behavior:**
+- Actions are executed sequentially in order
+- If any action fails, execution stops and plan status becomes `Failed`
+- Each successful action generates an `undo_id` for manual reversal via `.safety/.undo`
+- Check the plan status after approval to verify execution result
 
 #### Cleanup Analysis
 

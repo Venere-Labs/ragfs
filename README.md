@@ -22,7 +22,7 @@ A FUSE filesystem for RAG (Retrieval-Augmented Generation) architectures. RAGFS 
 - **Agent File Operations** - Structured file ops with JSON feedback via `.ops/` interface
 - **Safety Layer** - Soft delete, audit logging, and undo support via `.safety/`
 - **Semantic File Management** - AI-powered organization, deduplication, and cleanup via `.semantic/`
-- **Comprehensive Testing** - 294 tests across all crates ensuring reliability
+- **Comprehensive Testing** - 380+ tests across all crates ensuring reliability
 
 ## Requirements
 

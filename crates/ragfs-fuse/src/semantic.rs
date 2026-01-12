@@ -15,7 +15,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use std::fs;
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Request to organize files in a directory.
@@ -252,16 +253,38 @@ pub struct SemanticConfig {
     pub similar_limit: usize,
     /// Maximum plan retention (in hours)
     pub plan_retention_hours: u32,
+    /// Base directory for persistence (plans, etc.)
+    pub data_dir: PathBuf,
 }
 
 impl Default for SemanticConfig {
     fn default() -> Self {
+        let data_dir = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("ragfs");
+
         Self {
             duplicate_threshold: 0.95,
             similar_limit: 10,
             plan_retention_hours: 24,
+            data_dir,
         }
     }
+}
+
+/// Result of executing a plan action.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionResult {
+    /// Whether the action succeeded
+    pub success: bool,
+    /// ID for undoing this action (if reversible)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub undo_id: Option<Uuid>,
+    /// Error message if failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// When the action was executed
+    pub executed_at: DateTime<Utc>,
 }
 
 /// Semantic manager for intelligent file operations.
@@ -282,6 +305,10 @@ pub struct SemanticManager {
     cleanup_cache: Arc<RwLock<Option<CleanupAnalysis>>>,
     /// Cached duplicate groups
     dedupe_cache: Arc<RwLock<Option<DuplicateGroups>>>,
+    /// Directory for storing plans
+    plans_dir: PathBuf,
+    /// Operations manager for executing actions
+    ops_manager: Option<Arc<crate::ops::OpsManager>>,
 }
 
 impl SemanticManager {
@@ -292,16 +319,152 @@ impl SemanticManager {
         embedder: Option<Arc<dyn Embedder>>,
         config: Option<SemanticConfig>,
     ) -> Self {
+        let config = config.unwrap_or_default();
+
+        // Create index hash for isolation (same pattern as SafetyManager)
+        let index_hash = blake3::hash(source.to_string_lossy().as_bytes())
+            .to_hex()
+            .chars()
+            .take(16)
+            .collect::<String>();
+
+        let plans_dir = config.data_dir.join("plans").join(&index_hash);
+
+        // Ensure plans directory exists
+        if let Err(e) = fs::create_dir_all(&plans_dir) {
+            warn!("Failed to create plans directory: {e}");
+        }
+
+        // Load existing plans from disk
+        let plans = Self::load_plans(&plans_dir);
+        info!("Loaded {} existing semantic plans", plans.len());
+
         Self {
             source,
             store,
             embedder,
-            config: config.unwrap_or_default(),
-            pending_plans: Arc::new(RwLock::new(HashMap::new())),
+            config,
+            pending_plans: Arc::new(RwLock::new(plans)),
             last_similar_result: Arc::new(RwLock::new(None)),
             cleanup_cache: Arc::new(RwLock::new(None)),
             dedupe_cache: Arc::new(RwLock::new(None)),
+            plans_dir,
+            ops_manager: None,
         }
+    }
+
+    /// Create a semantic manager with an operations manager for plan execution.
+    pub fn with_ops(
+        source: PathBuf,
+        store: Option<Arc<dyn VectorStore>>,
+        embedder: Option<Arc<dyn Embedder>>,
+        config: Option<SemanticConfig>,
+        ops_manager: Arc<crate::ops::OpsManager>,
+    ) -> Self {
+        let mut manager = Self::new(source, store, embedder, config);
+        manager.ops_manager = Some(ops_manager);
+        manager
+    }
+
+    /// Set the operations manager.
+    pub fn set_ops_manager(&mut self, ops_manager: Arc<crate::ops::OpsManager>) {
+        self.ops_manager = Some(ops_manager);
+    }
+
+    /// Load all plans from disk.
+    fn load_plans(plans_dir: &PathBuf) -> HashMap<Uuid, SemanticPlan> {
+        let mut plans = HashMap::new();
+
+        if !plans_dir.exists() {
+            return plans;
+        }
+
+        let entries = match fs::read_dir(plans_dir) {
+            Ok(e) => e,
+            Err(e) => {
+                warn!("Failed to read plans directory: {e}");
+                return plans;
+            }
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "json") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    match serde_json::from_str::<SemanticPlan>(&content) {
+                        Ok(plan) => {
+                            plans.insert(plan.id, plan);
+                        }
+                        Err(e) => {
+                            warn!("Failed to parse plan file {:?}: {e}", path);
+                        }
+                    }
+                }
+            }
+        }
+
+        plans
+    }
+
+    /// Save a single plan to disk.
+    fn save_plan(&self, plan: &SemanticPlan) -> std::io::Result<()> {
+        let plan_path = self.plans_dir.join(format!("{}.json", plan.id));
+        let temp_path = self.plans_dir.join(format!("{}.json.tmp", plan.id));
+
+        // Write to temp file first for atomic operation
+        let content = serde_json::to_string_pretty(plan)?;
+        fs::write(&temp_path, content)?;
+
+        // Atomic rename
+        fs::rename(&temp_path, &plan_path)?;
+
+        Ok(())
+    }
+
+    /// Delete a plan file from disk.
+    fn delete_plan_file(&self, plan_id: Uuid) -> std::io::Result<()> {
+        let plan_path = self.plans_dir.join(format!("{}.json", plan_id));
+        if plan_path.exists() {
+            fs::remove_file(&plan_path)?;
+        }
+        Ok(())
+    }
+
+    /// Purge expired plans from memory and disk.
+    pub async fn purge_expired_plans(&self) -> usize {
+        let now = Utc::now();
+        let retention = chrono::Duration::hours(i64::from(self.config.plan_retention_hours));
+        let cutoff = now - retention;
+
+        let mut plans = self.pending_plans.write().await;
+        let expired: Vec<Uuid> = plans
+            .iter()
+            .filter(|(_, p)| {
+                // Purge completed/rejected/failed plans past retention
+                // Keep pending plans regardless of age
+                matches!(
+                    p.status,
+                    PlanStatus::Completed | PlanStatus::Rejected | PlanStatus::Failed { .. }
+                ) && p.created_at < cutoff
+            })
+            .map(|(id, _)| *id)
+            .collect();
+
+        let mut purged = 0;
+        for id in &expired {
+            plans.remove(id);
+            if let Err(e) = self.delete_plan_file(*id) {
+                warn!("Failed to delete expired plan file {}: {e}", id);
+            } else {
+                purged += 1;
+            }
+        }
+
+        if purged > 0 {
+            info!("Purged {} expired semantic plans", purged);
+        }
+
+        purged
     }
 
     /// Check if semantic operations are available.
@@ -738,8 +901,13 @@ impl SemanticManager {
             },
         };
 
-        // Store the plan
+        // Store the plan in memory
         self.pending_plans.write().await.insert(plan.id, plan.clone());
+
+        // Persist to disk
+        if let Err(e) = self.save_plan(&plan) {
+            warn!("Failed to persist plan {}: {e}", plan.id);
+        }
 
         info!("Created organization plan: {} with {} actions", plan.id, plan.actions.len());
         Ok(plan)
@@ -1020,8 +1188,39 @@ impl SemanticManager {
         self.pending_plans.read().await.get(&plan_id).cloned()
     }
 
+    /// Execute a single action via OpsManager.
+    async fn execute_action(&self, action: &ActionType) -> Result<ActionResult, String> {
+        let ops = self
+            .ops_manager
+            .as_ref()
+            .ok_or("OpsManager not configured - cannot execute plan actions")?;
+
+        let result = match action {
+            ActionType::Move { from, to } => ops.move_file(from, to).await,
+            ActionType::Mkdir { path } => ops.mkdir(path).await,
+            ActionType::Delete { path } => ops.delete(path).await,
+            ActionType::Symlink { target, link } => ops.symlink(target, link).await,
+        };
+
+        Ok(ActionResult {
+            success: result.success,
+            undo_id: result.undo_id,
+            error: if result.success {
+                None
+            } else {
+                Some(result.error.unwrap_or_else(|| "Unknown error".to_string()))
+            },
+            executed_at: Utc::now(),
+        })
+    }
+
     /// Approve and execute a plan.
     pub async fn approve_plan(&self, plan_id: Uuid) -> Result<SemanticPlan, String> {
+        // Verify OpsManager is available before starting
+        if self.ops_manager.is_none() {
+            return Err("OpsManager not configured - cannot execute plan actions".to_string());
+        }
+
         let mut plans = self.pending_plans.write().await;
         let plan = plans
             .get_mut(&plan_id)
@@ -1031,14 +1230,98 @@ impl SemanticManager {
             return Err(format!("Plan is not pending: {:?}", plan.status));
         }
 
-        info!("Approving plan: {}", plan_id);
+        info!("Approving plan: {} with {} actions", plan_id, plan.actions.len());
         plan.status = PlanStatus::Approved;
 
-        // Execute the plan actions
-        // For now, just mark as completed since we don't have actual actions
-        plan.status = PlanStatus::Completed;
+        // Execute actions sequentially, stopping on first failure
+        let total_actions = plan.actions.len();
+        let mut completed_actions = 0;
 
-        Ok(plan.clone())
+        // Clone actions to avoid holding lock during execution
+        let actions_to_execute: Vec<ActionType> = plan.actions.iter().map(|a| a.action.clone()).collect();
+
+        // Release write lock during execution to avoid deadlock
+        drop(plans);
+
+        for (idx, action) in actions_to_execute.iter().enumerate() {
+            debug!("Executing action {}/{}: {:?}", idx + 1, total_actions, action);
+
+            match self.execute_action(action).await {
+                Ok(result) if result.success => {
+                    completed_actions += 1;
+                    debug!(
+                        "Action {}/{} succeeded (undo_id: {:?})",
+                        idx + 1,
+                        total_actions,
+                        result.undo_id
+                    );
+                }
+                Ok(result) => {
+                    // Action failed
+                    let error_msg = result.error.unwrap_or_else(|| "Unknown error".to_string());
+                    warn!(
+                        "Action {}/{} failed: {}",
+                        idx + 1,
+                        total_actions,
+                        error_msg
+                    );
+
+                    // Update plan status to failed
+                    let mut plans = self.pending_plans.write().await;
+                    if let Some(plan) = plans.get_mut(&plan_id) {
+                        plan.status = PlanStatus::Failed {
+                            error: format!(
+                                "Action {} of {} failed: {}",
+                                idx + 1,
+                                total_actions,
+                                error_msg
+                            ),
+                        };
+
+                        let result = plan.clone();
+                        if let Err(e) = self.save_plan(&result) {
+                            warn!("Failed to persist failed plan {}: {e}", plan_id);
+                        }
+                        return Ok(result);
+                    }
+                    return Err("Plan disappeared during execution".to_string());
+                }
+                Err(e) => {
+                    // Execution error (OpsManager issue)
+                    warn!("Failed to execute action {}/{}: {}", idx + 1, total_actions, e);
+
+                    let mut plans = self.pending_plans.write().await;
+                    if let Some(plan) = plans.get_mut(&plan_id) {
+                        plan.status = PlanStatus::Failed { error: e.clone() };
+
+                        let result = plan.clone();
+                        if let Err(e) = self.save_plan(&result) {
+                            warn!("Failed to persist failed plan {}: {e}", plan_id);
+                        }
+                        return Ok(result);
+                    }
+                    return Err("Plan disappeared during execution".to_string());
+                }
+            }
+        }
+
+        // All actions completed successfully
+        let mut plans = self.pending_plans.write().await;
+        if let Some(plan) = plans.get_mut(&plan_id) {
+            plan.status = PlanStatus::Completed;
+            info!(
+                "Plan {} completed successfully: {} actions executed",
+                plan_id, completed_actions
+            );
+
+            let result = plan.clone();
+            if let Err(e) = self.save_plan(&result) {
+                warn!("Failed to persist completed plan {}: {e}", plan_id);
+            }
+            return Ok(result);
+        }
+
+        Err("Plan disappeared during execution".to_string())
     }
 
     /// Reject a plan.
@@ -1055,7 +1338,14 @@ impl SemanticManager {
         info!("Rejecting plan: {}", plan_id);
         plan.status = PlanStatus::Rejected;
 
-        Ok(plan.clone())
+        let result = plan.clone();
+
+        // Persist the status change
+        if let Err(e) = self.save_plan(&result) {
+            warn!("Failed to persist rejected plan {}: {e}", plan_id);
+        }
+
+        Ok(result)
     }
 
     /// Get cleanup analysis as JSON bytes (for FUSE read).

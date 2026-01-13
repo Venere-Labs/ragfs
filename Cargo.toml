@@ -52,14 +52,14 @@ notify-debouncer-full = "0.6"
 
 # Vector store
 lancedb = "0.23"
-arrow-array = "53"
-arrow-schema = "53"
+arrow-array = "56"
+arrow-schema = "56"
 
 # Embeddings
 # embed_anything = "0.5"
-candle-core = "0.8"
-candle-nn = "0.8"
-candle-transformers = "0.8"
+candle-core = "0.9"
+candle-nn = "0.9"
+candle-transformers = "0.9"
 hf-hub = { version = "0.4.3", features = ["tokio"] }
 tokenizers = "0.22"
 

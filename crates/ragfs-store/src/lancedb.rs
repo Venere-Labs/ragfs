@@ -10,7 +10,7 @@ use chrono::Utc;
 use futures::TryStreamExt;
 use lancedb::index::Index;
 use lancedb::index::scalar::{FtsIndexBuilder, FullTextSearchQuery};
-use lancedb::query::{ExecutableQuery, QueryBase};
+use lancedb::query::{ExecutableQuery, QueryBase, QueryExecutionOptions};
 use lancedb::{Connection, Table, connect};
 use ragfs_core::{
     Chunk, ChunkMetadata, ContentType, FileRecord, FileStatus, SearchQuery, SearchResult,
@@ -457,7 +457,7 @@ impl VectorStore for LanceStore {
             .nearest_to(query.embedding.clone())
             .map_err(|e| StoreError::Query(format!("Failed to create hybrid query: {e}")))?
             .limit(query.limit)
-            .execute_hybrid()
+            .execute_hybrid(QueryExecutionOptions::default())
             .await
             .map_err(|e| StoreError::Query(format!("Failed to execute hybrid search: {e}")))?;
 

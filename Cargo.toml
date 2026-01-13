@@ -108,6 +108,12 @@ mime_guess = "2.0"
 tempfile = "3.14"
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 
+[profile.dev]
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+opt-level = 3
+
 [workspace.lints.rust]
 unsafe_code = "warn"
 

@@ -1,0 +1,20 @@
+# RAGFS RAG Application Dependencies
+# Note: ragfs package is installed from wheel built in Dockerfile
+
+# Chainlit for professional chat UI
+chainlit>=1.0.0
+
+# LangChain components
+langchain-core>=0.2.0
+langchain-ollama>=0.1.0
+
+# File management dependencies
+aiofiles>=23.0.0          # Async file operations
+python-magic>=0.4.27      # MIME type detection
+
+# Environment management
+python-dotenv>=1.0.0
+
+# Optional: Cloud LLM providers (uncomment as needed)
+# langchain-openai>=0.1.0
+# langchain-anthropic>=0.1.0

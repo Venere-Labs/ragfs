@@ -1,0 +1,44 @@
+# Rust build artifacts (very large)
+/target/
+
+# Git
+.git/
+.gitignore
+
+# LanceDB data
+*.lance/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.code-workspace
+
+# Environment
+.env
+.env.local
+
+# Python (if any)
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+coverage/
+*.so
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Documentation (not needed in container)
+*.md
+!examples/**/*.md

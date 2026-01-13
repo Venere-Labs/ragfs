@@ -1,0 +1,19 @@
+# Development overrides for RAGFS Docker Stack
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  rag-app:
+    # Mount source code for hot reload
+    volumes:
+      - ./rag-app:/app:ro
+      - ragfs-index:/data/index:ro
+      - ragfs-models:/root/.cache/huggingface:ro
+    environment:
+      - CHAINLIT_DEBUG=true
+    # Enable watch mode for development
+    command: ["chainlit", "run", "app.py", "--host", "0.0.0.0", "--port", "8000", "-w"]
+
+  ragfs-indexer:
+    # In development, allow re-indexing by restarting
+    environment:
+      - RUST_LOG=debug

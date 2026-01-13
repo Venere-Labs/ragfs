@@ -1,0 +1,118 @@
+services:
+  # Ollama - Local LLM server
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ragfs-ollama
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - ragfs-net
+    # Uncomment for GPU support (NVIDIA)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # RAGFS Indexer - Indexes documents with file watching
+  ragfs-indexer:
+    build:
+      context: ../..
+      dockerfile: examples/docker-rag-stack/ragfs-indexer/Dockerfile
+    container_name: ragfs-indexer
+    volumes:
+      - ragfs-index:/data/index
+      - ragfs-models:/root/.cache/huggingface
+      - documents:/data/docs                    # RW for file uploads
+      - ./sample-docs:/data/docs/samples:ro     # Sample docs (read-only)
+    environment:
+      - RAGFS_DB_PATH=/data/index
+      - DOCUMENTS_PATH=/data/docs
+      - HF_HOME=/root/.cache/huggingface
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "test", "-d", "/data/index"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    networks:
+      - ragfs-net
+
+  # RAG App - LangChain + Chainlit UI with file management
+  rag-app:
+    build:
+      context: ../..
+      dockerfile: examples/docker-rag-stack/rag-app/Dockerfile
+    container_name: ragfs-rag-app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ragfs-index:/data/index                 # RW for safety operations
+      - ragfs-models:/root/.cache/huggingface:ro
+      - ragfs-trash:/data/trash                 # Trash for soft deletes
+      - documents:/data/docs                    # RW for file uploads
+    environment:
+      - RAGFS_DB_PATH=/data/index
+      - RAGFS_TRASH_PATH=/data/trash
+      - DOCUMENTS_PATH=/data/docs
+      - HF_HOME=/root/.cache/huggingface
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - CHAINLIT_HOST=0.0.0.0
+      - CHAINLIT_PORT=8000
+    depends_on:
+      ollama:
+        condition: service_healthy
+      ragfs-indexer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - ragfs-net
+
+  # Model puller - Downloads Ollama model on first run
+  model-puller:
+    image: curlimages/curl:latest
+    container_name: ragfs-model-puller
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "curl -X POST http://ollama:11434/api/pull -d '{\"name\": \"${OLLAMA_MODEL:-llama3.2}\"}' && echo 'Model pulled successfully'"
+    networks:
+      - ragfs-net
+    restart: "no"
+
+volumes:
+  ragfs-index:
+    name: ragfs-index
+  ragfs-models:
+    name: ragfs-models
+  ragfs-trash:
+    name: ragfs-trash
+  documents:
+    name: ragfs-documents
+  ollama-data:
+    name: ragfs-ollama-data
+
+networks:
+  ragfs-net:
+    name: ragfs-net
+    driver: bridge

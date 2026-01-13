@@ -112,4 +112,61 @@ mod tests {
         assert_eq!(result.filters.len(), 2);
         assert_eq!(result.limit, 5);
     }
+
+    #[test]
+    fn test_parse_empty_query() {
+        let parser = QueryParser::default();
+        let result = parser.parse("");
+
+        assert_eq!(result.text, "");
+        assert!(result.filters.is_empty());
+        assert_eq!(result.limit, 10);
+    }
+
+    #[test]
+    fn test_parse_language_filter() {
+        let parser = QueryParser::default();
+        let result = parser.parse("lang:rust");
+
+        assert_eq!(result.text, "");
+        assert_eq!(result.filters.len(), 1);
+        assert!(matches!(&result.filters[0], SearchFilter::Language(l) if l == "rust"));
+    }
+
+    #[test]
+    fn test_parse_path_prefix() {
+        let parser = QueryParser::default();
+        let result = parser.parse("path:src/lib");
+
+        assert_eq!(result.filters.len(), 1);
+        assert!(matches!(&result.filters[0], SearchFilter::PathPrefix(p) if p == "src/lib"));
+    }
+
+    #[test]
+    fn test_parse_depth_filter() {
+        let parser = QueryParser::default();
+        let result = parser.parse("depth:2 search term");
+
+        assert_eq!(result.text, "search term");
+        assert_eq!(result.filters.len(), 1);
+        assert!(matches!(&result.filters[0], SearchFilter::MaxDepth(2)));
+    }
+
+    #[test]
+    fn test_parse_invalid_limit() {
+        let parser = QueryParser::default();
+        let result = parser.parse("limit:abc search");
+
+        assert_eq!(result.text, "search");
+        assert_eq!(result.limit, 10); // Default preserved when invalid
+    }
+
+    #[test]
+    fn test_parse_unknown_filter_as_text() {
+        let parser = QueryParser::default();
+        let result = parser.parse("unknown:value search");
+
+        assert_eq!(result.text, "unknown:value search");
+        assert!(result.filters.is_empty());
+    }
 }

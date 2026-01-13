@@ -155,8 +155,8 @@ impl EmbeddingCache {
             }
         }
 
-        // Unwrap all results (all should be Some now)
-        Ok(results.into_iter().map(|r| r.unwrap()).collect())
+        // Collect all results (all should be Some now)
+        Ok(results.into_iter().flatten().collect())
     }
 
     /// Embed a single query (always bypasses cache for queries).
@@ -391,5 +391,67 @@ mod tests {
         assert_eq!(cache.dimension(), TEST_DIM);
         assert_eq!(cache.model_name(), "mock-embedder");
         assert_eq!(cache.modalities(), &[Modality::Text]);
+    }
+
+    #[tokio::test]
+    async fn test_cache_stats_accuracy() {
+        let embedder = Arc::new(MockEmbedder::new(TEST_DIM));
+        let cache = EmbeddingCache::new(Arc::clone(&embedder) as Arc<dyn Embedder>);
+        let config = EmbeddingConfig::default();
+
+        // Initial stats should be zero
+        let stats = cache.stats().await;
+        assert_eq!(stats.hits, 0);
+        assert_eq!(stats.misses, 0);
+
+        // First call: miss
+        cache.embed_text(&["test"], &config).await.unwrap();
+        let stats = cache.stats().await;
+        assert_eq!(stats.misses, 1);
+        assert_eq!(stats.hits, 0);
+
+        // Second call with same text: hit
+        cache.embed_text(&["test"], &config).await.unwrap();
+        let stats = cache.stats().await;
+        assert_eq!(stats.hits, 1);
+        assert_eq!(stats.misses, 1);
+    }
+
+    #[tokio::test]
+    async fn test_cache_multiple_texts_batch() {
+        let embedder = Arc::new(MockEmbedder::new(TEST_DIM));
+        let cache = EmbeddingCache::new(Arc::clone(&embedder) as Arc<dyn Embedder>);
+        let config = EmbeddingConfig::default();
+
+        // Embed multiple texts in one call
+        let texts = vec!["text one", "text two", "text three"];
+        let results = cache.embed_text(&texts, &config).await.unwrap();
+        assert_eq!(results.len(), 3);
+
+        // All should now be cached
+        let stats = cache.stats().await;
+        assert_eq!(stats.misses, 3);
+
+        // Call again - should all be hits
+        cache.embed_text(&texts, &config).await.unwrap();
+        let stats = cache.stats().await;
+        assert_eq!(stats.hits, 3);
+    }
+
+    #[tokio::test]
+    async fn test_cache_empty_input() {
+        let embedder = Arc::new(MockEmbedder::new(TEST_DIM));
+        let cache = EmbeddingCache::new(Arc::clone(&embedder) as Arc<dyn Embedder>);
+        let config = EmbeddingConfig::default();
+
+        // Empty input should return empty results
+        let texts: Vec<&str> = vec![];
+        let results = cache.embed_text(&texts, &config).await.unwrap();
+        assert!(results.is_empty());
+
+        // Stats should be unchanged
+        let stats = cache.stats().await;
+        assert_eq!(stats.hits, 0);
+        assert_eq!(stats.misses, 0);
     }
 }

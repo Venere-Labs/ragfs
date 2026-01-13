@@ -22,7 +22,7 @@ An agentic FUSE filesystem that makes file management safe and structured for LL
 - **Code-aware Chunking** - Syntax-aware splitting using tree-sitter for source code
 - **Hybrid Search** - Combine vector similarity with full-text search
 - **MCP Server** - Claude Desktop integration for AI assistants
-- **Comprehensive Testing** - 380+ tests across all crates ensuring reliability
+- **Comprehensive Testing** - 270+ tests across all crates ensuring reliability
 
 ## Feature Status
 

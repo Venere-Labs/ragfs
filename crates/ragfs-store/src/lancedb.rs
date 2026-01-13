@@ -1483,4 +1483,40 @@ mod tests {
             ContentType::Code { language, .. } if language == "rust"
         ));
     }
+
+    #[tokio::test]
+    async fn test_get_all_files_empty() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path.clone(), TEST_DIM);
+        store.init().await.unwrap();
+
+        let files = store.get_all_files().await.unwrap();
+        assert!(files.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_file() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path.clone(), TEST_DIM);
+        store.init().await.unwrap();
+
+        let path = PathBuf::from("/nonexistent/file.txt");
+        // Deleting a nonexistent file should not error
+        let result = store.delete_by_file_path(&path).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_file_not_found() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path.clone(), TEST_DIM);
+        store.init().await.unwrap();
+
+        let path = PathBuf::from("/nonexistent/file.txt");
+        let result = store.get_file(&path).await.unwrap();
+        assert!(result.is_none());
+    }
 }

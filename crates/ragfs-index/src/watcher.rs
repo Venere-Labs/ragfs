@@ -110,3 +110,64 @@ fn convert_event(event: &notify_debouncer_full::DebouncedEvent) -> Option<FileEv
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notify_debouncer_full::DebouncedEvent;
+    use notify_debouncer_full::notify::EventKind;
+    use notify_debouncer_full::notify::event::{CreateKind, ModifyKind, RemoveKind};
+    use std::path::PathBuf;
+    use std::time::Instant;
+
+    fn make_event(kind: EventKind, paths: Vec<PathBuf>) -> DebouncedEvent {
+        DebouncedEvent {
+            event: notify_debouncer_full::notify::Event {
+                kind,
+                paths,
+                attrs: Default::default(),
+            },
+            time: Instant::now(),
+        }
+    }
+
+    #[test]
+    fn test_convert_event_create() {
+        let path = PathBuf::from("/tmp/test.txt");
+        let event = make_event(EventKind::Create(CreateKind::File), vec![path.clone()]);
+
+        let result = convert_event(&event);
+        assert!(matches!(result, Some(FileEvent::Created(p)) if p == path));
+    }
+
+    #[test]
+    fn test_convert_event_modify() {
+        use notify_debouncer_full::notify::event::DataChange;
+        let path = PathBuf::from("/tmp/test.txt");
+        let event = make_event(
+            EventKind::Modify(ModifyKind::Data(DataChange::Any)),
+            vec![path.clone()],
+        );
+
+        let result = convert_event(&event);
+        assert!(matches!(result, Some(FileEvent::Modified(p)) if p == path));
+    }
+
+    #[test]
+    fn test_convert_event_delete() {
+        let path = PathBuf::from("/tmp/test.txt");
+        let event = make_event(EventKind::Remove(RemoveKind::File), vec![path.clone()]);
+
+        let result = convert_event(&event);
+        assert!(matches!(result, Some(FileEvent::Deleted(p)) if p == path));
+    }
+
+    #[test]
+    fn test_hidden_files_skipped() {
+        let path = PathBuf::from("/tmp/.hidden");
+        let event = make_event(EventKind::Create(CreateKind::File), vec![path]);
+
+        let result = convert_event(&event);
+        assert!(result.is_none());
+    }
+}

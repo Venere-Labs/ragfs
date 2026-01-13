@@ -335,7 +335,7 @@ fn estimate_page_count(text: &str) -> u32 {
 // Alternative PDF extractor using pdf_oxide (optional feature)
 // ============================================================================
 
-/// Alternative PDF extractor using the pdf_oxide library.
+/// Alternative PDF extractor using the `pdf_oxide` library.
 ///
 /// This extractor provides potentially better performance and a cleaner API
 /// compared to the default pdf-extract + lopdf combination.
@@ -442,12 +442,20 @@ fn extract_with_pdf_oxide(
                     }
 
                     // Get image data and determine MIME type
-                    let data = img.data;
-                    let mime_type = match img.format.as_deref() {
-                        Some("jpeg") | Some("jpg") => "image/jpeg",
-                        Some("png") => "image/png",
-                        Some("jp2") | Some("jpeg2000") => "image/jp2",
-                        _ => "image/png", // default assumption
+                    let (data, mime_type) = match img.data() {
+                        pdf_oxide::extractors::images::ImageData::Jpeg(bytes) => {
+                            (bytes.clone(), "image/jpeg")
+                        }
+                        _ => {
+                            // For raw pixel data, convert to PNG
+                            match img.to_png_bytes() {
+                                Ok(png_bytes) => (png_bytes, "image/png"),
+                                Err(e) => {
+                                    debug!("Failed to convert image to PNG: {e}");
+                                    continue;
+                                }
+                            }
+                        }
                     };
 
                     total_bytes += data.len();

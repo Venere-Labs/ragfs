@@ -80,6 +80,28 @@ jobs:
       - name: Test
         run: cargo test --all --all-features
 
+  test-with-models:
+    name: Test with Models
+    runs-on: ubuntu-latest
+    # Only run on push to main to reduce CI costs (model download is ~67MB)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-gte-small-${{ runner.os }}
+          restore-keys: hf-gte-small-
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
+      - name: Run ignored tests (require model download)
+        run: cargo test -p ragfs-embed -- --ignored
+        env:
+          HF_HOME: ~/.cache/huggingface
+
   doc:
     name: Documentation
     runs-on: ubuntu-latest

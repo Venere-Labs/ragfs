@@ -331,6 +331,150 @@ fn estimate_page_count(text: &str) -> u32 {
     std::cmp::max(1, (chars / 3000) as u32)
 }
 
+// ============================================================================
+// Alternative PDF extractor using pdf_oxide (optional feature)
+// ============================================================================
+
+/// Alternative PDF extractor using the pdf_oxide library.
+///
+/// This extractor provides potentially better performance and a cleaner API
+/// compared to the default pdf-extract + lopdf combination.
+///
+/// Enable with: `cargo build --features pdf_oxide`
+#[cfg(feature = "pdf_oxide")]
+pub struct PdfOxideExtractor;
+
+#[cfg(feature = "pdf_oxide")]
+impl PdfOxideExtractor {
+    /// Create a new PDF oxide extractor.
+    #[must_use]
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "pdf_oxide")]
+impl Default for PdfOxideExtractor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "pdf_oxide")]
+#[async_trait]
+impl ContentExtractor for PdfOxideExtractor {
+    fn supported_types(&self) -> &[&str] {
+        &["application/pdf"]
+    }
+
+    fn can_extract_by_extension(&self, path: &Path) -> bool {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+    }
+
+    async fn extract(&self, path: &Path) -> Result<ExtractedContent, ExtractError> {
+        debug!("Extracting PDF with pdf_oxide: {:?}", path);
+
+        let path_owned = path.to_path_buf();
+
+        // pdf_oxide operations are blocking
+        let (text, page_count, images) =
+            tokio::task::spawn_blocking(move || extract_with_pdf_oxide(&path_owned))
+                .await
+                .map_err(|e| ExtractError::Failed(format!("Task join error: {e}")))?
+                .map_err(|e| ExtractError::Failed(format!("PDF extraction failed: {e}")))?;
+
+        let elements = build_elements(&text);
+
+        Ok(ExtractedContent {
+            text,
+            elements,
+            images,
+            metadata: ContentMetadataInfo {
+                page_count: Some(page_count),
+                ..Default::default()
+            },
+        })
+    }
+}
+
+#[cfg(feature = "pdf_oxide")]
+fn extract_with_pdf_oxide(
+    path: &std::path::Path,
+) -> Result<(String, u32, Vec<ExtractedImage>), String> {
+    use pdf_oxide::PdfDocument;
+
+    let mut doc = PdfDocument::open(path).map_err(|e| format!("Failed to open PDF: {e}"))?;
+
+    let page_count = doc
+        .page_count()
+        .map_err(|e| format!("Failed to get page count: {e}"))?;
+
+    // Extract text from all pages
+    let mut text = String::new();
+    for page_idx in 0..page_count {
+        match doc.extract_text(page_idx) {
+            Ok(page_text) => {
+                text.push_str(&page_text);
+                text.push_str("\n\n");
+            }
+            Err(e) => {
+                debug!("Failed to extract text from page {}: {}", page_idx + 1, e);
+            }
+        }
+    }
+
+    // Extract images from all pages
+    let mut images = Vec::new();
+    let mut total_bytes = 0usize;
+
+    for page_idx in 0..page_count {
+        if images.len() >= MAX_IMAGES || total_bytes >= MAX_TOTAL_BYTES {
+            break;
+        }
+
+        match doc.extract_images(page_idx) {
+            Ok(page_images) => {
+                for img in page_images {
+                    if images.len() >= MAX_IMAGES || total_bytes >= MAX_TOTAL_BYTES {
+                        break;
+                    }
+
+                    // Get image data and determine MIME type
+                    let data = img.data;
+                    let mime_type = match img.format.as_deref() {
+                        Some("jpeg") | Some("jpg") => "image/jpeg",
+                        Some("png") => "image/png",
+                        Some("jp2") | Some("jpeg2000") => "image/jp2",
+                        _ => "image/png", // default assumption
+                    };
+
+                    total_bytes += data.len();
+                    images.push(ExtractedImage {
+                        data,
+                        mime_type: mime_type.to_string(),
+                        caption: None,
+                        page: Some(page_idx as u32 + 1),
+                    });
+                }
+            }
+            Err(e) => {
+                debug!("Failed to extract images from page {}: {}", page_idx + 1, e);
+            }
+        }
+    }
+
+    debug!(
+        "pdf_oxide: Extracted {} pages, {} chars, {} images",
+        page_count,
+        text.len(),
+        images.len()
+    );
+
+    Ok((text, page_count as u32, images))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

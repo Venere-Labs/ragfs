@@ -62,6 +62,8 @@ pub mod vision;
 
 pub use image::ImageExtractor;
 pub use pdf::PdfExtractor;
+#[cfg(feature = "pdf_oxide")]
+pub use pdf::PdfOxideExtractor;
 pub use registry::ExtractorRegistry;
 pub use text::TextExtractor;
 #[cfg(feature = "vision")]

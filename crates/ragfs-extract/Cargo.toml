@@ -29,9 +29,13 @@ candle-transformers = { workspace = true, optional = true }
 hf-hub = { workspace = true, optional = true }
 tokenizers = { workspace = true, optional = true }
 
+# Alternative PDF extraction (optional)
+pdf_oxide = { workspace = true, optional = true }
+
 [features]
 default = []
 vision = ["candle-core", "candle-nn", "candle-transformers", "hf-hub", "tokenizers"]
+pdf_oxide = ["dep:pdf_oxide"]
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -781,7 +781,7 @@ impl SemanticManager {
         request: OrganizeRequest,
     ) -> Result<SemanticPlan, String> {
         let store = self.store.as_ref().ok_or("Vector store not available")?;
-        let _embedder = self.embedder.as_ref().ok_or("Embedder not available")?;
+        let embedder = self.embedder.as_ref();
 
         debug!(
             "Creating organization plan for: {}",
@@ -883,7 +883,8 @@ impl SemanticManager {
             OrganizeStrategy::ByType => self.plan_by_type(&scoped_files, &scope_path),
             OrganizeStrategy::ByProject => self.plan_by_project(&scoped_files, &scope_path),
             OrganizeStrategy::Custom { categories } => {
-                self.plan_by_custom(&file_embeddings, &scope_path, categories)
+                self.plan_by_custom(&file_embeddings, &scope_path, categories, embedder)
+                    .await
             }
         };
 
@@ -1167,11 +1168,15 @@ impl SemanticManager {
     }
 
     /// Plan organization by custom categories.
-    fn plan_by_custom(
+    ///
+    /// Generates embeddings for category names and assigns files to the
+    /// best matching category using cosine similarity.
+    async fn plan_by_custom(
         &self,
         file_embeddings: &HashMap<PathBuf, Vec<f32>>,
         scope_path: &PathBuf,
         categories: &[String],
+        embedder: Option<&Arc<dyn Embedder>>,
     ) -> (Vec<PlanAction>, String) {
         let mut actions = Vec::new();
 
@@ -1186,9 +1191,71 @@ impl SemanticManager {
             });
         }
 
-        // Without category embeddings, we can't automatically assign files
-        // This would require generating embeddings for category names and matching
+        // Try to generate embeddings for categories and assign files automatically
+        if let Some(embedder) = embedder {
+            let category_texts: Vec<&str> = categories.iter().map(String::as_str).collect();
+            let config = EmbeddingConfig::default();
 
+            match embedder.embed_text(&category_texts, &config).await {
+                Ok(category_embeddings) if category_embeddings.len() == categories.len() => {
+                    // Minimum similarity threshold for assignment
+                    const MIN_SIMILARITY: f32 = 0.3;
+                    let mut assigned_count = 0;
+
+                    for (file_path, file_emb) in file_embeddings {
+                        // Find best matching category
+                        let best = category_embeddings
+                            .iter()
+                            .zip(categories.iter())
+                            .map(|(emb, cat)| (cat, cosine_similarity(file_emb, &emb.embedding)))
+                            .max_by(|a, b| {
+                                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+                            });
+
+                        if let Some((category, score)) = best
+                            && score >= MIN_SIMILARITY
+                            && let Some(file_name) = file_path.file_name()
+                        {
+                            let new_path = scope_path.join(category).join(file_name);
+                            if new_path != *file_path {
+                                actions.push(PlanAction {
+                                    action: ActionType::Move {
+                                        from: file_path.clone(),
+                                        to: new_path,
+                                    },
+                                    confidence: score,
+                                    reason: format!(
+                                        "Move to category '{category}' (similarity: {score:.2})"
+                                    ),
+                                });
+                                assigned_count += 1;
+                            }
+                        }
+                    }
+
+                    let description = format!(
+                        "Organize {} files into {} custom categories ({} files assigned)",
+                        file_embeddings.len(),
+                        categories.len(),
+                        assigned_count
+                    );
+                    return (actions, description);
+                }
+                Ok(_) => {
+                    warn!(
+                        "Category embedding count mismatch, falling back to directory creation only"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to embed categories: {}, falling back to directory creation only",
+                        e
+                    );
+                }
+            }
+        }
+
+        // Fallback: just create directories without automatic assignment
         let description = format!(
             "Created {} custom category directories for {} files (manual assignment needed)",
             categories.len(),
@@ -1626,5 +1693,63 @@ mod tests {
         let json = manager.get_similar_json().await;
         let json_str = String::from_utf8(json).unwrap();
         assert!(json_str.contains("No similar files search"));
+    }
+
+    #[tokio::test]
+    async fn test_plan_by_custom_without_embedder() {
+        // Test the fallback behavior when embedder is None
+        let manager = SemanticManager::new(PathBuf::from("/tmp/test"), None, None, None);
+        let mut file_embeddings = HashMap::new();
+        file_embeddings.insert(PathBuf::from("/tmp/test/doc1.txt"), vec![0.1, 0.2, 0.3]);
+        file_embeddings.insert(PathBuf::from("/tmp/test/doc2.txt"), vec![0.4, 0.5, 0.6]);
+
+        let scope_path = PathBuf::from("/tmp/test");
+        let categories = vec!["code".to_string(), "docs".to_string()];
+
+        let (actions, description) = manager
+            .plan_by_custom(&file_embeddings, &scope_path, &categories, None)
+            .await;
+
+        // Should create 2 category directories but no file moves (no embedder)
+        let mkdir_count = actions
+            .iter()
+            .filter(|a| matches!(a.action, ActionType::Mkdir { .. }))
+            .count();
+        let move_count = actions
+            .iter()
+            .filter(|a| matches!(a.action, ActionType::Move { .. }))
+            .count();
+
+        assert_eq!(mkdir_count, 2, "Should create 2 category directories");
+        assert_eq!(move_count, 0, "Should not move files without embedder");
+        assert!(
+            description.contains("manual assignment needed"),
+            "Description should indicate manual assignment needed"
+        );
+    }
+
+    #[test]
+    fn test_custom_categories_serialization() {
+        let request = OrganizeRequest {
+            scope: PathBuf::from("src/"),
+            strategy: OrganizeStrategy::Custom {
+                categories: vec!["code".to_string(), "docs".to_string(), "tests".to_string()],
+            },
+            max_groups: 10,
+            similarity_threshold: 0.7,
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("custom"));
+        assert!(json.contains("code"));
+        assert!(json.contains("docs"));
+        assert!(json.contains("tests"));
+
+        let parsed: OrganizeRequest = serde_json::from_str(&json).unwrap();
+        if let OrganizeStrategy::Custom { categories } = parsed.strategy {
+            assert_eq!(categories.len(), 3);
+        } else {
+            panic!("Expected Custom strategy");
+        }
     }
 }

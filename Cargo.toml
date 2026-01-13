@@ -64,9 +64,9 @@ hf-hub = { version = "0.4.3", features = ["tokio"] }
 tokenizers = "0.22"
 
 # PDF parsing
-# pdf_oxide = "0.2"  # TODO: verify availability
 pdf-extract = "0.10"
 lopdf = "0.38"
+pdf_oxide = "0.2"
 
 # Compression
 flate2 = "1.1"

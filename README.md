@@ -7,21 +7,21 @@
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 
-A FUSE filesystem for RAG (Retrieval-Augmented Generation) architectures. RAGFS enables semantic search over your files using vector embeddings, allowing you to find content by meaning rather than keywords.
+An agentic FUSE filesystem that makes file management safe and structured for LLM agents. Includes JSON-based operations with undo support, complete audit logging, and AI-powered features like semantic search, auto-organization, and deduplication.
 
 ## Features
 
+- **Agent File Operations** - Structured file ops with JSON feedback via `.ops/` interface
+- **Safety Layer** - Soft delete, audit logging, and undo support via `.safety/`
+- **AI-Powered Management** - Auto-organization, deduplication, and cleanup via `.semantic/`
 - **Semantic Search** - Query files by meaning using vector similarity search
 - **Local Embeddings** - Runs entirely offline using the `gte-small` model via Candle
-- **FUSE Integration** - Mount indexed directories as a searchable virtual filesystem
+- **FUSE Integration** - Mount indexed directories as a virtual filesystem
 - **Real-time Indexing** - Watch directories for changes and update the index automatically
 - **Multimodal Support** - Extract content from text, code, markdown, PDF, and images
 - **Code-aware Chunking** - Syntax-aware splitting using tree-sitter for source code
 - **Hybrid Search** - Combine vector similarity with full-text search
-- **JSON Output** - Machine-readable output for scripting and integration
-- **Agent File Operations** - Structured file ops with JSON feedback via `.ops/` interface
-- **Safety Layer** - Soft delete, audit logging, and undo support via `.safety/`
-- **Semantic File Management** - AI-powered organization, deduplication, and cleanup via `.semantic/`
+- **MCP Server** - Claude Desktop integration for AI assistants
 - **Comprehensive Testing** - 380+ tests across all crates ensuring reliability
 
 ## Feature Status
@@ -45,17 +45,18 @@ A FUSE filesystem for RAG (Retrieval-Augmented Generation) architectures. RAGFS 
 ## Use Cases
 
 **Ideal for:**
+- LLM agents managing files (Claude, GPT, local models)
+- Automated file organization and cleanup
+- Safe file operations with audit trail
 - Code repositories (1K-50K files)
 - Documentation collections
 - Research notes and papers
-- AI agent file management
 - Local-first semantic search
 
 **Limitations:**
 - Linux only (FUSE requirement)
 - Embedding model requires ~500MB disk
 - Large repositories (100K+ files) may need tuning
-- Real-time search, not batch analytics
 
 ## Requirements
 

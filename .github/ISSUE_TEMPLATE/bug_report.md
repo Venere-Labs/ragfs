@@ -26,7 +26,7 @@ What actually happened.
 
 ## Environment
 
-- OS: [e.g., Ubuntu 22.04, macOS 14]
+- OS: [e.g., Ubuntu 24.04, Fedora 40, Arch Linux]
 - Rust version: [output of `rustc --version`]
 - RAGFS version: [output of `ragfs --version`]
 - FUSE version: [output of `fusermount --version` if applicable]

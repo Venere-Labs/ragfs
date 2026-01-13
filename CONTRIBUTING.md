@@ -140,7 +140,9 @@ ragfs/
 │   ├── ragfs-embed/     # Embedding generation
 │   ├── ragfs-extract/   # Content extraction
 │   ├── ragfs-store/     # Vector storage
-│   └── ragfs-query/     # Query execution
+│   ├── ragfs-query/     # Query execution
+│   ├── ragfs-python/    # Python bindings (PyO3)
+│   └── ragfs-mcp/       # MCP server for Claude Desktop
 └── docs/                # Documentation
 ```
 

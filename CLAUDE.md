@@ -75,14 +75,34 @@ File → Extraction → Chunking → Embedding → Storage → Search
 **Virtual directory structure (`.ragfs/`):**
 ```
 .ragfs/
-├── .query/<text>        # Semantic search
-├── .ops/                # File operations with JSON feedback
-│   ├── .create, .delete, .move, .batch, .result
-├── .safety/             # Trash, history, undo
-│   ├── .trash/, .history, .undo
-└── .semantic/           # AI-powered operations
-    ├── .organize, .similar, .cleanup, .dedupe
-    ├── .pending/, .approve, .reject
+├── .query/<text>          # Semantic query → JSON results
+├── .search/<text>         # Search results
+├── .similar/<path>        # Find similar files
+├── .index                 # Index statistics (JSON)
+├── .config                # Current configuration (JSON)
+├── .reindex               # Write path to trigger reindex
+├── .help                  # Usage documentation
+│
+├── .ops/                  # Agent file operations
+│   ├── .create            # Write: "path\ncontent"
+│   ├── .delete            # Write: "path"
+│   ├── .move              # Write: "src\ndst"
+│   ├── .batch             # Write: JSON BatchRequest
+│   └── .result            # Read: JSON OperationResult
+│
+├── .safety/               # Protection layer
+│   ├── .trash/            # Soft-deleted files (recoverable)
+│   ├── .history           # Audit log (JSONL)
+│   └── .undo              # Write: operation_id to undo
+│
+└── .semantic/             # AI-powered operations
+    ├── .organize          # Write: OrganizeRequest JSON
+    ├── .similar           # Write: path → find similar
+    ├── .cleanup           # Read: CleanupAnalysis JSON
+    ├── .dedupe            # Read: DuplicateGroups JSON
+    ├── .pending/          # Proposed plans directory
+    ├── .approve           # Write: plan_id to execute
+    └── .reject            # Write: plan_id to cancel
 ```
 
 ## Key Details

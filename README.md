@@ -24,6 +24,39 @@ A FUSE filesystem for RAG (Retrieval-Augmented Generation) architectures. RAGFS 
 - **Semantic File Management** - AI-powered organization, deduplication, and cleanup via `.semantic/`
 - **Comprehensive Testing** - 380+ tests across all crates ensuring reliability
 
+## Feature Status
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| CLI (index, query, status) | Stable | Core functionality |
+| FUSE mount | Stable | Linux only |
+| Semantic search | Stable | Vector similarity with LanceDB |
+| Hybrid search | Stable | Vector + full-text |
+| Text extraction | Stable | 40+ formats |
+| Code chunking | Stable | Tree-sitter based |
+| PDF extraction | Stable | Text + embedded images |
+| Agent operations (.ops/) | Stable | JSON feedback, batch support |
+| Safety layer (.safety/) | Stable | Trash, history, undo |
+| Semantic operations (.semantic/) | Beta | Organize, dedupe, cleanup |
+| Python bindings | Beta | PyO3 based |
+| MCP server | Beta | Claude Desktop integration |
+| Image captioning | Experimental | Optional, requires `vision` feature |
+
+## Use Cases
+
+**Ideal for:**
+- Code repositories (1K-50K files)
+- Documentation collections
+- Research notes and papers
+- AI agent file management
+- Local-first semantic search
+
+**Limitations:**
+- Linux only (FUSE requirement)
+- Embedding model requires ~500MB disk
+- Large repositories (100K+ files) may need tuning
+- Real-time search, not batch analytics
+
 ## Requirements
 
 - Rust 1.88 or later
@@ -203,10 +236,17 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 
 ## Documentation
 
-- [Architecture Overview](docs/ARCHITECTURE.md)
-- [User Guide](docs/USER_GUIDE.md)
-- [Development Guide](docs/DEVELOPMENT.md)
-- [API Reference](docs/API.md)
+- [Getting Started](docs/GETTING_STARTED.md) - 5-minute tutorial
+- [User Guide](docs/USER_GUIDE.md) - Complete CLI reference
+- [Configuration](docs/CONFIGURATION.md) - All config options
+- [Performance Guide](docs/PERFORMANCE.md) - Tuning and optimization
+- [Troubleshooting](docs/TROUBLESHOOTING.md) - Common issues and solutions
+- [Architecture](docs/ARCHITECTURE.md) - Technical deep-dive
+- [Architecture Decisions](docs/ARCHITECTURE_DECISIONS.md) - Why we made these choices
+- [API Reference](docs/API.md) - Library usage and types
+- [Python Bindings](docs/PYTHON.md) - Python SDK and framework integrations
+- [MCP Server](docs/MCP.md) - Claude Desktop integration
+- [Development Guide](docs/DEVELOPMENT.md) - Contributing to RAGFS
 
 ## How It Works
 

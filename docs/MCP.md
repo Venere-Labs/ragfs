@@ -235,6 +235,16 @@ Restore a file from trash using its undo_id.
 | `undo_id` | string | required | The undo_id from delete |
 | `index` | string | "default" | Index name |
 
+**Response:**
+```json
+{
+  "success": true,
+  "message": "File restored successfully",
+  "undo_id": "trash_abc123",
+  "restored_path": "/path/to/file.txt"
+}
+```
+
 ### ragfs_get_history
 
 Get operation history for audit trail.
@@ -272,6 +282,28 @@ Undo a previous operation by its ID.
 |-----------|------|---------|-------------|
 | `undo_id` | string | required | Operation ID from history |
 | `index` | string | "default" | Index name |
+
+**Response:**
+```json
+{
+  "success": true,
+  "undo_id": "op_abc123",
+  "message": "Operation undone: delete -> restore",
+  "original_operation": "delete",
+  "undo_action": "restore",
+  "affected_path": "/path/to/file.txt"
+}
+```
+
+**Error Response (operation not undoable):**
+```json
+{
+  "success": false,
+  "error": "Operation is not reversible",
+  "undo_id": "op_xyz789",
+  "hint": "Only delete, move, copy, and create operations can be undone"
+}
+```
 
 ---
 
@@ -370,7 +402,44 @@ Create an organization plan (NOT executed until approved).
 
 ### ragfs_propose_cleanup
 
-Create a cleanup plan for redundant/stale files.
+Create a cleanup plan for redundant/stale files (NOT executed until approved).
+
+**Parameters:**
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `scope` | string | "/" | Directory scope to analyze |
+| `include_duplicates` | boolean | true | Include duplicate files |
+| `include_stale` | boolean | true | Include stale files |
+| `stale_days` | integer | 90 | Days to consider a file stale |
+| `index` | string | "default" | Index name |
+
+**Response:**
+```json
+{
+  "plan_id": "plan_cleanup_xyz",
+  "status": "pending",
+  "description": "Cleanup: remove 5 duplicates, 3 stale files",
+  "action_count": 8,
+  "actions": [
+    {
+      "action_type": "delete",
+      "target": "/path/to/file_copy.txt",
+      "reason": "Duplicate of /path/to/file.txt (similarity: 0.99)",
+      "confidence": 0.95
+    },
+    {
+      "action_type": "delete",
+      "target": "/old/unused.log",
+      "reason": "Stale file: not modified in 180 days",
+      "confidence": 0.80
+    }
+  ],
+  "potential_savings_bytes": 5242880,
+  "potential_savings_mb": 5.0,
+  "created_at": "2024-01-15T10:30:00",
+  "hint": "Review carefully. Use ragfs_approve_plan(plan_id='plan_cleanup_xyz') to execute."
+}
+```
 
 ### ragfs_list_pending_plans
 
@@ -403,6 +472,55 @@ Get full details of a plan including all proposed actions.
 | `plan_id` | string | required | The plan ID |
 | `index` | string | "default" | Index name |
 
+**Response:**
+```json
+{
+  "plan_id": "plan_abc123",
+  "status": "pending",
+  "description": "Organize files by topic into 3 groups",
+  "created_at": "2024-01-15T10:30:00",
+  "action_count": 5,
+  "actions": [
+    {
+      "action_type": "mkdir",
+      "target": "/docs/api/",
+      "reason": "Create directory for API documentation",
+      "confidence": 1.0
+    },
+    {
+      "action_type": "move",
+      "source": "/docs/endpoints.md",
+      "target": "/docs/api/endpoints.md",
+      "reason": "Group with related API documentation",
+      "confidence": 0.87
+    },
+    {
+      "action_type": "move",
+      "source": "/docs/authentication.md",
+      "target": "/docs/api/authentication.md",
+      "reason": "Group with related API documentation",
+      "confidence": 0.82
+    }
+  ],
+  "impact_summary": {
+    "files_affected": 4,
+    "directories_created": 1,
+    "moves": 3,
+    "deletes": 0
+  }
+}
+```
+
+**Error Response (plan not found):**
+```json
+{
+  "success": false,
+  "error": "Plan not found",
+  "plan_id": "plan_invalid",
+  "hint": "Use ragfs_list_pending_plans to see available plans"
+}
+```
+
 ### ragfs_approve_plan
 
 Approve and execute a plan. All actions become reversible.
@@ -434,6 +552,18 @@ Reject and discard a plan (no changes made).
 |-----------|------|---------|-------------|
 | `plan_id` | string | required | The plan ID to reject |
 | `index` | string | "default" | Index name |
+
+**Response:**
+```json
+{
+  "success": true,
+  "plan_id": "plan_abc123",
+  "status": "rejected",
+  "message": "Plan rejected and discarded",
+  "action_count": 5,
+  "hint": "No changes were made to the filesystem"
+}
+```
 
 ---
 

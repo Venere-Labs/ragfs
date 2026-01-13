@@ -35,6 +35,117 @@ async def main():
 asyncio.run(main())
 ```
 
+## Complete RAG Pipeline Example
+
+This example shows the complete workflow: load files, chunk, embed, store, and query.
+
+```python
+import asyncio
+from ragfs import (
+    RagfsDocumentLoader,
+    RagfsTextSplitter,
+    RagfsEmbeddings,
+    RagfsVectorStore,
+    RagfsRetriever,
+)
+
+async def build_rag_index(source_dir: str, db_path: str):
+    """Build a complete RAG index from a source directory."""
+
+    # 1. Load documents from various formats
+    print("Loading documents...")
+    loader = RagfsDocumentLoader()
+    await loader.init()
+    docs = await loader.load_directory(source_dir, glob="**/*.{py,rs,md,txt}")
+    print(f"  Loaded {len(docs)} documents")
+
+    # 2. Split into chunks (code-aware for source files)
+    print("Splitting into chunks...")
+    splitter = RagfsTextSplitter(
+        chunk_size=512,
+        chunk_overlap=64,
+        code_aware=True,  # Uses tree-sitter for code files
+    )
+    await splitter.init()
+    chunks = await splitter.split_documents(docs)
+    print(f"  Created {len(chunks)} chunks")
+
+    # 3. Initialize embeddings (downloads model on first run)
+    print("Initializing embeddings...")
+    embeddings = RagfsEmbeddings()
+    await embeddings.init()
+    print(f"  Using {embeddings.model_name} ({embeddings.dimension} dimensions)")
+
+    # 4. Store in vector database
+    print("Storing vectors...")
+    store = RagfsVectorStore(db_path=db_path)
+    await store.init()
+    await store.add_documents(chunks)
+    print(f"  Stored {len(chunks)} vectors")
+
+    return store
+
+async def query_index(db_path: str, query: str, k: int = 5):
+    """Query an existing index."""
+
+    retriever = RagfsRetriever(db_path=db_path, hybrid=True, k=k)
+    await retriever.init()
+
+    results = await retriever.search(query)
+
+    print(f"\nQuery: {query}")
+    print("-" * 50)
+    for i, result in enumerate(results, 1):
+        print(f"\n{i}. {result.document.metadata.get('file_path', 'unknown')}")
+        print(f"   Score: {result.score:.4f}")
+        print(f"   Preview: {result.document.page_content[:150]}...")
+
+async def main():
+    # Build the index
+    store = await build_rag_index(
+        source_dir="./my_project",
+        db_path="./ragfs_index"
+    )
+
+    # Query the index
+    await query_index(
+        db_path="./ragfs_index",
+        query="how does authentication work",
+        k=5
+    )
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+**Output:**
+```
+Loading documents...
+  Loaded 47 documents
+Splitting into chunks...
+  Created 312 chunks
+Initializing embeddings...
+  Using gte-small (384 dimensions)
+Storing vectors...
+  Stored 312 vectors
+
+Query: how does authentication work
+--------------------------------------------------
+
+1. src/auth/jwt.rs
+   Score: 0.8542
+   Preview: pub async fn validate_token(token: &str) -> Result<Claims> {
+       let key = get_signing_key()?;
+       let claims = decode::<Claims>(token, &key, &Validation::default())...
+
+2. src/middleware/auth.rs
+   Score: 0.8123
+   Preview: impl<S> AuthMiddleware<S> {
+       pub fn new(inner: S) -> Self {
+           Self { inner, jwt_validator: JwtValidator::new() }
+       }...
+```
+
 ## Core Components
 
 ### RagfsEmbeddings

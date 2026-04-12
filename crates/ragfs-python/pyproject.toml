@@ -34,7 +34,7 @@ llamaindex = ["llama-index-core>=0.10"]
 haystack = ["haystack-ai>=2.0"]
 
 # LLM providers (for RAG chain examples)
-openai = ["langchain-openai>=0.1"]
+openai = ["langchain-openai>=0.3.35"]
 anthropic = ["langchain-anthropic>=0.1"]
 ollama = ["langchain-ollama>=0.1"]
 

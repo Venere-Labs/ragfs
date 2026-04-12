@@ -36,7 +36,7 @@ haystack = ["haystack-ai>=2.0"]
 # LLM providers (for RAG chain examples)
 openai = ["langchain-openai>=0.1"]
 anthropic = ["langchain-anthropic>=0.1"]
-ollama = ["langchain-ollama>=0.1"]
+ollama = ["langchain-ollama>=0.3.10"]
 
 # Convenience bundles
 all-llm = ["ragfs[langchain,openai,anthropic,ollama]"]

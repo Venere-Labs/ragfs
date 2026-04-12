@@ -31,7 +31,7 @@ keywords = ["rag", "embeddings", "vector-search", "langchain", "llama-index"]
 # Framework adapters
 langchain = ["langchain-core>=0.2", "langchain-text-splitters>=0.2"]
 llamaindex = ["llama-index-core>=0.10"]
-haystack = ["haystack-ai>=2.0"]
+haystack = ["haystack-ai>=2.21.0"]
 
 # LLM providers (for RAG chain examples)
 openai = ["langchain-openai>=0.1"]

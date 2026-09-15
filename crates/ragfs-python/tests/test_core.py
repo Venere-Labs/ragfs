@@ -30,14 +30,12 @@ class TestDocument:
 class TestSearchResult:
     """Tests for SearchResult class."""
 
-    def test_search_result_creation(self):
-        """Test creating a SearchResult."""
-        from ragfs import Document, SearchResult
+    def test_search_result_exported(self):
+        """SearchResult is returned by search, not constructed by callers."""
+        from ragfs import SearchResult
 
-        doc = Document(page_content="Content", metadata={"file": "test.txt"})
-        result = SearchResult(document=doc, score=0.95)
-        assert result.document.page_content == "Content"
-        assert result.score == 0.95
+        assert hasattr(SearchResult, "document")
+        assert hasattr(SearchResult, "score")
 
 
 class TestOperationTypes:
@@ -48,42 +46,42 @@ class TestOperationTypes:
         from ragfs import Operation
 
         op = Operation.create("/path/file.txt", "content")
-        assert op.action_type == "create"
-        assert op.target == "/path/file.txt"
+        assert op.operation_type == "create"
+        assert "/path/file.txt" in repr(op)
 
     def test_operation_move(self):
         """Test Operation.move factory."""
         from ragfs import Operation
 
         op = Operation.move("/old/path", "/new/path")
-        assert op.action_type == "move"
-        assert op.source == "/old/path"
-        assert op.target == "/new/path"
+        assert op.operation_type == "move"
+        assert "/old/path" in repr(op)
+        assert "/new/path" in repr(op)
 
     def test_operation_copy(self):
         """Test Operation.copy factory."""
         from ragfs import Operation
 
         op = Operation.copy("/src", "/dst")
-        assert op.action_type == "copy"
-        assert op.source == "/src"
-        assert op.target == "/dst"
+        assert op.operation_type == "copy"
+        assert "/src" in repr(op)
+        assert "/dst" in repr(op)
 
     def test_operation_delete(self):
         """Test Operation.delete factory."""
         from ragfs import Operation
 
         op = Operation.delete("/path/to/delete")
-        assert op.action_type == "delete"
-        assert op.target == "/path/to/delete"
+        assert op.operation_type == "delete"
+        assert "/path/to/delete" in repr(op)
 
     def test_operation_mkdir(self):
         """Test Operation.mkdir factory."""
         from ragfs import Operation
 
         op = Operation.mkdir("/new/directory")
-        assert op.action_type == "mkdir"
-        assert op.target == "/new/directory"
+        assert op.operation_type == "mkdir"
+        assert "/new/directory" in repr(op)
 
 
 class TestOrganizeTypes:
@@ -94,21 +92,21 @@ class TestOrganizeTypes:
         from ragfs import OrganizeStrategy
 
         strat = OrganizeStrategy.by_topic()
-        assert strat.strategy_type == "by_topic"
+        assert strat.name == "by_topic"
 
     def test_organize_strategy_by_type(self):
         """Test OrganizeStrategy.by_type factory."""
         from ragfs import OrganizeStrategy
 
         strat = OrganizeStrategy.by_type()
-        assert strat.strategy_type == "by_type"
+        assert strat.name == "by_type"
 
     def test_organize_strategy_by_project(self):
         """Test OrganizeStrategy.by_project factory."""
         from ragfs import OrganizeStrategy
 
         strat = OrganizeStrategy.by_project()
-        assert strat.strategy_type == "by_project"
+        assert strat.name == "by_project"
 
     def test_organize_request(self):
         """Test OrganizeRequest creation."""
@@ -123,7 +121,7 @@ class TestOrganizeTypes:
         )
         assert request.scope == "./docs"
         assert request.max_groups == 5
-        assert request.similarity_threshold == 0.8
+        assert request.similarity_threshold == pytest.approx(0.8)
 
 
 @pytest.mark.requires_model

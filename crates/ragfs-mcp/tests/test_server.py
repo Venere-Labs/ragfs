@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import blake3
 import pytest
 
 
@@ -191,8 +192,6 @@ class TestServerConfiguration:
 
     def test_get_db_path_matches_cli_blake3_scheme(self, tmp_path, monkeypatch):
         """MCP must hash the canonical source path the same way as the CLI."""
-        import blake3
-
         from ragfs_mcp.server import get_db_path, index_id_for_source
 
         monkeypatch.delenv("RAGFS_DB_PATH", raising=False)
@@ -227,8 +226,6 @@ class TestServerConfiguration:
 
     def test_get_db_path_default_uses_source_path(self, tmp_path, monkeypatch):
         """Default index follows RAGFS_SOURCE_PATH, not a literal 'default' folder."""
-        import blake3
-
         from ragfs_mcp.server import get_db_path
 
         monkeypatch.delenv("RAGFS_DB_PATH", raising=False)
@@ -263,8 +260,6 @@ class TestServerConfiguration:
 
     def test_get_db_path_respects_data_dir(self, tmp_path, monkeypatch):
         """RAGFS_DATA_DIR is the same override the CLI data_dir() uses."""
-        import blake3
-
         from ragfs_mcp.server import get_db_path
 
         monkeypatch.delenv("RAGFS_DB_PATH", raising=False)

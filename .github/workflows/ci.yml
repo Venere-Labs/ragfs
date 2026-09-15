@@ -195,11 +195,28 @@ jobs:
         run: |
           cd crates/ragfs-python
           maturin develop --features "candle,lancedb"
+      # All LlamaIndex/Haystack tests are marked requires_model, so this
+      # marker expression deselects every test (pytest exit 5). Treat that
+      # as success; real failures still fail the job.
       - name: Run LlamaIndex tests
         run: |
           cd crates/ragfs-python
-          pytest tests/test_llamaindex/ -v -m "not slow and not requires_model"
+          pytest tests/test_llamaindex/ -v -m "not slow and not requires_model" || {
+            status=$?
+            if [ "$status" -eq 5 ]; then
+              echo "No tests selected (pytest exit 5); treating as success"
+              exit 0
+            fi
+            exit "$status"
+          }
       - name: Run Haystack tests
         run: |
           cd crates/ragfs-python
-          pytest tests/test_haystack/ -v -m "not slow and not requires_model"
+          pytest tests/test_haystack/ -v -m "not slow and not requires_model" || {
+            status=$?
+            if [ "$status" -eq 5 ]; then
+              echo "No tests selected (pytest exit 5); treating as success"
+              exit 0
+            fi
+            exit "$status"
+          }

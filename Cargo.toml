@@ -114,10 +114,6 @@ split-debuginfo = "unpacked"
 [profile.dev.package."*"]
 opt-level = 3
 
-[patch.crates-io]
-# Fix ethnum 1.5.2 compilation error with Rust 1.97+
-ethnum = "1.5.3"
-
 [workspace.lints.rust]
 unsafe_code = "warn"
 

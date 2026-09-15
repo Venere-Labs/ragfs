@@ -321,6 +321,55 @@ impl LanceStore {
 
         Ok(batch)
     }
+
+    /// Combine chunk-column filters with source-file `modified_at` constraints.
+    async fn chunk_filter_sql(
+        &self,
+        filters: &[SearchFilter],
+    ) -> Result<Option<String>, StoreError> {
+        Ok(combine_predicates(
+            filters_to_sql(filters),
+            self.modified_at_path_predicate(filters).await?,
+        ))
+    }
+
+    /// Resolve `ModifiedAfter` / `ModifiedBefore` against the files table.
+    async fn modified_at_path_predicate(
+        &self,
+        filters: &[SearchFilter],
+    ) -> Result<Option<String>, StoreError> {
+        let Some(date_sql) = file_date_filters_to_sql(filters) else {
+            return Ok(None);
+        };
+
+        let table = self.get_files_table().await?;
+        let mut results = table
+            .query()
+            .only_if(date_sql)
+            .execute()
+            .await
+            .map_err(|e| StoreError::Query(format!("Failed to apply modified_at filter: {e}")))?;
+
+        let mut paths = Vec::new();
+        while let Some(batch) = results.try_next().await.map_err(|e| {
+            StoreError::Query(format!("Failed to fetch files for modified_at filter: {e}"))
+        })? {
+            for record in batch_to_file_records(&batch)? {
+                paths.push(record.path.to_string_lossy().to_string());
+            }
+        }
+
+        if paths.is_empty() {
+            return Ok(Some("1 = 0".to_string()));
+        }
+
+        let in_list = paths
+            .iter()
+            .map(|p| format!("'{}'", escape_sql_literal(p)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Ok(Some(format!("file_path IN ({in_list})")))
+    }
 }
 
 #[async_trait]
@@ -416,7 +465,7 @@ impl VectorStore for LanceStore {
         );
 
         let table = self.get_chunks_table().await?;
-        let filter_sql = filters_to_sql(&query.filters);
+        let filter_sql = self.chunk_filter_sql(&query.filters).await?;
 
         let mut search_q = table
             .vector_search(query.embedding.clone())
@@ -464,7 +513,7 @@ impl VectorStore for LanceStore {
         );
 
         let table = self.get_chunks_table().await?;
-        let filter_sql = filters_to_sql(&query.filters);
+        let filter_sql = self.chunk_filter_sql(&query.filters).await?;
 
         // Build hybrid query combining FTS and vector search
         let fts_query = FullTextSearchQuery::new(query_text);
@@ -786,63 +835,110 @@ fn escape_like_literal(value: &str) -> String {
         .replace('_', "\\_")
 }
 
-/// Convert a glob (`*`, `**`, `?`) into a SQL `LIKE` pattern.
-fn glob_to_like_pattern(glob: &str) -> String {
-    let mut pattern = String::with_capacity(glob.len());
-    let mut chars = glob.chars().peekable();
+/// Convert a glob (`*`, `**`, `?`) into an anchored regular expression.
+///
+/// `*` and `?` do not cross `/`. `**` matches across directories; `**/` also
+/// matches zero intervening segments without collapsing the following name.
+fn glob_to_regex(glob: &str) -> String {
+    let mut regex = String::from("^");
+    let chars: Vec<char> = glob.chars().collect();
+    let mut i = 0;
 
-    while let Some(c) = chars.next() {
-        match c {
+    while i < chars.len() {
+        match chars[i] {
             '*' => {
-                if chars.peek() == Some(&'*') {
-                    chars.next();
-                    if chars.peek() == Some(&'/') {
-                        chars.next();
+                if i + 1 < chars.len() && chars[i + 1] == '*' {
+                    i += 2;
+                    if i < chars.len() && chars[i] == '/' {
+                        i += 1;
+                        regex.push_str("(?:.*/)?");
+                    } else {
+                        regex.push_str(".*");
                     }
-                }
-                if !pattern.ends_with('%') {
-                    pattern.push('%');
+                } else {
+                    regex.push_str("[^/]*");
+                    i += 1;
                 }
             }
-            '?' => pattern.push('_'),
-            '%' | '_' => {
-                pattern.push('\\');
-                pattern.push(c);
+            '?' => {
+                regex.push_str("[^/]");
+                i += 1;
             }
-            '\\' => pattern.push_str("\\\\"),
-            _ => pattern.push(c),
+            c => {
+                regex.push_str(&regex_escape_char(c));
+                i += 1;
+            }
         }
     }
 
-    pattern
+    regex.push('$');
+    regex
 }
 
-/// Convert one [`SearchFilter`] into a `LanceDB`/`DataFusion` SQL predicate.
-fn filter_to_sql(filter: &SearchFilter) -> String {
-    match filter {
+fn regex_escape_char(c: char) -> String {
+    if matches!(
+        c,
+        '.' | '+' | '(' | ')' | '|' | '[' | ']' | '{' | '}' | '^' | '$' | '\\'
+    ) {
+        format!("\\{c}")
+    } else {
+        c.to_string()
+    }
+}
+
+/// Convert one [`SearchFilter`] into a chunks-table SQL predicate.
+///
+/// Date filters are omitted here; they are resolved against `files.modified_at`.
+fn filter_to_sql(filter: &SearchFilter) -> Option<String> {
+    Some(match filter {
         SearchFilter::PathPrefix(prefix) => {
             let pattern = escape_sql_literal(&format!("{}%", escape_like_literal(prefix)));
             format!("file_path LIKE '{pattern}' ESCAPE '\\'")
         }
         SearchFilter::PathGlob(glob) => {
-            let pattern = escape_sql_literal(&glob_to_like_pattern(glob));
-            format!("file_path LIKE '{pattern}' ESCAPE '\\'")
+            let pattern = escape_sql_literal(&glob_to_regex(glob));
+            format!("regexp_like(file_path, '{pattern}')")
         }
         SearchFilter::MimeType(value) => type_or_mime_sql(value),
         SearchFilter::Language(lang) => {
             let escaped = escape_sql_literal(&lang.to_lowercase());
             format!("(LOWER(language) = '{escaped}' OR LOWER(content_type) = 'code:{escaped}')")
         }
-        SearchFilter::ModifiedAfter(ts) => {
-            let escaped = escape_sql_literal(&ts.to_rfc3339());
-            format!("indexed_at >= '{escaped}'")
-        }
-        SearchFilter::ModifiedBefore(ts) => {
-            let escaped = escape_sql_literal(&ts.to_rfc3339());
-            format!("indexed_at <= '{escaped}'")
-        }
+        SearchFilter::ModifiedAfter(_) | SearchFilter::ModifiedBefore(_) => return None,
         SearchFilter::MinDepth(depth) => format!("depth >= {depth}"),
         SearchFilter::MaxDepth(depth) => format!("depth <= {depth}"),
+    })
+}
+
+/// Files-table predicates for source modification time (inclusive).
+fn file_date_filters_to_sql(filters: &[SearchFilter]) -> Option<String> {
+    let clauses: Vec<String> = filters
+        .iter()
+        .filter_map(|filter| match filter {
+            SearchFilter::ModifiedAfter(ts) => {
+                let escaped = escape_sql_literal(&ts.to_rfc3339());
+                Some(format!("modified_at >= '{escaped}'"))
+            }
+            SearchFilter::ModifiedBefore(ts) => {
+                let escaped = escape_sql_literal(&ts.to_rfc3339());
+                Some(format!("modified_at <= '{escaped}'"))
+            }
+            _ => None,
+        })
+        .collect();
+
+    if clauses.is_empty() {
+        None
+    } else {
+        Some(clauses.join(" AND "))
+    }
+}
+
+fn combine_predicates(left: Option<String>, right: Option<String>) -> Option<String> {
+    match (left, right) {
+        (Some(a), Some(b)) => Some(format!("{a} AND {b}")),
+        (Some(a), None) | (None, Some(a)) => Some(a),
+        (None, None) => None,
     }
 }
 
@@ -873,8 +969,12 @@ fn filters_to_sql(filters: &[SearchFilter]) -> Option<String> {
         return None;
     }
 
-    let clauses: Vec<String> = filters.iter().map(filter_to_sql).collect();
-    Some(clauses.join(" AND "))
+    let clauses: Vec<String> = filters.iter().filter_map(filter_to_sql).collect();
+    if clauses.is_empty() {
+        None
+    } else {
+        Some(clauses.join(" AND "))
+    }
 }
 
 fn content_type_to_string(ct: &ContentType) -> String {
@@ -1781,7 +1881,7 @@ mod tests {
         ])
         .unwrap();
 
-        assert!(sql.contains("file_path LIKE 'src/%.rs' ESCAPE '\\'"));
+        assert!(sql.contains("regexp_like(file_path, '^src/(?:.*/)?[^/]*\\.rs$')"));
         assert!(sql.contains("LOWER(file_mime_type) = 'text/x-rust'"));
         assert!(sql.contains("depth >= 1"));
     }
@@ -1798,11 +1898,24 @@ mod tests {
     }
 
     #[test]
-    fn test_glob_to_like_pattern() {
-        assert_eq!(glob_to_like_pattern("src/**"), "src/%");
-        assert_eq!(glob_to_like_pattern("src/**/*.rs"), "src/%.rs");
-        assert_eq!(glob_to_like_pattern("file?.txt"), "file_.txt");
-        assert_eq!(glob_to_like_pattern("100%_done"), "100\\%\\_done");
+    fn test_glob_to_regex_preserves_path_segments() {
+        assert_eq!(glob_to_regex("src/*.rs"), r"^src/[^/]*\.rs$");
+        assert_eq!(glob_to_regex("src/**/mod.rs"), r"^src/(?:.*/)?mod\.rs$");
+        assert_eq!(glob_to_regex("src/**"), r"^src/.*$");
+        assert_eq!(glob_to_regex("file?.txt"), r"^file[^/]\.txt$");
+        assert!(!glob_to_regex("src/*.rs").contains(".*"));
+        assert!(!glob_to_regex("src/**/mod.rs").contains("%mod"));
+    }
+
+    #[test]
+    fn test_file_date_filters_use_modified_at() {
+        let after = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        let sql = file_date_filters_to_sql(&[SearchFilter::ModifiedAfter(after)]).unwrap();
+        assert!(sql.contains("modified_at >= "));
+        assert!(!sql.contains("indexed_at"));
+        assert!(filters_to_sql(&[SearchFilter::ModifiedAfter(after)]).is_none());
     }
 
     #[test]
@@ -1991,5 +2104,112 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].file_path, PathBuf::from("src/lib.rs"));
         assert!(results[0].content.contains("rust_auth"));
+    }
+
+    async fn seeded_glob_boundary_store() -> (tempfile::TempDir, LanceStore, Vec<f32>) {
+        let temp = tempdir().unwrap();
+        let store = LanceStore::new(temp.path().join("test.lance"), TEST_DIM);
+        store.init().await.unwrap();
+        let embedding = create_random_embedding(TEST_DIM);
+        store
+            .upsert_chunks(&[
+                create_test_chunk(Path::new("src/lib.rs"), "lib", embedding.clone(), 0),
+                create_test_chunk(
+                    Path::new("src/nested/file.rs"),
+                    "nested",
+                    embedding.clone(),
+                    0,
+                ),
+                create_test_chunk(Path::new("src/mod.rs"), "mod file", embedding.clone(), 0),
+                create_test_chunk(Path::new("src/notmod.rs"), "not mod", embedding.clone(), 0),
+            ])
+            .await
+            .unwrap();
+        (temp, store, embedding)
+    }
+
+    #[tokio::test]
+    async fn test_search_path_glob_star_does_not_cross_slash() {
+        let (_temp, store, embedding) = seeded_glob_boundary_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::PathGlob("src/*.rs".to_string())],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        let paths: Vec<_> = results.iter().map(|r| r.file_path.clone()).collect();
+        assert!(paths.contains(&PathBuf::from("src/lib.rs")));
+        assert!(paths.contains(&PathBuf::from("src/mod.rs")));
+        assert!(paths.contains(&PathBuf::from("src/notmod.rs")));
+        assert!(!paths.contains(&PathBuf::from("src/nested/file.rs")));
+    }
+
+    #[tokio::test]
+    async fn test_search_path_glob_doublestar_keeps_separator() {
+        let (_temp, store, embedding) = seeded_glob_boundary_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::PathGlob("src/**/mod.rs".to_string())],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        let paths: Vec<_> = results.iter().map(|r| r.file_path.clone()).collect();
+        assert_eq!(results.len(), 1);
+        assert!(paths.contains(&PathBuf::from("src/mod.rs")));
+        assert!(!paths.contains(&PathBuf::from("src/notmod.rs")));
+        assert!(!paths.contains(&PathBuf::from("src/lib.rs")));
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_source_modified_at() {
+        let temp = tempdir().unwrap();
+        let store = LanceStore::new(temp.path().join("test.lance"), TEST_DIM);
+        store.init().await.unwrap();
+        let embedding = create_random_embedding(TEST_DIM);
+
+        let old_path = PathBuf::from("old.txt");
+        let new_path = PathBuf::from("new.txt");
+        store
+            .upsert_chunks(&[
+                create_test_chunk(&old_path, "old file", embedding.clone(), 0),
+                create_test_chunk(&new_path, "new file", embedding.clone(), 0),
+            ])
+            .await
+            .unwrap();
+
+        let old_modified = chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        let new_modified = chrono::DateTime::parse_from_rfc3339("2024-06-01T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        let cutoff = chrono::DateTime::parse_from_rfc3339("2022-01-01T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let mut old_record = create_test_file_record(&old_path);
+        old_record.modified_at = old_modified;
+        let mut new_record = create_test_file_record(&new_path);
+        new_record.modified_at = new_modified;
+        store.upsert_file(&old_record).await.unwrap();
+        store.upsert_file(&new_record).await.unwrap();
+
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::ModifiedAfter(cutoff)],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, new_path);
     }
 }

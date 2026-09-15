@@ -89,8 +89,6 @@ ALLOWED_MIME_TYPES = {
     "application/toml",
     # Documents
     "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     # Fallback for unknown text
     "application/octet-stream",
 }

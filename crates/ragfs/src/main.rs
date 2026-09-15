@@ -32,12 +32,12 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use daemonize::Daemonize;
 use ragfs_chunker::{ChunkerRegistry, CodeChunker, FixedSizeChunker, SemanticChunker};
-use ragfs_core::{ChunkConfig, Embedder, EmbeddingConfig, Indexer, VectorStore};
+use ragfs_core::{Embedder, Indexer, VectorStore};
 #[cfg(feature = "candle")]
 use ragfs_embed::CandleEmbedder;
 use ragfs_embed::EmbedderPool;
 use ragfs_extract::{ExtractorRegistry, ImageExtractor, PdfExtractor, TextExtractor};
-use ragfs_index::{IndexerConfig, IndexerService};
+use ragfs_index::IndexerService;
 use ragfs_query::QueryExecutor;
 #[cfg(feature = "lancedb")]
 use ragfs_store::LanceStore;
@@ -48,9 +48,7 @@ use std::sync::Arc;
 use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
-mod config;
-
-use config::{Config, data_dir};
+use ragfs::config::{Config, data_dir};
 
 /// Embedding dimension for gte-small model.
 const EMBEDDING_DIM: usize = 384;
@@ -124,9 +122,13 @@ enum Commands {
         /// Query string
         query: String,
 
-        /// Maximum results
-        #[arg(short, long, default_value = "10")]
-        limit: usize,
+        /// Maximum results (overrides `[query].default_limit`)
+        #[arg(short, long)]
+        limit: Option<usize>,
+
+        /// Enable hybrid search (vector + full-text). Overrides `[query].hybrid`.
+        #[arg(long)]
+        hybrid: bool,
     },
 
     /// Show index status
@@ -222,9 +224,10 @@ fn get_log_path(source: &PathBuf) -> Result<PathBuf> {
     Ok(dir.join(format!("{hash_str}.log")))
 }
 
-/// Create the standard component stack.
+/// Create the standard component stack, applying `[embedding]` from config.
 async fn create_components(
     source: PathBuf,
+    config: &Config,
 ) -> Result<(
     Arc<LanceStore>,
     Arc<ExtractorRegistry>,
@@ -250,11 +253,15 @@ async fn create_components(
     chunkers.set_default("fixed");
     let chunkers = Arc::new(chunkers);
 
-    // Create embedder
+    // Create embedder from config (model, GPU). Unknown models fail before download.
+    let model = config
+        .resolve_embedding_model()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     let cache_dir = data_dir()
         .context("Failed to get data directory")?
         .join("models");
-    let embedder = CandleEmbedder::new(cache_dir);
+    let embedder = CandleEmbedder::try_new(cache_dir, model, config.embedding.use_gpu)
+        .context("Failed to create embedder")?;
 
     // Initialize embedder (downloads model if needed)
     info!("Initializing embedder (this may download the model on first run)...");
@@ -265,10 +272,19 @@ async fn create_components(
 
     let embedder_pool = Arc::new(EmbedderPool::new(
         Arc::new(embedder) as Arc<dyn Embedder>,
-        4,
+        config.embedder_pool_size(),
     ));
 
     Ok((store, extractors, chunkers, embedder_pool))
+}
+
+fn load_config(cli: &Cli) -> Result<Config> {
+    if let Some(ref path) = cli.config {
+        Config::load_from(Some(path.clone()))
+            .with_context(|| format!("Failed to load config from {}", path.display()))
+    } else {
+        Config::load().context("Failed to load config")
+    }
 }
 
 #[tokio::main]
@@ -289,6 +305,8 @@ async fn main() -> Result<()> {
 
     tracing::subscriber::set_global_default(subscriber)
         .context("Failed to set tracing subscriber")?;
+
+    let config = load_config(&cli)?;
 
     match cli.command {
         Commands::Mount {
@@ -311,17 +329,12 @@ async fn main() -> Result<()> {
 
             // Create components for RAG functionality
             let (store, extractors, chunkers, embedder_pool) =
-                create_components(source.clone()).await?;
+                create_components(source.clone(), &config).await?;
 
             // Initialize store
             store.init().await.context("Failed to initialize store")?;
 
-            // Create indexer for reindex requests
-            let indexer_config = IndexerConfig {
-                chunk_config: ChunkConfig::default(),
-                embed_config: EmbeddingConfig::default(),
-                ..Default::default()
-            };
+            let indexer_config = config.to_indexer_config(false);
 
             let indexer = Arc::new(IndexerService::new(
                 source.clone(),
@@ -331,6 +344,13 @@ async fn main() -> Result<()> {
                 embedder_pool.clone(),
                 indexer_config,
             ));
+
+            // Initial scan + file watcher so a cold mount is not an empty index
+            indexer
+                .start()
+                .await
+                .context("Failed to start indexer")?;
+            info!("Indexing and watching {}", source.display());
 
             // Create channel for reindex requests
             let (reindex_tx, mut reindex_rx) = tokio::sync::mpsc::channel::<PathBuf>(32);
@@ -355,12 +375,14 @@ async fn main() -> Result<()> {
             let runtime = tokio::runtime::Handle::current();
 
             // Create filesystem with RAG capabilities
-            let fs = ragfs_fuse::RagFs::with_rag(
+            let fs = ragfs_fuse::RagFs::with_rag_query(
                 source.clone(),
                 store as Arc<dyn VectorStore>,
                 embedder_pool.document_embedder(),
                 runtime,
                 Some(reindex_tx),
+                config.query.default_limit,
+                config.query.hybrid,
             );
 
             // Build mount options
@@ -370,7 +392,7 @@ async fn main() -> Result<()> {
                 fuser::MountOption::DefaultPermissions,
             ];
 
-            if allow_other {
+            if allow_other || config.mount.allow_other {
                 options.push(fuser::MountOption::AllowOther);
             }
 
@@ -432,14 +454,10 @@ async fn main() -> Result<()> {
             let path = path.canonicalize()?;
             info!("Indexing {:?} (force={})", path, force);
 
-            let (store, extractors, chunkers, embedder) = create_components(path.clone()).await?;
+            let (store, extractors, chunkers, embedder) =
+                create_components(path.clone(), &config).await?;
 
-            // Create indexer config
-            let config = IndexerConfig {
-                chunk_config: ChunkConfig::default(),
-                embed_config: EmbeddingConfig::default(),
-                ..Default::default()
-            };
+            let indexer_config = config.to_indexer_config(force);
 
             // Create indexer
             let indexer = IndexerService::new(
@@ -448,7 +466,7 @@ async fn main() -> Result<()> {
                 extractors,
                 chunkers,
                 embedder,
-                config,
+                indexer_config,
             );
 
             // Subscribe to updates for progress
@@ -478,29 +496,33 @@ async fn main() -> Result<()> {
             // Start indexer
             indexer.start().await.context("Failed to start indexer")?;
 
+            indexer.wait_until_idle().await;
+
+            let stats = store.stats().await?;
+            info!(
+                "Indexing complete: {} files, {} chunks",
+                stats.total_files, stats.total_chunks
+            );
+
             if watch {
                 info!("Watching for changes. Press Ctrl+C to stop.");
-                // Wait indefinitely
                 tokio::signal::ctrl_c()
                     .await
                     .context("Failed to wait for Ctrl+C")?;
                 indexer.stop().await?;
             } else {
-                // Give some time for initial indexing
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
-                // Check stats
-                let stats = store.stats().await?;
-                info!(
-                    "Indexing complete: {} files, {} chunks",
-                    stats.total_files, stats.total_chunks
-                );
+                indexer.stop().await?;
             }
 
             drop(progress_handle);
         }
 
-        Commands::Query { path, query, limit } => {
+        Commands::Query {
+            path,
+            query,
+            limit,
+            hybrid,
+        } => {
             if !path.exists() {
                 anyhow::bail!("Directory does not exist: {}", path.display());
             }
@@ -517,18 +539,23 @@ async fn main() -> Result<()> {
                 );
             }
 
-            let (store, _extractors, _chunkers, embedder) = create_components(path).await?;
+            let (store, _extractors, _chunkers, embedder) =
+                create_components(path, &config).await?;
 
             // Initialize store
             store.init().await.context("Failed to initialize store")?;
+
+            let limit = config.query_limit(limit);
+            let use_hybrid = config.query_hybrid(hybrid);
 
             // Create query executor
             let executor = QueryExecutor::new(
                 store as Arc<dyn VectorStore>,
                 embedder.document_embedder(),
                 limit,
-                false, // hybrid search
-            );
+                use_hybrid,
+            )
+            .with_max_limit(config.query.max_limit);
 
             // Execute query
             let results = executor
@@ -628,14 +655,6 @@ async fn main() -> Result<()> {
         }
 
         Commands::Config { action } => {
-            // Load config from file or CLI-specified path
-            let config = if let Some(ref path) = cli.config {
-                Config::load_from(Some(path.clone()))
-                    .context(format!("Failed to load config from {}", path.display()))?
-            } else {
-                Config::load().context("Failed to load config")?
-            };
-
             match action {
                 ConfigAction::Show => match cli.format {
                     OutputFormat::Json => {

@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::bert::{BertModel, Config};
-use hf_hub::{Repo, RepoType, api::tokio::Api};
+use hf_hub::{Repo, RepoType};
 use ragfs_core::{EmbedError, Embedder, EmbeddingConfig, EmbeddingOutput, Modality};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -19,6 +19,18 @@ use tracing::{debug, info};
 
 /// Model identifier on `HuggingFace` Hub.
 const MODEL_ID: &str = "thenlper/gte-small";
+
+/// Resolve a user-facing model name to the implemented HuggingFace id.
+///
+/// RAGFS currently implements only `thenlper/gte-small` (alias: `gte-small`).
+pub fn resolve_supported_model(model: &str) -> Result<&'static str, EmbedError> {
+    match model.trim() {
+        "thenlper/gte-small" | "gte-small" => Ok(MODEL_ID),
+        other => Err(EmbedError::ModelLoad(format!(
+            "Unsupported embedding model '{other}'. RAGFS currently supports only 'thenlper/gte-small' (alias: 'gte-small')."
+        ))),
+    }
+}
 
 /// Embedding dimension for gte-small.
 const EMBEDDING_DIM: usize = 384;
@@ -37,27 +49,40 @@ pub struct CandleEmbedder {
     /// Model configuration
     config: Arc<RwLock<Option<Config>>>,
     /// Cache directory for models
-    #[allow(dead_code)]
     cache_dir: PathBuf,
     /// Whether model is initialized
     initialized: Arc<RwLock<bool>>,
 }
 
 impl CandleEmbedder {
-    /// Create a new `CandleEmbedder`.
+    /// Create a new `CandleEmbedder` with the default gte-small model.
+    ///
+    /// GPU is used when available. Prefer [`Self::try_new`] to honor config.
     pub fn new(cache_dir: PathBuf) -> Self {
-        // Try to use CUDA if available, fallback to CPU
-        let device = Device::cuda_if_available(0).unwrap_or(Device::Cpu);
+        Self::try_new(cache_dir, MODEL_ID, true)
+            .expect("default model thenlper/gte-small is supported")
+    }
+
+    /// Create an embedder from config (`model`, `use_gpu`).
+    ///
+    /// Unsupported models fail immediately with a clear error — before download.
+    pub fn try_new(cache_dir: PathBuf, model: &str, use_gpu: bool) -> Result<Self, EmbedError> {
+        let _model_id = resolve_supported_model(model)?;
+        let device = if use_gpu {
+            Device::cuda_if_available(0).unwrap_or(Device::Cpu)
+        } else {
+            Device::Cpu
+        };
         info!("CandleEmbedder using device: {:?}", device);
 
-        Self {
+        Ok(Self {
             device,
             model: Arc::new(RwLock::new(None)),
             tokenizer: Arc::new(RwLock::new(None)),
             config: Arc::new(RwLock::new(None)),
             cache_dir,
             initialized: Arc::new(RwLock::new(false)),
-        }
+        })
     }
 
     /// Create with specific device.
@@ -72,6 +97,12 @@ impl CandleEmbedder {
         }
     }
 
+    /// Whether inference will run on CPU (config `use_gpu = false`, or no GPU).
+    #[must_use]
+    pub fn device_is_cpu(&self) -> bool {
+        self.device.is_cpu()
+    }
+
     /// Initialize the model (download if needed, load into memory).
     pub async fn init(&self) -> Result<(), EmbedError> {
         {
@@ -83,8 +114,10 @@ impl CandleEmbedder {
 
         info!("Initializing CandleEmbedder with model: {}", MODEL_ID);
 
-        // Download model files from HuggingFace Hub
-        let api = Api::new()
+        // Download model files from HuggingFace Hub into the configured cache dir
+        let api = hf_hub::api::tokio::ApiBuilder::new()
+            .with_cache_dir(self.cache_dir.clone())
+            .build()
             .map_err(|e| EmbedError::ModelLoad(format!("Failed to create HF API: {e}")))?;
 
         let repo = api.repo(Repo::new(MODEL_ID.to_string(), RepoType::Model));
@@ -388,6 +421,48 @@ impl Embedder for CandleEmbedder {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_unsupported_model_errors_before_download() {
+        let cache_dir = tempdir().unwrap();
+        let err = CandleEmbedder::try_new(
+            cache_dir.path().to_path_buf(),
+            "jina-embeddings-v3",
+            false,
+        )
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("jina-embeddings-v3"),
+            "error should name the requested model: {message}"
+        );
+        assert!(
+            message.contains("thenlper/gte-small"),
+            "error should name the supported model: {message}"
+        );
+    }
+
+    #[test]
+    fn test_gte_small_alias_is_accepted() {
+        let cache_dir = tempdir().unwrap();
+        let embedder =
+            CandleEmbedder::try_new(cache_dir.path().to_path_buf(), "gte-small", false).unwrap();
+        assert_eq!(embedder.model_name(), "thenlper/gte-small");
+        assert!(
+            embedder.device_is_cpu(),
+            "use_gpu=false must select the CPU device"
+        );
+    }
+
+    #[test]
+    fn test_resolve_supported_model() {
+        assert_eq!(
+            resolve_supported_model("thenlper/gte-small").unwrap(),
+            MODEL_ID
+        );
+        assert_eq!(resolve_supported_model("gte-small").unwrap(), MODEL_ID);
+        assert!(resolve_supported_model("jina-embeddings-v3").is_err());
+    }
 
     #[tokio::test]
     #[ignore] // Requires model download

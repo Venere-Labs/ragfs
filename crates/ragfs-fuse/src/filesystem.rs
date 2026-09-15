@@ -90,6 +90,8 @@ impl RagFs {
     }
 
     /// Create a new RAGFS filesystem with full RAG capabilities.
+    ///
+    /// Hybrid search defaults to on (same as `[query].hybrid` in config.toml).
     pub fn with_rag(
         source: PathBuf,
         store: Arc<dyn VectorStore>,
@@ -97,11 +99,24 @@ impl RagFs {
         runtime: Handle,
         reindex_sender: Option<mpsc::Sender<PathBuf>>,
     ) -> Self {
+        Self::with_rag_query(source, store, embedder, runtime, reindex_sender, 10, true)
+    }
+
+    /// Create a RAG-enabled filesystem with query settings from config / CLI.
+    pub fn with_rag_query(
+        source: PathBuf,
+        store: Arc<dyn VectorStore>,
+        embedder: Arc<dyn Embedder>,
+        runtime: Handle,
+        reindex_sender: Option<mpsc::Sender<PathBuf>>,
+        default_limit: usize,
+        hybrid: bool,
+    ) -> Self {
         let query_executor = Arc::new(QueryExecutor::new(
             store.clone(),
             embedder.clone(),
-            10,    // default limit
-            false, // hybrid search
+            default_limit,
+            hybrid,
         ));
 
         let safety_manager = Arc::new(SafetyManager::new(&source, None));

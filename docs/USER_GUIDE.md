@@ -118,7 +118,7 @@ ragfs index <PATH> [OPTIONS]
 **Options:**
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--force` | `-f` | Force reindexing of all files |
+| `--force` | `-f` | Reindex every eligible file (skip content-hash reuse) |
 | `--watch` | `-w` | Watch for changes after initial indexing |
 
 **Examples:**
@@ -159,7 +159,8 @@ ragfs query <PATH> <QUERY> [OPTIONS]
 **Options:**
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
-| `--limit` | `-l` | 10 | Maximum number of results |
+| `--limit` | `-l` | `[query].default_limit` (10) | Maximum number of results (clamped by `[query].max_limit`) |
+| `--hybrid` | | config `[query].hybrid` (true) | Force hybrid search (vector + full-text) |
 
 **Examples:**
 
@@ -206,7 +207,7 @@ Query: error handling implementation
 
 ### ragfs mount
 
-Mount a directory as a RAGFS filesystem.
+Mount a directory as a RAGFS filesystem. Starts an initial index scan and a file watcher so queries are not run against an empty or stale index.
 
 ```
 ragfs mount <SOURCE> <MOUNTPOINT> [OPTIONS]
@@ -305,7 +306,7 @@ ragfs config path
 
 ### Configuration File
 
-RAGFS can be configured via `~/.config/ragfs/config.toml`. Generate a sample config:
+RAGFS can be configured via `~/.config/ragfs/config.toml`. `index`, `query`, and `mount` all load this file (CLI flags override it). Generate a sample config:
 
 ```bash
 ragfs config init > ~/.config/ragfs/config.toml

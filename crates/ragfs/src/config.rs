@@ -16,6 +16,8 @@
 //! 3. CLI arguments
 
 use directories::ProjectDirs;
+use ragfs_core::{ChunkConfig, EmbeddingConfig as CoreEmbeddingConfig};
+use ragfs_index::IndexerConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
@@ -30,6 +32,12 @@ pub enum ConfigError {
     /// Failed to parse the config file.
     #[error("failed to parse config file: {0}")]
     Parse(#[from] toml::de::Error),
+
+    /// Embedding model is not implemented.
+    #[error(
+        "unsupported embedding model '{0}': RAGFS currently supports only 'thenlper/gte-small' (alias: 'gte-small')"
+    )]
+    UnsupportedModel(String),
 }
 
 /// Main configuration structure.
@@ -97,6 +105,76 @@ impl Config {
     /// Get the config file path.
     pub fn config_path() -> Option<PathBuf> {
         config_dir().map(|d| d.join("config.toml"))
+    }
+
+    /// Convert this config into an [`IndexerConfig`].
+    ///
+    /// `force` comes from the CLI (`ragfs index --force`) and skips the
+    /// content-hash short-circuit so every eligible file is reindexed.
+    pub fn to_indexer_config(&self, force: bool) -> IndexerConfig {
+        IndexerConfig {
+            chunk_config: self.chunk_config(),
+            embed_config: self.core_embedding_config(),
+            include_patterns: self.index.include.clone(),
+            exclude_patterns: self.index.exclude.clone(),
+            debounce_ms: self.index.debounce_ms,
+            max_file_size: self.index.max_file_size,
+            force,
+        }
+    }
+
+    /// Chunk settings applied to the indexer.
+    pub fn chunk_config(&self) -> ChunkConfig {
+        ChunkConfig {
+            target_size: self.chunking.target_size,
+            max_size: self.chunking.max_size,
+            overlap: self.chunking.overlap,
+            hierarchical: self.chunking.hierarchical,
+            max_depth: self.chunking.max_depth,
+        }
+    }
+
+    /// Core embedding batch settings (normalize stays on for gte-small).
+    pub fn core_embedding_config(&self) -> CoreEmbeddingConfig {
+        CoreEmbeddingConfig {
+            normalize: true,
+            instruction: None,
+            batch_size: self.embedding.batch_size.max(1),
+        }
+    }
+
+    /// Canonical model id, or a clear error if the configured model is not implemented.
+    pub fn resolve_embedding_model(&self) -> Result<&'static str, ConfigError> {
+        resolve_supported_model(&self.embedding.model)
+    }
+
+    /// Worker-pool size for the embedder.
+    pub fn embedder_pool_size(&self) -> usize {
+        self.embedding.max_concurrent.max(1)
+    }
+
+    /// Result limit: CLI `--limit` overrides `[query].default_limit`, then clamped to `max_limit`.
+    pub fn query_limit(&self, cli_limit: Option<usize>) -> usize {
+        cli_limit
+            .unwrap_or(self.query.default_limit)
+            .min(self.query.max_limit)
+            .max(1)
+    }
+
+    /// Hybrid search: CLI `--hybrid` forces on; otherwise `[query].hybrid` is used.
+    pub fn query_hybrid(&self, cli_hybrid: bool) -> bool {
+        cli_hybrid || self.query.hybrid
+    }
+}
+
+/// HuggingFace id of the only implemented embedding model.
+pub const SUPPORTED_EMBEDDING_MODEL: &str = "thenlper/gte-small";
+
+/// Resolve a user-facing model name to the implemented HuggingFace id.
+pub fn resolve_supported_model(model: &str) -> Result<&'static str, ConfigError> {
+    match model.trim() {
+        "thenlper/gte-small" | "gte-small" => Ok(SUPPORTED_EMBEDDING_MODEL),
+        other => Err(ConfigError::UnsupportedModel(other.to_string())),
     }
 }
 
@@ -185,7 +263,7 @@ pub struct EmbeddingConfig {
 }
 
 fn default_embedding_model() -> String {
-    "jina-embeddings-v3".to_string()
+    SUPPORTED_EMBEDDING_MODEL.to_string()
 }
 
 fn default_batch_size() -> usize {
@@ -356,4 +434,148 @@ pub fn config_dir() -> Option<PathBuf> {
 #[allow(dead_code)]
 pub fn cache_dir() -> Option<PathBuf> {
     ProjectDirs::from("", "", "ragfs").map(|dirs| dirs.cache_dir().to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(toml: &str) -> Config {
+        toml::from_str(toml).expect("valid test config")
+    }
+
+    #[test]
+    fn default_model_is_gte_small() {
+        let config = Config::default();
+        assert_eq!(config.embedding.model, SUPPORTED_EMBEDDING_MODEL);
+        assert_eq!(
+            config.resolve_embedding_model().unwrap(),
+            SUPPORTED_EMBEDDING_MODEL
+        );
+        assert!(config.query.hybrid);
+        let sample = Config::sample_toml();
+        assert!(
+            sample.contains("thenlper/gte-small"),
+            "sample config should advertise the implemented model: {sample}"
+        );
+        assert!(
+            !sample.contains("jina-embeddings-v3"),
+            "sample config must not default to an unimplemented model"
+        );
+    }
+
+    #[test]
+    fn toml_overrides_drive_indexer_config() {
+        let config = parse(
+            r#"
+            [index]
+            include = ["**/*.rs", "**/*.md"]
+            exclude = ["**/secrets/**", "**/*.bin"]
+            max_file_size = 4096
+            debounce_ms = 250
+
+            [chunking]
+            target_size = 128
+            max_size = 256
+            overlap = 16
+            hierarchical = false
+            max_depth = 1
+
+            [embedding]
+            model = "gte-small"
+            batch_size = 8
+            use_gpu = false
+            max_concurrent = 2
+            "#,
+        );
+
+        let indexer = config.to_indexer_config(true);
+        assert_eq!(
+            indexer.include_patterns,
+            vec!["**/*.rs".to_string(), "**/*.md".to_string()]
+        );
+        assert_eq!(
+            indexer.exclude_patterns,
+            vec!["**/secrets/**".to_string(), "**/*.bin".to_string()]
+        );
+        assert_eq!(indexer.max_file_size, 4096);
+        assert_eq!(indexer.debounce_ms, 250);
+        assert!(indexer.force);
+        assert_eq!(indexer.chunk_config.target_size, 128);
+        assert_eq!(indexer.chunk_config.max_size, 256);
+        assert_eq!(indexer.chunk_config.overlap, 16);
+        assert!(!indexer.chunk_config.hierarchical);
+        assert_eq!(indexer.chunk_config.max_depth, 1);
+        assert_eq!(indexer.embed_config.batch_size, 8);
+        assert!(!config.embedding.use_gpu);
+        assert_eq!(config.embedder_pool_size(), 2);
+        assert_eq!(
+            config.resolve_embedding_model().unwrap(),
+            SUPPORTED_EMBEDDING_MODEL
+        );
+    }
+
+    #[test]
+    fn toml_overrides_drive_query_options() {
+        let config = parse(
+            r#"
+            [query]
+            default_limit = 3
+            max_limit = 7
+            hybrid = false
+            "#,
+        );
+
+        assert!(!config.query.hybrid);
+        assert!(!config.query_hybrid(false));
+        assert!(
+            config.query_hybrid(true),
+            "--hybrid must force hybrid on when config disables it"
+        );
+        assert_eq!(config.query_limit(None), 3);
+        assert_eq!(config.query_limit(Some(20)), 7, "CLI limit is clamped");
+        assert_eq!(config.query_limit(Some(5)), 5);
+    }
+
+    #[test]
+    fn unsupported_model_is_a_clear_error() {
+        let config = parse(
+            r#"
+            [embedding]
+            model = "jina-embeddings-v3"
+            "#,
+        );
+
+        let err = config.resolve_embedding_model().unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("jina-embeddings-v3"),
+            "error should name the requested model: {message}"
+        );
+        assert!(
+            message.contains("thenlper/gte-small"),
+            "error should name the supported model: {message}"
+        );
+    }
+
+    #[test]
+    fn default_indexer_mapping_uses_config_excludes() {
+        let indexer = Config::default().to_indexer_config(false);
+        assert!(!indexer.force);
+        assert_eq!(indexer.max_file_size, default_max_file_size());
+        assert_eq!(indexer.debounce_ms, default_debounce_ms());
+        assert!(
+            indexer
+                .exclude_patterns
+                .contains(&"**/node_modules/**".to_string())
+        );
+        assert!(indexer.include_patterns.contains(&"**/*".to_string()));
+    }
+
+    #[test]
+    fn load_from_missing_file_is_defaults() {
+        let config = Config::load_from(Some(PathBuf::from("/no/such/ragfs-config.toml"))).unwrap();
+        assert_eq!(config.embedding.model, SUPPORTED_EMBEDDING_MODEL);
+        assert!(config.query.hybrid);
+    }
 }

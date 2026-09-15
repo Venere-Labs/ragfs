@@ -117,6 +117,11 @@ opt-level = 3
 [workspace.lints.rust]
 unsafe_code = "warn"
 
+[workspace.lints.rustdoc]
+# Angle-bracket placeholders in virtual-path docs (`<uuid>`, `<text>`) are
+# not HTML. Newer rustdoc treats them as invalid tags under -D warnings.
+invalid_html_tags = "allow"
+
 [workspace.lints.clippy]
 # Enable warning groups with priority -1 (lower than individual lints)
 all = { level = "warn", priority = -1 }

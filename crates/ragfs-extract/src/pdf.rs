@@ -234,7 +234,7 @@ fn decode_flate_image(pdf_image: &lopdf::xobject::PdfImage) -> Result<(Vec<u8>, 
 #[allow(clippy::many_single_char_names)]
 fn cmyk_to_rgb(cmyk: &[u8]) -> Vec<u8> {
     let mut rgb = Vec::with_capacity((cmyk.len() / 4) * 3);
-    for chunk in cmyk.chunks_exact(4) {
+    for chunk in cmyk.as_chunks::<4>().0 {
         let c = f32::from(chunk[0]) / 255.0;
         let m = f32::from(chunk[1]) / 255.0;
         let y = f32::from(chunk[2]) / 255.0;

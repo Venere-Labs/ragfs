@@ -1,0 +1,12 @@
+# Keep Python Lint green on existing code without mass rewrites.
+# Unpinned `pip install ruff` now enables pyupgrade/isort by default
+# (hundreds of I001/UP* findings). Restrict to classic pycodestyle + Pyflakes.
+
+[lint]
+select = ["E", "W", "F"]
+ignore = [
+    "E501",  # long docstrings and generated-style comments
+    "F401",  # unused imports for optional adapters / availability checks
+    "F541",  # f-strings without placeholders in examples
+    "F841",  # unused variables in examples
+]

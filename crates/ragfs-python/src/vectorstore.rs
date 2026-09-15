@@ -35,7 +35,7 @@ impl Document {
     fn __repr__(&self) -> String {
         format!(
             "Document(page_content='{}...', metadata={:?})",
-            &self.page_content.chars().take(50).collect::<String>(),
+            self.page_content.chars().take(50).collect::<String>(),
             self.metadata
         )
     }
@@ -60,8 +60,7 @@ impl SearchResultPy {
             "SearchResult(score={:.4}, chunk_id='{}', content='{}...')",
             self.score,
             self.chunk_id,
-            &self
-                .document
+            self.document
                 .page_content
                 .chars()
                 .take(50)
@@ -159,7 +158,7 @@ impl PyChunk {
             "PyChunk(id='{}', file='{}', content='{}...')",
             self.id,
             self.file_path,
-            &self.content.chars().take(50).collect::<String>()
+            self.content.chars().take(50).collect::<String>()
         )
     }
 }

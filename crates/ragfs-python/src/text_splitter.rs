@@ -23,7 +23,7 @@ use crate::vectorstore::Document;
 /// splitter = RagfsTextSplitter(chunk_size=512, chunk_overlap=64)
 /// chunks = await splitter.split_text("Long text to split...")
 /// ```
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct RagfsTextSplitter {
     registry: Arc<ChunkerRegistry>,

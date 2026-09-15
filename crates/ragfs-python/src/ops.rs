@@ -18,7 +18,7 @@ use std::sync::Arc;
 // ============================================================================
 
 /// Python wrapper for Operation.
-#[pyclass(name = "Operation")]
+#[pyclass(name = "Operation", from_py_object)]
 #[derive(Clone)]
 pub struct PyOperation {
     inner: Operation,
@@ -161,7 +161,7 @@ impl PyOperation {
 }
 
 /// Python wrapper for OperationResult.
-#[pyclass(name = "OperationResult")]
+#[pyclass(name = "OperationResult", skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyOperationResult {
     /// Unique identifier for this operation
@@ -242,7 +242,7 @@ impl From<&OperationResult> for PyOperationResult {
 }
 
 /// Python wrapper for BatchResult.
-#[pyclass(name = "BatchResult")]
+#[pyclass(name = "BatchResult", skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyBatchResult {
     /// Unique identifier for this batch

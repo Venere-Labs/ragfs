@@ -24,7 +24,7 @@ use crate::vectorstore::Document;
 /// loader = RagfsDocumentLoader()
 /// documents = await loader.load("/path/to/file.pdf")
 /// ```
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct RagfsDocumentLoader {
     registry: Arc<ExtractorRegistry>,

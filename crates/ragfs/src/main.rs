@@ -30,7 +30,6 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use daemonize::Daemonize;
 use ragfs_chunker::{ChunkerRegistry, CodeChunker, FixedSizeChunker, SemanticChunker};
 use ragfs_core::{ChunkConfig, Embedder, EmbeddingConfig, Indexer, VectorStore};
 #[cfg(feature = "candle")]
@@ -42,8 +41,8 @@ use ragfs_query::QueryExecutor;
 #[cfg(feature = "lancedb")]
 use ragfs_store::LanceStore;
 use serde::Serialize;
-use std::fs::File;
-use std::path::PathBuf;
+use std::os::fd::AsRawFd;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
@@ -180,7 +179,7 @@ struct StatusOutput {
 }
 
 /// Get the database path for a given source directory.
-fn get_db_path(source: &PathBuf) -> Result<PathBuf> {
+fn get_db_path(source: &Path) -> Result<PathBuf> {
     let data = data_dir().context("Failed to get data directory")?;
     let hash = blake3::hash(source.to_string_lossy().as_bytes());
     let hash_str = &hash.to_hex()[..16];
@@ -191,7 +190,7 @@ fn get_db_path(source: &PathBuf) -> Result<PathBuf> {
 ///
 /// Uses `$XDG_RUNTIME_DIR/ragfs/` if available, otherwise falls back to
 /// `$XDG_CACHE_HOME/ragfs/run/`.
-fn get_pid_path(source: &PathBuf) -> Result<PathBuf> {
+fn get_pid_path(source: &Path) -> Result<PathBuf> {
     let hash = blake3::hash(source.to_string_lossy().as_bytes());
     let hash_str = &hash.to_hex()[..16];
 
@@ -211,7 +210,7 @@ fn get_pid_path(source: &PathBuf) -> Result<PathBuf> {
 }
 
 /// Get the log file path for daemon output.
-fn get_log_path(source: &PathBuf) -> Result<PathBuf> {
+fn get_log_path(source: &Path) -> Result<PathBuf> {
     let hash = blake3::hash(source.to_string_lossy().as_bytes());
     let hash_str = &hash.to_hex()[..16];
 
@@ -271,8 +270,67 @@ async fn create_components(
     Ok((store, extractors, chunkers, embedder_pool))
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+/// Detach the process into the background.
+///
+/// Replaces the unmaintained `daemonize` crate (RUSTSEC-2025-0069) with the
+/// `nix` primitives. It must run *before* the Tokio runtime is built: forking a
+/// process that already owns worker threads is not safe.
+///
+/// `source` must already be canonicalized, because the pid file path is derived
+/// from it and must match the one `run` computes for cleanup.
+// The only unsafe operation is the documented `fork()` below; there is no safe
+// wrapper for it in std. See the SAFETY comment at the call site.
+#[allow(unsafe_code)]
+fn daemonize_process(source: &Path) -> Result<()> {
+    let pid_path = get_pid_path(source)?;
+    let log_path = get_log_path(source)?;
+
+    // Last lines the user sees: after the fork below, stdout is the log file.
+    println!("Mounting in background...");
+    println!("PID file: {}", pid_path.display());
+    println!("Log file: {}", log_path.display());
+    println!("Unmount: fusermount -u <mountpoint>");
+
+    // Opened once and shared by stdout and stderr. The previous code called
+    // `File::create` twice on the same path, so the second open truncated the
+    // first and any early output was lost.
+    let log = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .with_context(|| format!("Failed to open log file {}", log_path.display()))?;
+
+    // SAFETY: no threads exist yet, because the Tokio runtime is built by the
+    // caller only after this returns. Everything executed between fork and the
+    // end of this function (setsid, chdir, dup2, write) is async-signal-safe.
+    match unsafe { nix::unistd::fork() }.context("Failed to fork into the background")? {
+        // The parent exits immediately so the shell prompt comes back.
+        nix::unistd::ForkResult::Parent { .. } => std::process::exit(0),
+        nix::unistd::ForkResult::Child => {}
+    }
+
+    nix::unistd::setsid().context("Failed to start a new session")?;
+    std::env::set_current_dir("/").context("Failed to change directory to /")?;
+
+    let fd = log.as_raw_fd();
+    nix::unistd::dup2(fd, nix::libc::STDOUT_FILENO).context("Failed to redirect stdout")?;
+    nix::unistd::dup2(fd, nix::libc::STDERR_FILENO).context("Failed to redirect stderr")?;
+
+    if fd > nix::libc::STDERR_FILENO {
+        // stdout and stderr hold their own descriptions of the file now.
+        drop(log);
+    } else {
+        // The kernel handed us fd 1 or 2: closing it would close stdio.
+        std::mem::forget(log);
+    }
+
+    std::fs::write(&pid_path, format!("{}\n", nix::unistd::getpid()))
+        .with_context(|| format!("Failed to write pid file {}", pid_path.display()))?;
+
+    Ok(())
+}
+
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Setup logging
@@ -290,6 +348,32 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber)
         .context("Failed to set tracing subscriber")?;
 
+    // Detach before the runtime exists, so the model download, the indexer and
+    // the FUSE session all live in the background process.
+    if let Commands::Mount {
+        source,
+        foreground: false,
+        ..
+    } = &cli.command
+    {
+        if !source.exists() {
+            anyhow::bail!("Source directory does not exist: {}", source.display());
+        }
+        let canonical = source
+            .canonicalize()
+            .with_context(|| format!("Failed to canonicalize source path {}", source.display()))?;
+        daemonize_process(&canonical)?;
+    }
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("Failed to build the Tokio runtime")?
+        .block_on(run(cli))
+}
+
+/// Execute the selected command.
+async fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Mount {
             source,
@@ -375,6 +459,8 @@ async fn main() -> Result<()> {
             }
 
             // Mount
+            // Mount. When `foreground` is false the process was already
+            // detached by `daemonize_process` before this runtime existed.
             if foreground {
                 info!("Running in foreground (Ctrl+C to unmount)");
                 info!("Try: cat {:?}/.ragfs/.index", mountpoint);
@@ -382,46 +468,22 @@ async fn main() -> Result<()> {
                     "Reindex: echo 'path/to/file' > {:?}/.ragfs/.reindex",
                     mountpoint
                 );
-                fuser::mount2(fs, &mountpoint, &options)?;
             } else {
-                // Daemonize: fork to background
-                let pid_path = get_pid_path(&source)?;
-                let log_path = get_log_path(&source)?;
-
-                // Print info before daemonizing (these won't be visible after fork)
-                println!("Mounting in background...");
-                println!("PID file: {}", pid_path.display());
-                println!("Log file: {}", log_path.display());
-                println!("Try: cat {}/.ragfs/.index", mountpoint.display());
-                println!("Unmount: fusermount -u {}", mountpoint.display());
-
-                // Open log file for stdout/stderr redirection
-                let stdout =
-                    File::create(&log_path).context("Failed to create log file for stdout")?;
-                let stderr =
-                    File::create(&log_path).context("Failed to create log file for stderr")?;
-
-                let daemonize = Daemonize::new()
-                    .pid_file(&pid_path)
-                    .chown_pid_file(true)
-                    .working_directory("/")
-                    .stdout(stdout)
-                    .stderr(stderr);
-
-                match daemonize.start() {
-                    Ok(()) => {
-                        // We're now in the daemon process
-                        // Re-initialize tracing to log file since we've forked
-                        fuser::mount2(fs, &mountpoint, &options)?;
-                    }
-                    Err(e) => {
-                        anyhow::bail!("Failed to daemonize: {e}");
-                    }
-                }
+                info!("Running in the background (pid {})", std::process::id());
             }
+
+            fuser::mount2(fs, &mountpoint, &options)?;
 
             // Cleanup reindex handler on unmount
             reindex_handler.abort();
+
+            // `mount2` returns only once the filesystem is unmounted, so the
+            // pid file is stale from here on.
+            if !foreground {
+                if let Ok(pid_path) = get_pid_path(&source) {
+                    let _ = std::fs::remove_file(pid_path);
+                }
+            }
         }
 
         Commands::Index { path, force, watch } => {

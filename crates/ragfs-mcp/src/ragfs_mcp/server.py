@@ -44,8 +44,9 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import blake3
 from mcp.server.fastmcp import FastMCP
@@ -193,7 +194,7 @@ async def ragfs_search(
             "results": output,
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -243,8 +244,9 @@ async def ragfs_index_status(index: str = "default") -> str:
         files = [f for f in dataset.rglob("*") if f.is_file()]
         if files:
             latest = max(f.stat().st_mtime for f in files)
-            from datetime import datetime
-            status["last_modified"] = datetime.fromtimestamp(latest).isoformat()
+            status["last_modified"] = datetime.fromtimestamp(
+                latest, tz=timezone.utc
+            ).isoformat()
 
     return json.dumps(status, indent=2)
 
@@ -275,7 +277,7 @@ async def ragfs_similar(
         return json.dumps({"error": f"File not found: {file_path}"})
 
     try:
-        from ragfs import RagfsRetriever, RagfsDocumentLoader
+        from ragfs import RagfsDocumentLoader, RagfsRetriever
     except ImportError:
         return '{"error": "ragfs package not installed"}'
 
@@ -327,7 +329,7 @@ async def ragfs_similar(
             "count": len(similar),
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -340,9 +342,6 @@ async def ragfs_list_indices() -> str:
     Returns:
         JSON string with list of available indices.
     """
-    import json
-    from datetime import datetime
-
     indices_dir = get_indices_dir()
 
     if not indices_dir.exists():
@@ -367,7 +366,9 @@ async def ragfs_list_indices() -> str:
                     "name": item.name,
                     "path": str(dataset if dataset.exists() else item),
                     "size_mb": round(total_size / (1024 * 1024), 2),
-                    "last_modified": datetime.fromtimestamp(latest_mtime).isoformat() if latest_mtime else None,
+                    "last_modified": datetime.fromtimestamp(
+                        latest_mtime, tz=timezone.utc
+                    ).isoformat() if latest_mtime else None,
                 })
 
     return json.dumps({
@@ -435,7 +436,7 @@ async def ragfs_delete_to_trash(
             "hint": f"Use ragfs_restore_from_trash with undo_id='{trash_entry.id}' to restore",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -479,7 +480,7 @@ async def ragfs_list_trash(index: str = "default") -> str:
             "hint": "Use ragfs_restore_from_trash to restore any file",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -518,14 +519,14 @@ async def ragfs_restore_from_trash(
             "restored_path": restored_path,
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
 async def ragfs_get_history(
     limit: int = 50,
-    path: Optional[str] = None,
+    path: str | None = None,
     index: str = "default",
 ) -> str:
     """Get operation history for audit trail.
@@ -573,7 +574,7 @@ async def ragfs_get_history(
             "hint": "Use ragfs_undo with the entry id to undo reversible operations",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -619,7 +620,7 @@ async def ragfs_undo(
             "message": result,
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -681,7 +682,7 @@ async def ragfs_find_duplicates(
             "hint": "Use ragfs_propose_cleanup to create a plan for handling duplicates",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -736,7 +737,7 @@ async def ragfs_analyze_cleanup(index: str = "default") -> str:
             "hint": "Use ragfs_propose_cleanup to create a cleanup plan for review",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -775,7 +776,7 @@ async def ragfs_propose_organization(
         JSON with plan_id and proposed actions for review.
     """
     try:
-        from ragfs import RagfsSemanticManager, OrganizeStrategy, OrganizeRequest
+        from ragfs import OrganizeRequest, OrganizeStrategy, RagfsSemanticManager
     except ImportError:
         return json.dumps({"error": "ragfs package not installed"})
 
@@ -829,7 +830,7 @@ async def ragfs_propose_organization(
             "hint": f"Review the actions above. Use ragfs_approve_plan(plan_id='{plan.id}') to execute, or ragfs_reject_plan to discard.",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -850,7 +851,7 @@ async def ragfs_propose_cleanup(index: str = "default") -> str:
         JSON with plan_id and proposed cleanup actions.
     """
     try:
-        from ragfs import RagfsSemanticManager, OrganizeStrategy, OrganizeRequest
+        from ragfs import OrganizeRequest, OrganizeStrategy, RagfsSemanticManager
     except ImportError:
         return json.dumps({"error": "ragfs package not installed"})
 
@@ -894,7 +895,7 @@ async def ragfs_propose_cleanup(index: str = "default") -> str:
             "hint": f"Review the actions. Use ragfs_approve_plan(plan_id='{plan.id}') to execute.",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -945,7 +946,7 @@ async def ragfs_list_pending_plans(index: str = "default") -> str:
             "hint": "Use ragfs_get_plan to see full details, ragfs_approve_plan to execute, or ragfs_reject_plan to discard",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -1004,7 +1005,7 @@ async def ragfs_get_plan(
             "created_at": plan.created_at,
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -1054,7 +1055,7 @@ async def ragfs_approve_plan(
             "hint": "All actions are reversible. Use ragfs_get_history to see undo IDs.",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -1100,7 +1101,7 @@ async def ragfs_reject_plan(
             "message": "Plan rejected and discarded",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -1111,7 +1112,7 @@ async def ragfs_reject_plan(
 
 @mcp.tool()
 async def ragfs_batch_operations(
-    operations: List[Dict[str, Any]],
+    operations: list[dict[str, Any]],
     atomic: bool = True,
     dry_run: bool = False,
     index: str = "default",
@@ -1141,7 +1142,7 @@ async def ragfs_batch_operations(
         JSON with batch result and undo IDs.
     """
     try:
-        from ragfs import RagfsOpsManager, Operation
+        from ragfs import Operation, RagfsOpsManager
     except ImportError:
         return json.dumps({"error": "ragfs package not installed"})
 
@@ -1212,7 +1213,7 @@ async def ragfs_batch_operations(
             "hint": "Use ragfs_undo with rollback_id to undo the entire batch, or individual undo_ids for specific operations",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 

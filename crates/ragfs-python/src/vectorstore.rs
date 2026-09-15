@@ -55,13 +55,22 @@ pub struct SearchResultPy {
 
 #[pymethods]
 impl SearchResultPy {
+    #[new]
+    #[pyo3(signature = (document, score, chunk_id=""))]
+    fn new(document: Document, score: f32, chunk_id: &str) -> Self {
+        Self {
+            document,
+            score,
+            chunk_id: chunk_id.to_string(),
+        }
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "SearchResult(score={:.4}, chunk_id='{}', content='{}...')",
             self.score,
             self.chunk_id,
-            &self
-                .document
+            self.document
                 .page_content
                 .chars()
                 .take(50)

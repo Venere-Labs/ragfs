@@ -89,7 +89,10 @@ impl IndexerConfig {
 
 /// Match a path against a glob-style include/exclude pattern.
 ///
-/// Supports `**/*`, `**/dir/**`, `**/*.ext`, `*.ext`, and literal path components.
+/// Supports `**` (any directories), `*` / `?` within a path segment, and
+/// basename-only patterns such as `test_*.rs` (matched against any component).
+/// Patterns that do not start with `**/` also match as a suffix of an absolute
+/// path (`src/**/*.rs` matches `/proj/src/lib.rs`).
 #[must_use]
 pub fn path_matches_pattern(path: &str, pattern: &str) -> bool {
     let path = path.replace('\\', "/");
@@ -109,27 +112,49 @@ pub fn path_matches_pattern(path: &str, pattern: &str) -> bool {
             .is_some_and(|name| !name.is_empty() && name.starts_with('.'));
     }
 
-    let suffix = pattern.strip_prefix("**/").unwrap_or(pattern.as_str());
-    if let Some(ext) = suffix.strip_prefix('*')
-        && ext.starts_with('.')
-        && !ext.contains('*')
-        && !ext[1..].contains('/')
-    {
-        return path.ends_with(ext);
+    if glob_match_path(&path, &pattern) {
+        return true;
     }
-
-    let trimmed = pattern
-        .trim_start_matches("**/")
-        .trim_end_matches("/**")
-        .trim_matches('*');
-    if !trimmed.is_empty() && !trimmed.contains('*') && !trimmed.contains('/') {
-        return path.split('/').any(|component| component == trimmed);
+    // Absolute indexed paths should still match repo-relative globs.
+    if !pattern.starts_with("**/") && !pattern.starts_with('/') {
+        return glob_match_path(&path, &format!("**/{pattern}"));
     }
-    if !trimmed.is_empty() {
-        return path.contains(trimmed);
-    }
-
     false
+}
+
+fn glob_match_path(path: &str, pattern: &str) -> bool {
+    let path: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let pat: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
+    glob_match_segments(&path, &pat)
+}
+
+fn glob_match_segments(path: &[&str], pat: &[&str]) -> bool {
+    match pat.split_first() {
+        None => path.is_empty(),
+        Some((&"**", rest)) => {
+            if rest.is_empty() {
+                return true;
+            }
+            glob_match_segments(path, rest)
+                || (!path.is_empty() && glob_match_segments(&path[1..], pat))
+        }
+        Some((seg, rest)) => path.split_first().is_some_and(|(head, tail)| {
+            glob_match_segment(head, seg) && glob_match_segments(tail, rest)
+        }),
+    }
+}
+
+fn glob_match_segment(name: &str, pat: &str) -> bool {
+    glob_match_bytes(name.as_bytes(), pat.as_bytes())
+}
+
+fn glob_match_bytes(name: &[u8], pat: &[u8]) -> bool {
+    match pat.split_first() {
+        None => name.is_empty(),
+        Some((b'*', rest)) => (0..=name.len()).any(|i| glob_match_bytes(&name[i..], rest)),
+        Some((b'?', rest)) => !name.is_empty() && glob_match_bytes(&name[1..], rest),
+        Some((c, rest)) => name.first() == Some(c) && glob_match_bytes(&name[1..], rest),
+    }
 }
 
 /// Main indexing service.
@@ -648,6 +673,7 @@ async fn process_file(
             metadata.len(),
             config.max_file_size
         );
+        let _ = store.delete_by_file_path(path).await;
         return Ok(0);
     }
 
@@ -1475,6 +1501,21 @@ mod tests {
         ));
         assert!(path_matches_pattern("/proj/src/main.rs", "**/*.rs"));
         assert!(!path_matches_pattern("/proj/readme.md", "**/*.rs"));
+        assert!(
+            path_matches_pattern("src/lib.rs", "src/**/*.rs"),
+            "nested ** must match a file directly under the prefix"
+        );
+        assert!(path_matches_pattern("/proj/src/lib.rs", "src/**/*.rs"));
+        assert!(path_matches_pattern(
+            "/proj/src/nested/lib.rs",
+            "src/**/*.rs"
+        ));
+        assert!(path_matches_pattern("test_unit.rs", "test_*.rs"));
+        assert!(path_matches_pattern(
+            "/proj/tests/test_unit.rs",
+            "test_*.rs"
+        ));
+        assert!(!path_matches_pattern("/proj/src/lib.rs", "test_*.rs"));
 
         let config = IndexerConfig {
             include_patterns: vec!["**/*.rs".to_string()],
@@ -1532,6 +1573,39 @@ mod tests {
         assert_eq!(chunk_count, 0);
         assert!(store.files.read().await.is_empty());
         assert!(store.chunks.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_oversized_previously_indexed_file_is_removed() {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("grow.txt");
+        std::fs::write(&file_path, "small").unwrap();
+
+        let store = Arc::new(MockStore::new());
+        let indexer = create_test_indexer(Arc::clone(&store) as Arc<dyn VectorStore>);
+        let chunk_count = indexer.process_single(&file_path).await.unwrap();
+        assert!(chunk_count > 0);
+        assert!(store.files.read().await.contains_key(&file_path));
+        assert!(!store.chunks.read().await.is_empty());
+
+        std::fs::write(&file_path, "this file is now much larger than eight bytes").unwrap();
+
+        let limited = IndexerConfig {
+            max_file_size: 8,
+            ..Default::default()
+        };
+        let limited_indexer =
+            create_test_indexer_with_config(Arc::clone(&store) as Arc<dyn VectorStore>, limited);
+        let skipped = limited_indexer.process_single(&file_path).await.unwrap();
+        assert_eq!(skipped, 0);
+        assert!(
+            store.files.read().await.is_empty(),
+            "growing past max_file_size must drop the file record"
+        );
+        assert!(
+            store.chunks.read().await.is_empty(),
+            "growing past max_file_size must drop indexed chunks"
+        );
     }
 
     #[tokio::test]

@@ -99,7 +99,16 @@ impl RagFs {
         runtime: Handle,
         reindex_sender: Option<mpsc::Sender<PathBuf>>,
     ) -> Self {
-        Self::with_rag_query(source, store, embedder, runtime, reindex_sender, 10, true)
+        Self::with_rag_query(
+            source,
+            store,
+            embedder,
+            runtime,
+            reindex_sender,
+            10,
+            true,
+            100,
+        )
     }
 
     /// Create a RAG-enabled filesystem with query settings from config / CLI.
@@ -111,13 +120,12 @@ impl RagFs {
         reindex_sender: Option<mpsc::Sender<PathBuf>>,
         default_limit: usize,
         hybrid: bool,
+        max_limit: usize,
     ) -> Self {
-        let query_executor = Arc::new(QueryExecutor::new(
-            store.clone(),
-            embedder.clone(),
-            default_limit,
-            hybrid,
-        ));
+        let query_executor = Arc::new(
+            QueryExecutor::new(store.clone(), embedder.clone(), default_limit, hybrid)
+                .with_max_limit(max_limit),
+        );
 
         let safety_manager = Arc::new(SafetyManager::new(&source, None));
         let ops_manager = Arc::new(OpsManager::with_safety(

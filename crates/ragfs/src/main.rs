@@ -287,25 +287,115 @@ fn load_config(cli: &Cli) -> Result<Config> {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let cli = Cli::parse();
-
-    // Setup logging
-    let level = if cli.verbose {
-        Level::DEBUG
-    } else {
-        Level::INFO
-    };
-
+fn setup_logging(verbose: bool) -> Result<()> {
+    let level = if verbose { Level::DEBUG } else { Level::INFO };
     let subscriber = FmtSubscriber::builder()
         .with_max_level(level)
         .with_target(false)
         .finish();
+    tracing::subscriber::set_global_default(subscriber).context("Failed to set tracing subscriber")
+}
 
-    tracing::subscriber::set_global_default(subscriber)
-        .context("Failed to set tracing subscriber")?;
+fn print_config_meta(action: &ConfigAction) {
+    match action {
+        ConfigAction::Init => {
+            println!("{}", Config::sample_toml());
+        }
+        ConfigAction::Path => {
+            if let Some(path) = Config::config_path() {
+                println!("{}", path.display());
+            } else {
+                println!("Could not determine config directory");
+            }
+        }
+        ConfigAction::Show => {}
+    }
+}
 
+/// Fork to the background before Tokio or indexer threads are created.
+///
+/// `daemonize` 0.5 keeps only the calling thread in the child, so the
+/// watcher and event-loop threads started by `IndexerService::start` would
+/// not survive a later fork.
+fn maybe_daemonize_background_mount(cli: &mut Cli) -> Result<()> {
+    let is_background = matches!(
+        &cli.command,
+        Commands::Mount {
+            foreground: false,
+            ..
+        }
+    );
+    if !is_background {
+        return Ok(());
+    }
+
+    // Fail in the parent if config.toml is invalid.
+    load_config(cli)?;
+
+    let Commands::Mount {
+        source, mountpoint, ..
+    } = &mut cli.command
+    else {
+        return Ok(());
+    };
+
+    if !source.exists() {
+        anyhow::bail!("Source directory does not exist: {}", source.display());
+    }
+    if !mountpoint.exists() {
+        anyhow::bail!("Mount point does not exist: {}", mountpoint.display());
+    }
+
+    *source = source.canonicalize()?;
+    *mountpoint = mountpoint.canonicalize()?;
+
+    let pid_path = get_pid_path(source)?;
+    let log_path = get_log_path(source)?;
+
+    println!("Mounting in background...");
+    println!("PID file: {}", pid_path.display());
+    println!("Log file: {}", log_path.display());
+    println!("Try: cat {}/.ragfs/.index", mountpoint.display());
+    println!("Unmount: fusermount -u {}", mountpoint.display());
+
+    let stdout = File::create(&log_path).context("Failed to create log file for stdout")?;
+    let stderr = File::create(&log_path).context("Failed to create log file for stderr")?;
+
+    let daemonize = Daemonize::new()
+        .pid_file(&pid_path)
+        .chown_pid_file(true)
+        .working_directory("/")
+        .stdout(stdout)
+        .stderr(stderr);
+
+    daemonize
+        .start()
+        .map_err(|e| anyhow::anyhow!("Failed to daemonize: {e}"))?;
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    let mut cli = Cli::parse();
+    setup_logging(cli.verbose)?;
+
+    // `config init` / `config path` must work even if config.toml is invalid.
+    if let Commands::Config { action } = &cli.command
+        && matches!(action, ConfigAction::Init | ConfigAction::Path)
+    {
+        print_config_meta(action);
+        return Ok(());
+    }
+
+    maybe_daemonize_background_mount(&mut cli)?;
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("Failed to start async runtime")?
+        .block_on(run(cli))
+}
+
+async fn run(cli: Cli) -> Result<()> {
     let config = load_config(&cli)?;
 
     match cli.command {
@@ -380,6 +470,7 @@ async fn main() -> Result<()> {
                 Some(reindex_tx),
                 config.query.default_limit,
                 config.query.hybrid,
+                config.query.max_limit,
             );
 
             // Build mount options
@@ -393,7 +484,7 @@ async fn main() -> Result<()> {
                 options.push(fuser::MountOption::AllowOther);
             }
 
-            // Mount
+            // Mount. Background forks happen in `main` before Tokio starts.
             if foreground {
                 info!("Running in foreground (Ctrl+C to unmount)");
                 info!("Try: cat {:?}/.ragfs/.index", mountpoint);
@@ -401,43 +492,8 @@ async fn main() -> Result<()> {
                     "Reindex: echo 'path/to/file' > {:?}/.ragfs/.reindex",
                     mountpoint
                 );
-                fuser::mount2(fs, &mountpoint, &options)?;
-            } else {
-                // Daemonize: fork to background
-                let pid_path = get_pid_path(&source)?;
-                let log_path = get_log_path(&source)?;
-
-                // Print info before daemonizing (these won't be visible after fork)
-                println!("Mounting in background...");
-                println!("PID file: {}", pid_path.display());
-                println!("Log file: {}", log_path.display());
-                println!("Try: cat {}/.ragfs/.index", mountpoint.display());
-                println!("Unmount: fusermount -u {}", mountpoint.display());
-
-                // Open log file for stdout/stderr redirection
-                let stdout =
-                    File::create(&log_path).context("Failed to create log file for stdout")?;
-                let stderr =
-                    File::create(&log_path).context("Failed to create log file for stderr")?;
-
-                let daemonize = Daemonize::new()
-                    .pid_file(&pid_path)
-                    .chown_pid_file(true)
-                    .working_directory("/")
-                    .stdout(stdout)
-                    .stderr(stderr);
-
-                match daemonize.start() {
-                    Ok(()) => {
-                        // We're now in the daemon process
-                        // Re-initialize tracing to log file since we've forked
-                        fuser::mount2(fs, &mountpoint, &options)?;
-                    }
-                    Err(e) => {
-                        anyhow::bail!("Failed to daemonize: {e}");
-                    }
-                }
             }
+            fuser::mount2(fs, &mountpoint, &options)?;
 
             // Cleanup reindex handler on unmount
             reindex_handler.abort();
@@ -667,15 +723,8 @@ async fn main() -> Result<()> {
                     );
                 }
             },
-            ConfigAction::Init => {
-                println!("{}", Config::sample_toml());
-            }
-            ConfigAction::Path => {
-                if let Some(path) = Config::config_path() {
-                    println!("{}", path.display());
-                } else {
-                    println!("Could not determine config directory");
-                }
+            ConfigAction::Init | ConfigAction::Path => {
+                // Handled in `main` before config load.
             }
         },
     }

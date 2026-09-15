@@ -38,6 +38,10 @@ pub enum ConfigError {
         "unsupported embedding model '{0}': RAGFS currently supports only 'thenlper/gte-small' (alias: 'gte-small')"
     )]
     UnsupportedModel(String),
+
+    /// A positive setting was set to zero.
+    #[error("{0} must be greater than zero")]
+    InvalidPositive(&'static str),
 }
 
 /// Main configuration structure.
@@ -93,7 +97,22 @@ impl Config {
 
         let content = std::fs::read_to_string(&path)?;
         let config: Config = toml::from_str(&content)?;
+        config.validate()?;
         Ok(config)
+    }
+
+    /// Reject zero values for settings that must be positive.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.embedding.batch_size == 0 {
+            return Err(ConfigError::InvalidPositive("[embedding].batch_size"));
+        }
+        if self.embedding.max_concurrent == 0 {
+            return Err(ConfigError::InvalidPositive("[embedding].max_concurrent"));
+        }
+        if self.query.max_limit == 0 {
+            return Err(ConfigError::InvalidPositive("[query].max_limit"));
+        }
+        Ok(())
     }
 
     /// Generate a sample config file content.
@@ -139,7 +158,7 @@ impl Config {
         CoreEmbeddingConfig {
             normalize: true,
             instruction: None,
-            batch_size: self.embedding.batch_size.max(1),
+            batch_size: self.embedding.batch_size,
         }
     }
 
@@ -150,7 +169,7 @@ impl Config {
 
     /// Worker-pool size for the embedder.
     pub fn embedder_pool_size(&self) -> usize {
-        self.embedding.max_concurrent.max(1)
+        self.embedding.max_concurrent
     }
 
     /// Result limit: CLI `--limit` overrides `[query].default_limit`, then clamped to `max_limit`.
@@ -158,7 +177,6 @@ impl Config {
         cli_limit
             .unwrap_or(self.query.default_limit)
             .min(self.query.max_limit)
-            .max(1)
     }
 
     /// Hybrid search: CLI `--hybrid` forces on; otherwise `[query].hybrid` is used.
@@ -577,5 +595,28 @@ mod tests {
         let config = Config::load_from(Some(PathBuf::from("/no/such/ragfs-config.toml"))).unwrap();
         assert_eq!(config.embedding.model, SUPPORTED_EMBEDDING_MODEL);
         assert!(config.query.hybrid);
+    }
+
+    #[test]
+    fn zero_positive_settings_are_errors() {
+        let cases = [
+            ("[embedding]\nbatch_size = 0\n", "[embedding].batch_size"),
+            (
+                "[embedding]\nmax_concurrent = 0\n",
+                "[embedding].max_concurrent",
+            ),
+            ("[query]\nmax_limit = 0\n", "[query].max_limit"),
+        ];
+        for (toml, needle) in cases {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir.path().join("config.toml");
+            std::fs::write(&path, toml).unwrap();
+            let err = Config::load_from(Some(path)).unwrap_err();
+            let message = err.to_string();
+            assert!(
+                message.contains(needle),
+                "expected {needle} in error, got {message}"
+            );
+        }
     }
 }

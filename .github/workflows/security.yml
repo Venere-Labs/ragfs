@@ -35,18 +35,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Advisories that are knowingly accepted *for now*.
+      # No `ignore:` list, on purpose.
       #
-      # Every ID below is attributed to its dependency path, with a reason, an
-      # owner and a review date, in docs/AUDIT.md. The rule for this list is:
-      # an advisory belongs here only when no upgrade exists inside the ranges
-      # the current dependency generation allows.
-      #
-      # Anything NOT listed here fails the job on purpose. In particular
-      # RUSTSEC-2026-0187 (lopdf, a direct dependency that parses untrusted
-      # PDFs) and RUSTSEC-2026-0176/0177 (pyo3, a direct dependency) are
-      # intentionally absent: they are fixable and tracked as P0 work.
+      # It previously suppressed advisories pinned by the `lancedb` 0.23
+      # generation; the move to `lancedb` 0.37 removed every one of them, so the
+      # audit now runs unsuppressed. Re-adding an ID requires a reachability
+      # analysis and a review date in docs/AUDIT.md.
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          ignore: "RUSTSEC-2026-0258,RUSTSEC-2026-0194,RUSTSEC-2026-0195,RUSTSEC-2023-0071,RUSTSEC-2026-0098,RUSTSEC-2026-0099,RUSTSEC-2026-0104"

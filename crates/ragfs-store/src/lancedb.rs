@@ -2,7 +2,7 @@
 
 use arrow_array::{
     Array, ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator,
-    StringArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
+    RecordBatchReader, StringArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
 use async_trait::async_trait;
@@ -752,7 +752,7 @@ impl VectorStore for LanceStore {
         let batches = RecordBatchIterator::new(vec![Ok(batch)], schema);
 
         table
-            .add(Box::new(batches))
+            .add(Box::new(batches) as Box<dyn RecordBatchReader + Send>)
             .execute()
             .await
             .map_err(|e| StoreError::Insert(format!("Failed to insert chunks: {e}")))?;
@@ -1002,7 +1002,7 @@ impl VectorStore for LanceStore {
         let batches = RecordBatchIterator::new(vec![Ok(batch)], schema);
 
         files_table
-            .add(Box::new(batches))
+            .add(Box::new(batches) as Box<dyn RecordBatchReader + Send>)
             .execute()
             .await
             .map_err(|e| StoreError::Insert(format!("Failed to insert file record: {e}")))?;
@@ -2955,7 +2955,11 @@ mod tests {
         let table = conn.open_table(CHUNKS_TABLE).execute().await.unwrap();
         let schema = batch.schema();
         let batches = RecordBatchIterator::new(vec![Ok(batch)], schema);
-        table.add(Box::new(batches)).execute().await.unwrap();
+        table
+            .add(Box::new(batches) as Box<dyn RecordBatchReader + Send>)
+            .execute()
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

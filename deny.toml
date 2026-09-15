@@ -16,22 +16,10 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 unmaintained = "workspace"  # Only fail for direct workspace dependencies
 yanked = "warn"
 
-# Ignore only advisories with no in-range upgrade. Each ID is attributed to its
-# dependency path, with a reason and a review date, in docs/AUDIT.md §1.2.
-# Keep this list in sync with security.yml and pre-release.yml.
-ignore = [
-    # h2 0.3 via lancedb → lance → aws-sdk-dynamodb → aws-smithy-http-client
-    "RUSTSEC-2026-0258",
-    # quick-xml via lancedb → lance-io → opendal → reqsign and object_store 0.12
-    "RUSTSEC-2026-0194",
-    "RUSTSEC-2026-0195",
-    # rsa via lancedb → lance-io → opendal → reqsign (no upstream patch)
-    "RUSTSEC-2023-0071",
-    # rustls-webpki 0.101 via lancedb → lance → aws-sdk-dynamodb → rustls 0.21
-    "RUSTSEC-2026-0098",
-    "RUSTSEC-2026-0099",
-    "RUSTSEC-2026-0104",
-]
+# No suppressions. The lancedb 0.37 migration dropped every advisory that used
+# to need an ignore. Re-adding an ID requires a reachability analysis and a
+# review date in docs/AUDIT.md.
+ignore = []
 
 [licenses]
 # Ensure licenses are compatible with our dual MIT/Apache-2.0 license

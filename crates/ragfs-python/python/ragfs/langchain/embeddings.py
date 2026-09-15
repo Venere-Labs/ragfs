@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import List
-
 from ragfs import RagfsEmbeddings as CoreEmbeddings
 
 try:
@@ -58,7 +56,7 @@ class LangChainRagfsEmbeddings(Embeddings):
             await self._embedder.init()
             self._initialized = True
 
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed a list of documents synchronously.
 
         Note: This blocks the event loop. Use aembed_documents for async.
@@ -69,7 +67,7 @@ class LangChainRagfsEmbeddings(Embeddings):
             self.aembed_documents(texts)
         )
 
-    def embed_query(self, text: str) -> List[float]:
+    def embed_query(self, text: str) -> list[float]:
         """Embed a query synchronously.
 
         Note: This blocks the event loop. Use aembed_query for async.
@@ -78,12 +76,12 @@ class LangChainRagfsEmbeddings(Embeddings):
 
         return asyncio.get_event_loop().run_until_complete(self.aembed_query(text))
 
-    async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
         """Embed a list of documents asynchronously."""
         await self.ainit()
         return await self._embedder.embed_documents(texts)
 
-    async def aembed_query(self, text: str) -> List[float]:
+    async def aembed_query(self, text: str) -> list[float]:
         """Embed a query asynchronously."""
         await self.ainit()
         return await self._embedder.embed_query(text)

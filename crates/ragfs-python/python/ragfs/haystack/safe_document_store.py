@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+from ragfs import HistoryEntry, RagfsSafetyManager, TrashEntry
 
 from .document_store import HaystackRagfsDocumentStore
-from ragfs import RagfsSafetyManager, TrashEntry, HistoryEntry
 
 try:
     from haystack.document_stores.types import DuplicatePolicy
@@ -50,7 +51,7 @@ class HaystackRagfsSafeDocumentStore(HaystackRagfsDocumentStore):
         db_path: str,
         dimension: int = 384,
         safety_enabled: bool = True,
-        source_path: Optional[str] = None,
+        source_path: str | None = None,
     ):
         """Initialize the safe document store.
 
@@ -73,8 +74,8 @@ class HaystackRagfsSafeDocumentStore(HaystackRagfsDocumentStore):
 
     def safe_delete_documents(
         self,
-        document_ids: List[str],
-    ) -> Dict[str, Any]:
+        document_ids: list[str],
+    ) -> dict[str, Any]:
         """Soft delete documents (can be undone).
 
         Unlike the standard delete, this moves documents to trash
@@ -96,8 +97,8 @@ class HaystackRagfsSafeDocumentStore(HaystackRagfsDocumentStore):
 
     async def _async_safe_delete_documents(
         self,
-        document_ids: List[str],
-    ) -> Dict[str, Any]:
+        document_ids: list[str],
+    ) -> dict[str, Any]:
         """Async implementation of safe delete."""
         result = {
             "document_ids": document_ids,
@@ -123,7 +124,7 @@ class HaystackRagfsSafeDocumentStore(HaystackRagfsDocumentStore):
 
         return result
 
-    def restore_documents(self, undo_ids: List[str]) -> List[str]:
+    def restore_documents(self, undo_ids: list[str]) -> list[str]:
         """Restore soft-deleted documents from trash.
 
         Args:
@@ -141,7 +142,7 @@ class HaystackRagfsSafeDocumentStore(HaystackRagfsDocumentStore):
             self._async_restore_documents(undo_ids)
         )
 
-    async def _async_restore_documents(self, undo_ids: List[str]) -> List[str]:
+    async def _async_restore_documents(self, undo_ids: list[str]) -> list[str]:
         """Async implementation of restore."""
         if not self._safety or not self._safety_enabled:
             raise RuntimeError("Safety layer not enabled. Cannot restore documents.")
@@ -153,7 +154,7 @@ class HaystackRagfsSafeDocumentStore(HaystackRagfsDocumentStore):
 
         return restored_paths
 
-    def get_trash_contents(self) -> List[TrashEntry]:
+    def get_trash_contents(self) -> list[TrashEntry]:
         """List all items in trash that can be restored.
 
         Returns:
@@ -171,7 +172,7 @@ class HaystackRagfsSafeDocumentStore(HaystackRagfsDocumentStore):
             self._safety.list_trash()
         )
 
-    def get_history(self, limit: Optional[int] = None) -> List[HistoryEntry]:
+    def get_history(self, limit: int | None = None) -> list[HistoryEntry]:
         """Get operation history for audit trail.
 
         Args:
@@ -229,7 +230,7 @@ class HaystackRagfsSafeDocumentStore(HaystackRagfsDocumentStore):
         return self._safety_enabled
 
     @property
-    def safety_manager(self) -> Optional[RagfsSafetyManager]:
+    def safety_manager(self) -> RagfsSafetyManager | None:
         """Get the underlying safety manager."""
         return self._safety
 

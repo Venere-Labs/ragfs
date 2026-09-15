@@ -192,6 +192,7 @@ class TestServerConfiguration:
     def test_get_db_path_matches_cli_blake3_scheme(self, tmp_path, monkeypatch):
         """MCP must hash the canonical source path the same way as the CLI."""
         import blake3
+
         from ragfs_mcp.server import get_db_path, index_id_for_source
 
         monkeypatch.delenv("RAGFS_DB_PATH", raising=False)
@@ -202,6 +203,9 @@ class TestServerConfiguration:
         source.mkdir()
         canonical = str(source.resolve())
         expected_id = blake3.blake3(canonical.encode()).hexdigest()[:16]
+
+        # Official BLAKE3 empty-input prefix (same as the Rust blake3 crate).
+        assert blake3.blake3(b"").hexdigest().startswith("af1349b9f5f9a1a6")
 
         assert index_id_for_source(str(source)) == expected_id
         assert index_id_for_source(canonical) == expected_id
@@ -224,6 +228,7 @@ class TestServerConfiguration:
     def test_get_db_path_default_uses_source_path(self, tmp_path, monkeypatch):
         """Default index follows RAGFS_SOURCE_PATH, not a literal 'default' folder."""
         import blake3
+
         from ragfs_mcp.server import get_db_path
 
         monkeypatch.delenv("RAGFS_DB_PATH", raising=False)
@@ -259,6 +264,7 @@ class TestServerConfiguration:
     def test_get_db_path_respects_data_dir(self, tmp_path, monkeypatch):
         """RAGFS_DATA_DIR is the same override the CLI data_dir() uses."""
         import blake3
+
         from ragfs_mcp.server import get_db_path
 
         monkeypatch.delenv("RAGFS_DB_PATH", raising=False)
@@ -279,9 +285,10 @@ class TestServerConfiguration:
 
     def test_get_source_path(self):
         """Test source path."""
+        import os
+
         from ragfs_mcp.server import get_source_path
 
-        import os
         path = get_source_path()
         assert path == os.getcwd() or path is not None
 

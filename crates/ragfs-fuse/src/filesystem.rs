@@ -298,11 +298,21 @@ impl RagFs {
     }
 
     /// Get configuration as JSON.
+    ///
+    /// This is mount wiring, not `~/.config/ragfs/config.toml`.
     fn get_config(&self) -> Vec<u8> {
         let json = serde_json::json!({
+            "api_version": "0.2",
             "source": self.source.to_string_lossy(),
             "store_configured": self.store.is_some(),
             "query_executor_configured": self.query_executor.is_some(),
+            "interfaces": {
+                "query": true,
+                "ops": true,
+                "safety": true,
+                "semantic": true
+            },
+            "note": "Mount wiring only. User TOML is not echoed here.",
         });
         serde_json::to_string_pretty(&json)
             .unwrap_or_default()
@@ -331,45 +341,60 @@ impl RagFs {
         r#"RAGFS Virtual Control Directory
 ================================
 
-The .ragfs directory provides a virtual interface to RAGFS functionality.
+The .ragfs directory is the agent control plane: search, file ops,
+soft-delete, and propose/approve semantic plans.
 
-Available paths:
-
-  .index          Read to get index statistics (JSON)
-                  Shows file count, chunk count, and last update time.
-
-  .config         Read to get current configuration (JSON)
-                  Shows source directory and component status.
-
-  .reindex        Write a file path to trigger reindexing.
+Search and index
+----------------
+  .index          Read index statistics (JSON).
+  .config         Read mount wiring (JSON). Includes api_version.
+                  This is not ~/.config/ragfs/config.toml.
+  .reindex        Write a relative path to queue reindex.
                   Example: echo "src/main.rs" > .ragfs/.reindex
+  .query/<q>      Semantic search. Filename is the query.
+                  Returns JSON results.
+                  Example: cat ".ragfs/.query/authentication"
+  .search/<q>     Symlinks to matching files.
+  .similar/<path> Symlinks to files similar to <path>.
+  .help           This file.
 
-  .query/<q>      Read to execute a semantic search query.
-                  The filename is the query string.
-                  Returns JSON with matching results.
-                  Example: cat .ragfs/.query/authentication
+Agent operations (.ops/)
+------------------------
+  .ops/.create    Write: path<newline>content
+  .ops/.delete    Write: path  (soft-delete when safety is on)
+  .ops/.move      Write: src<newline>dst
+  .ops/.batch     Write: JSON BatchRequest (create/delete/move/copy/write/mkdir/symlink)
+  .ops/.result    Read:  JSON OperationResult of the last op (global; not per-agent)
 
-  .search/        Directory for search results (symlinks).
-                  Access .search/<query>/ to get symlinks to matching files.
+  echo -e "notes.md\n# Hello" > .ragfs/.ops/.create
+  cat .ragfs/.ops/.result
 
-  .similar/       Directory for finding similar files.
-                  Access .similar/<path>/ to get symlinks to similar files.
+Safety (.safety/)
+-----------------
+  .safety/.trash/   Soft-deleted files (recoverable)
+  .safety/.history  Audit log (JSONL)
+  .safety/.undo     Write the history operation_id (same as undo_id in .result)
 
-  .help           This help file.
+  echo "<undo_id>" > .ragfs/.safety/.undo
 
-Examples:
+Semantic (.semantic/) — Beta
+----------------------------
+  .semantic/.organize  Write OrganizeRequest JSON → plan in .pending/
+  .semantic/.similar   Write a path → similar files JSON
+  .semantic/.cleanup   Read cleanup analysis (duplicates today)
+  .semantic/.dedupe    Read duplicate groups
+  .semantic/.pending/  Proposed plans
+  .semantic/.approve   Write plan_id to execute
+  .semantic/.reject    Write plan_id to cancel
 
-  # Check index status
-  cat .ragfs/.index
-
-  # Search for files about authentication
-  cat ".ragfs/.query/how to authenticate users"
-
-  # Trigger reindex of a specific file
-  echo "src/lib.rs" > .ragfs/.reindex
-
-  # View configuration
-  cat .ragfs/.config
+Limits (honest)
+---------------
+  - Write relative paths. Absolute paths that leave the source are rejected when path jail is enabled.
+  - .ops/.result is the last operation only; concurrent agents overwrite it.
+  - Semantic ByProject/cleanup is Beta: organize may only mkdir; cleanup is mostly duplicates.
+  - allow_other (if enabled) exposes .ops/.safety/.semantic to every local user.
+  - Code chunking is pattern-based (function/class signatures), not tree-sitter.
+  - Default extractors: UTF-8 text/code, PDF, images. Binary .doc is not supported.
 "#
         .as_bytes()
         .to_vec()
@@ -2049,6 +2074,8 @@ mod tests {
         assert_eq!(json["source"], "/tmp/test-config");
         assert_eq!(json["store_configured"], false);
         assert_eq!(json["query_executor_configured"], false);
+        assert_eq!(json["api_version"], "0.2");
+        assert_eq!(json["interfaces"]["ops"], true);
     }
 
     #[tokio::test]
@@ -2066,6 +2093,19 @@ mod tests {
         assert!(json.get("source").is_some());
         assert!(json.get("store_configured").is_some());
         assert!(json.get("query_executor_configured").is_some());
+        assert_eq!(json["api_version"], "0.2");
+        assert!(json.get("interfaces").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_help_mentions_agent_interfaces() {
+        let fs = RagFs::new(PathBuf::from("/tmp/test-help"));
+        let help = String::from_utf8(fs.get_help_content()).expect("Valid UTF-8");
+        assert!(help.contains(".ops/"), "help must document .ops/");
+        assert!(help.contains(".safety/"), "help must document .safety/");
+        assert!(help.contains(".semantic/"), "help must document .semantic/");
+        assert!(help.contains(".undo"), "help must document undo");
+        assert!(help.contains("api_version"));
     }
 
     // ========== get_index_status() Tests ==========

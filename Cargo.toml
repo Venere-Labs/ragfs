@@ -74,9 +74,6 @@ flate2 = "1.1"
 # Image processing
 image = "0.25"
 
-# Code parsing
-tree-sitter = "0.26.3"
-
 # Tokenization
 tiktoken-rs = "0.6"
 

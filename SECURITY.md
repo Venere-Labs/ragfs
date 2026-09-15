@@ -4,8 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
-| < 1.0   | :x:                |
+| 0.2.x   | :white_check_mark: |
+| < 0.2   | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -48,10 +48,17 @@ RAGFS operates entirely locally by default:
 
 ### Code Security
 
-- All dependencies audited via `cargo audit`
-- No use of `unsafe` in public APIs
+- Dependencies checked via `cargo deny` / `cargo audit` in CI
+- Public traits avoid `unsafe`; the embedder uses `unsafe` mmap for safetensors
 - Content-addressed storage using blake3 hashes
-- Input validation at all boundaries
+- Path validation is enforced at the FUSE ops/semantic boundary when path jail is enabled
+
+### FUSE / agent surface
+
+- `.ops/`, `.safety/`, and `.semantic/` can mutate the source tree
+- `allow_other` exposes that surface to every user on the machine — do not enable it on shared hosts without a policy
+- Soft-delete can be bypassed if safety is disabled
+- Index chunks store file text under `~/.local/share/ragfs/` (protect that directory)
 
 ### FUSE Security
 
@@ -76,7 +83,7 @@ We regularly audit our dependencies:
 
 - Rust: `cargo audit` run on every release
 - Python: Security scanners in CI/CD
-- All dependencies pinned to specific versions
+- Workspace crate versions are pinned; some transitive crates may have multiple versions (see `deny.toml`)
 
 ## Acknowledgments
 

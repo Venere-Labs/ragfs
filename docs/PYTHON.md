@@ -64,7 +64,7 @@ async def build_rag_index(source_dir: str, db_path: str):
     splitter = RagfsTextSplitter(
         chunk_size=512,
         chunk_overlap=64,
-        code_aware=True,  # Uses tree-sitter for code files
+        code_aware=True,  # Pattern-based function/class splits for code files
     )
     await splitter.init()
     chunks = await splitter.split_documents(docs)
@@ -185,7 +185,7 @@ results_with_scores = await store.similarity_search_with_score("query", k=5)
 
 ### RagfsDocumentLoader
 
-Load documents from 40+ file formats.
+Load documents from UTF-8 text/code, PDF, and images (not binary `.doc`).
 
 ```python
 from ragfs import RagfsDocumentLoader
@@ -210,7 +210,7 @@ from ragfs import RagfsTextSplitter
 splitter = RagfsTextSplitter(
     chunk_size=512,
     chunk_overlap=64,
-    code_aware=True,  # Uses tree-sitter for code files
+    code_aware=True,  # Pattern-based function/class splits for code files
 )
 await splitter.init()
 

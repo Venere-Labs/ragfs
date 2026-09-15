@@ -7,8 +7,8 @@ written in Rust.
 Features:
 - Local embeddings using GTE-small (384 dimensions, no API calls)
 - Vector storage with LanceDB (hybrid search support)
-- Multi-format document loading (40+ text formats, PDF, images)
-- Code-aware text splitting with tree-sitter
+- Multi-format document loading (UTF-8 text/code, PDF, images)
+- Code-aware text splitting (pattern-based function/class splits)
 - Framework adapters for LangChain, LlamaIndex, and Haystack
 - **FUSE filesystem capabilities for AI agent operations**
 

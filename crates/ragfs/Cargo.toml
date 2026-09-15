@@ -55,7 +55,7 @@ thiserror.workspace = true
 fuser.workspace = true
 blake3.workspace = true
 chrono.workspace = true
-daemonize.workspace = true
+nix.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

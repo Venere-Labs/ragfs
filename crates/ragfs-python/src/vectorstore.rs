@@ -12,7 +12,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /// Document with content and metadata.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct Document {
     #[pyo3(get, set)]
@@ -42,7 +42,7 @@ impl Document {
 }
 
 /// Search result with document and score.
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct SearchResultPy {
     #[pyo3(get)]
@@ -73,7 +73,7 @@ impl SearchResultPy {
 /// A chunk of content for vector storage.
 ///
 /// Used to add documents programmatically to the vector store.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct PyChunk {
     /// Unique chunk identifier (UUID string)
@@ -237,7 +237,7 @@ fn parse_content_type(s: &str) -> ContentType {
 /// await store.init()
 /// results = await store.similarity_search(query_embedding, k=5)
 /// ```
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct RagfsVectorStore {
     store: Arc<LanceStore>,

@@ -3,15 +3,30 @@ name: Security Audit
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  # Deliberately no `pull_request` trigger.
+  #
+  # PR-time advisory gating is already done by the `cargo-deny` job in ci.yml.
+  # Running the full audit on PRs as well would make every PR red for
+  # pre-existing lockfile advisories it did not introduce, which is exactly the
+  # noise this file is meant to remove. The scheduled run is the canonical,
+  # blocking signal for the repository as a whole.
   schedule:
     - cron: '0 0 * * 1'
   workflow_dispatch:
 
 permissions:
   contents: read
+  # `rustsec/audit-check` opens (and updates) a tracking issue when it finds
+  # advisories. Without `issues: write` the action aborts with
+  # "Resource not accessible by integration" *after* it has already scanned,
+  # which is why this workflow reported failure on every run since 2026-05
+  # while producing no report anyone could act on.
+  issues: write
   checks: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   audit:
@@ -19,6 +34,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Advisories that are knowingly accepted *for now*.
+      #
+      # Every ID below is attributed to its dependency path, with a reason, an
+      # owner and a review date, in docs/AUDIT.md. The rule for this list is:
+      # an advisory belongs here only when no upgrade exists inside the ranges
+      # the current dependency generation allows.
+      #
+      # Anything NOT listed here fails the job on purpose. In particular
+      # RUSTSEC-2026-0187 (lopdf, a direct dependency that parses untrusted
+      # PDFs) and RUSTSEC-2026-0176/0177 (pyo3, a direct dependency) are
+      # intentionally absent: they are fixable and tracked as P0 work.
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          ignore: "RUSTSEC-2026-0258,RUSTSEC-2026-0194,RUSTSEC-2026-0195,RUSTSEC-2023-0071,RUSTSEC-2026-0098,RUSTSEC-2026-0099,RUSTSEC-2026-0104"

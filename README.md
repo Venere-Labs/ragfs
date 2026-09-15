@@ -248,6 +248,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 - [Python Bindings](docs/PYTHON.md) - Python SDK and framework integrations
 - [MCP Server](docs/MCP.md) - Claude Desktop integration
 - [Development Guide](docs/DEVELOPMENT.md) - Contributing to RAGFS
+- [Audit & Improvement Tracker](docs/AUDIT.md) - Security posture, accepted advisories, open work
 
 ## How It Works
 

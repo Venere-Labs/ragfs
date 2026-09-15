@@ -483,6 +483,11 @@ impl SemanticManager {
         crate::path_jail::resolve_under_root(&self.source, path)
     }
 
+    /// Canonicalize for comparison; keep the original path if it is gone.
+    fn canonical_or_owned(path: &Path) -> PathBuf {
+        path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    }
+
     /// Find files similar to a given path.
     pub async fn find_similar(&self, path: &PathBuf) -> Result<SimilarFilesResult, String> {
         let full_path = self.resolve_path(path)?;
@@ -515,10 +520,12 @@ impl SemanticManager {
             .await
             .map_err(|e| format!("Search failed: {e}"))?;
 
-        // Convert results, excluding the source file itself
+        // Convert results, excluding the source file itself.
+        // Index paths may be non-canonical; compare after canonicalize.
+        let source_canonical = Self::canonical_or_owned(&full_path);
         let similar: Vec<SimilarFile> = results
             .into_iter()
-            .filter(|r| r.file_path != full_path)
+            .filter(|r| Self::canonical_or_owned(&r.file_path) != source_canonical)
             .take(self.config.similar_limit)
             .map(|r| SimilarFile {
                 path: r.file_path,
@@ -780,7 +787,7 @@ impl SemanticManager {
         &self,
         request: OrganizeRequest,
     ) -> Result<SemanticPlan, String> {
-        let scope_path = self.resolve_path(&request.scope)?;
+        let scope_path = Self::canonical_or_owned(&self.resolve_path(&request.scope)?);
         let store = self.store.as_ref().ok_or("Vector store not available")?;
         let embedder = self.embedder.as_ref();
 
@@ -802,7 +809,7 @@ impl SemanticManager {
 
         let scoped_files: Vec<&FileRecord> = all_files
             .iter()
-            .filter(|f| f.path.starts_with(&scope_path))
+            .filter(|f| Self::canonical_or_owned(&f.path).starts_with(&scope_path))
             .collect();
 
         if scoped_files.is_empty() {
@@ -823,7 +830,9 @@ impl SemanticManager {
         // Build file embeddings map
         let mut file_chunks: HashMap<PathBuf, Vec<&Chunk>> = HashMap::new();
         for chunk in &all_chunks {
-            if chunk.embedding.is_some() && chunk.file_path.starts_with(&scope_path) {
+            if chunk.embedding.is_some()
+                && Self::canonical_or_owned(&chunk.file_path).starts_with(&scope_path)
+            {
                 file_chunks
                     .entry(chunk.file_path.clone())
                     .or_default()
@@ -1782,5 +1791,26 @@ mod tests {
         };
         let err = manager.create_organize_plan(request).await.unwrap_err();
         assert!(err.contains("escapes"), "{err}");
+    }
+
+    #[test]
+    fn test_canonical_or_owned_equalizes_dot_components() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("a.txt");
+        std::fs::write(&file, "x").unwrap();
+        let dotted = temp.path().join(".").join("a.txt");
+        assert_eq!(
+            SemanticManager::canonical_or_owned(&dotted),
+            SemanticManager::canonical_or_owned(&file)
+        );
+        let scope = temp.path().join("docs");
+        std::fs::create_dir(&scope).unwrap();
+        let nested = scope.join("a.txt");
+        std::fs::write(&nested, "x").unwrap();
+        let dotted_nested = temp.path().join(".").join("docs").join("a.txt");
+        assert!(
+            SemanticManager::canonical_or_owned(&dotted_nested)
+                .starts_with(SemanticManager::canonical_or_owned(&scope))
+        );
     }
 }

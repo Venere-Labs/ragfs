@@ -962,15 +962,14 @@ impl OpsManager {
     /// Create a symbolic link.
     #[cfg(unix)]
     pub async fn symlink(&self, target: &PathBuf, link: &PathBuf) -> OperationResult {
-        let resolved_target = match self.resolve_path(target) {
-            Ok(p) => p,
-            Err(e) => return self.fail_and_store("symlink", link.clone(), e).await,
-        };
+        if let Err(e) = self.resolve_path(target) {
+            return self.fail_and_store("symlink", link.clone(), e).await;
+        }
         let resolved_link = match self.resolve_path(link) {
             Ok(p) => p,
             Err(e) => return self.fail_and_store("symlink", link.clone(), e).await,
         };
-        debug!("ops::symlink {:?} -> {:?}", resolved_link, resolved_target);
+        debug!("ops::symlink {:?} -> {:?}", resolved_link, target);
 
         if resolved_link.exists() {
             return OperationResult::failure(
@@ -992,12 +991,11 @@ impl OpsManager {
             );
         }
 
-        match std::os::unix::fs::symlink(&resolved_target, &resolved_link) {
+        // Jail checks use resolved_target; pass the original target so a
+        // relative link stays relative instead of being rewritten absolute.
+        match std::os::unix::fs::symlink(target, &resolved_link) {
             Ok(()) => {
-                info!(
-                    "Created symlink: {:?} -> {:?}",
-                    resolved_link, resolved_target
-                );
+                info!("Created symlink: {:?} -> {:?}", resolved_link, target);
 
                 let result = OperationResult::success("symlink", link.clone(), false);
 
@@ -1847,6 +1845,10 @@ mod tests {
         assert_eq!(result.operation, "symlink");
         let link_path = temp.path().join("link_to_target");
         assert!(link_path.symlink_metadata().is_ok());
+        assert_eq!(
+            std::fs::read_link(&link_path).unwrap(),
+            PathBuf::from("target_file.txt")
+        );
     }
 
     #[tokio::test]

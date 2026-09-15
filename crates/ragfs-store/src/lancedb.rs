@@ -11,10 +11,10 @@ use futures::TryStreamExt;
 use lancedb::index::Index;
 use lancedb::index::scalar::{FtsIndexBuilder, FullTextSearchQuery};
 use lancedb::query::{ExecutableQuery, QueryBase, QueryExecutionOptions};
-use lancedb::{Connection, Table, connect};
+use lancedb::{Connection, DistanceType, Table, connect};
 use ragfs_core::{
-    Chunk, ChunkMetadata, ContentType, FileRecord, FileStatus, SearchQuery, SearchResult,
-    StoreError, StoreStats, VectorStore,
+    Chunk, ChunkMetadata, ContentType, DistanceMetric, FileRecord, FileStatus, SearchFilter,
+    SearchQuery, SearchResult, StoreError, StoreStats, VectorStore,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -408,14 +408,28 @@ impl VectorStore for LanceStore {
     }
 
     async fn search(&self, query: SearchQuery) -> Result<Vec<SearchResult>, StoreError> {
-        debug!("Searching with limit {}", query.limit);
+        debug!(
+            "Searching with limit {} metric {:?} filters {}",
+            query.limit,
+            query.metric,
+            query.filters.len()
+        );
 
         let table = self.get_chunks_table().await?;
+        let filter_sql = filters_to_sql(&query.filters);
 
-        let mut results = table
+        let mut search_q = table
             .vector_search(query.embedding.clone())
             .map_err(|e| StoreError::Query(format!("Failed to create search query: {e}")))?
-            .limit(query.limit)
+            .distance_type(distance_type_from_metric(query.metric))
+            .limit(query.limit);
+
+        if let Some(ref filter) = filter_sql {
+            debug!("Applying search filter: {filter}");
+            search_q = search_q.only_if(filter);
+        }
+
+        let mut results = search_q
             .execute()
             .await
             .map_err(|e| StoreError::Query(format!("Failed to execute search: {e}")))?;
@@ -442,21 +456,33 @@ impl VectorStore for LanceStore {
         };
 
         debug!(
-            "Performing hybrid search with text: '{}' and limit {}",
-            query_text, query.limit
+            "Performing hybrid search with text: '{}' limit {} metric {:?} filters {}",
+            query_text,
+            query.limit,
+            query.metric,
+            query.filters.len()
         );
 
         let table = self.get_chunks_table().await?;
+        let filter_sql = filters_to_sql(&query.filters);
 
         // Build hybrid query combining FTS and vector search
         let fts_query = FullTextSearchQuery::new(query_text);
 
-        let mut results = table
+        let mut search_q = table
             .query()
             .full_text_search(fts_query)
             .nearest_to(query.embedding.clone())
             .map_err(|e| StoreError::Query(format!("Failed to create hybrid query: {e}")))?
-            .limit(query.limit)
+            .distance_type(distance_type_from_metric(query.metric))
+            .limit(query.limit);
+
+        if let Some(ref filter) = filter_sql {
+            debug!("Applying hybrid search filter: {filter}");
+            search_q = search_q.only_if(filter);
+        }
+
+        let mut results = search_q
             .execute_hybrid(QueryExecutionOptions::default())
             .await
             .map_err(|e| StoreError::Query(format!("Failed to execute hybrid search: {e}")))?;
@@ -736,6 +762,117 @@ fn calculate_dir_size(path: &Path) -> u64 {
     }
 
     total_size
+}
+
+/// Map [`DistanceMetric`] to the LanceDB distance type used at query time.
+fn distance_type_from_metric(metric: DistanceMetric) -> DistanceType {
+    match metric {
+        DistanceMetric::Cosine => DistanceType::Cosine,
+        DistanceMetric::L2 => DistanceType::L2,
+        DistanceMetric::Dot => DistanceType::Dot,
+    }
+}
+
+/// Escape a string for use inside a single-quoted SQL literal.
+fn escape_sql_literal(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
+/// Escape `%` and `_` so they are treated as literals in `LIKE` patterns.
+fn escape_like_literal(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+/// Convert a glob (`*`, `**`, `?`) into a SQL `LIKE` pattern.
+fn glob_to_like_pattern(glob: &str) -> String {
+    let mut pattern = String::with_capacity(glob.len());
+    let mut chars = glob.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '*' => {
+                if chars.peek() == Some(&'*') {
+                    chars.next();
+                    if chars.peek() == Some(&'/') {
+                        chars.next();
+                    }
+                }
+                pattern.push('%');
+            }
+            '?' => pattern.push('_'),
+            '%' | '_' => {
+                pattern.push('\\');
+                pattern.push(c);
+            }
+            '\\' => pattern.push_str("\\\\"),
+            _ => pattern.push(c),
+        }
+    }
+
+    pattern
+}
+
+/// Convert one [`SearchFilter`] into a LanceDB/DataFusion SQL predicate.
+fn filter_to_sql(filter: &SearchFilter) -> String {
+    match filter {
+        SearchFilter::PathPrefix(prefix) => {
+            let pattern = escape_sql_literal(&format!("{}%", escape_like_literal(prefix)));
+            format!("file_path LIKE '{pattern}' ESCAPE '\\'")
+        }
+        SearchFilter::PathGlob(glob) => {
+            let pattern = escape_sql_literal(&glob_to_like_pattern(glob));
+            format!("file_path LIKE '{pattern}' ESCAPE '\\'")
+        }
+        SearchFilter::MimeType(value) => type_or_mime_sql(value),
+        SearchFilter::Language(lang) => {
+            let escaped = escape_sql_literal(&lang.to_lowercase());
+            format!("(LOWER(language) = '{escaped}' OR LOWER(content_type) = 'code:{escaped}')")
+        }
+        SearchFilter::ModifiedAfter(ts) => {
+            let escaped = escape_sql_literal(&ts.to_rfc3339());
+            format!("indexed_at >= '{escaped}'")
+        }
+        SearchFilter::ModifiedBefore(ts) => {
+            let escaped = escape_sql_literal(&ts.to_rfc3339());
+            format!("indexed_at <= '{escaped}'")
+        }
+        SearchFilter::MinDepth(depth) => format!("depth >= {depth}"),
+        SearchFilter::MaxDepth(depth) => format!("depth <= {depth}"),
+    }
+}
+
+/// `type:` / `mime:` values may name a content-type alias or a MIME type.
+fn type_or_mime_sql(value: &str) -> String {
+    let lowered = value.to_lowercase();
+    let escaped = escape_sql_literal(&lowered);
+
+    if lowered.contains('/') {
+        return format!("LOWER(file_mime_type) = '{escaped}'");
+    }
+
+    match lowered.as_str() {
+        "code" => "(LOWER(content_type) LIKE 'code:%' OR LOWER(content_type) = 'code')".to_string(),
+        "text" => "LOWER(content_type) = 'text'".to_string(),
+        "markdown" | "md" => "LOWER(content_type) = 'markdown'".to_string(),
+        "pdf" => "(LOWER(content_type) LIKE 'pdf:%' OR LOWER(content_type) = 'pdf')".to_string(),
+        "image" | "image_caption" => "LOWER(content_type) = 'image_caption'".to_string(),
+        _ => format!(
+            "(LOWER(content_type) = '{escaped}' OR LOWER(content_type) LIKE '{escaped}:%' OR LOWER(file_mime_type) = '{escaped}')"
+        ),
+    }
+}
+
+/// Combine [`SearchQuery`] filters into a single SQL predicate, if any.
+fn filters_to_sql(filters: &[SearchFilter]) -> Option<String> {
+    if filters.is_empty() {
+        return None;
+    }
+
+    let clauses: Vec<String> = filters.iter().map(filter_to_sql).collect();
+    Some(clauses.join(" AND "))
 }
 
 fn content_type_to_string(ct: &ContentType) -> String {
@@ -1096,7 +1233,7 @@ fn batch_to_file_records(batch: &RecordBatch) -> Result<Vec<FileRecord>, StoreEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ragfs_core::DistanceMetric;
+    use ragfs_core::{DistanceMetric, SearchFilter};
     use std::collections::HashMap;
     use tempfile::tempdir;
 
@@ -1518,5 +1655,339 @@ mod tests {
         let path = PathBuf::from("/nonexistent/file.txt");
         let result = store.get_file(&path).await.unwrap();
         assert!(result.is_none());
+    }
+
+    fn create_chunk_with_meta(
+        file_path: &Path,
+        content: &str,
+        embedding: Vec<f32>,
+        content_type: ContentType,
+        mime_type: Option<String>,
+        depth: u8,
+    ) -> Chunk {
+        Chunk {
+            id: Uuid::new_v4(),
+            file_id: Uuid::new_v4(),
+            file_path: file_path.to_path_buf(),
+            content: content.to_string(),
+            content_type,
+            mime_type,
+            chunk_index: 0,
+            byte_range: 0..content.len() as u64,
+            line_range: Some(0..1),
+            parent_chunk_id: None,
+            depth,
+            embedding: Some(embedding),
+            metadata: ChunkMetadata {
+                indexed_at: Some(Utc::now()),
+                embedding_model: Some("test-model".to_string()),
+                token_count: None,
+                extra: HashMap::new(),
+            },
+        }
+    }
+
+    async fn seeded_filter_store() -> (tempfile::TempDir, LanceStore, Vec<f32>) {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path, TEST_DIM);
+        store.init().await.unwrap();
+
+        let embedding = create_random_embedding(TEST_DIM);
+        let chunks = vec![
+            create_chunk_with_meta(
+                Path::new("src/lib.rs"),
+                "fn rust_auth() {}",
+                embedding.clone(),
+                ContentType::Code {
+                    language: "rust".to_string(),
+                    symbol: None,
+                },
+                Some("text/x-rust".to_string()),
+                0,
+            ),
+            create_chunk_with_meta(
+                Path::new("src/app.py"),
+                "def python_auth(): pass",
+                embedding.clone(),
+                ContentType::Code {
+                    language: "python".to_string(),
+                    symbol: None,
+                },
+                Some("text/x-python".to_string()),
+                1,
+            ),
+            create_chunk_with_meta(
+                Path::new("docs/readme.md"),
+                "authentication notes",
+                embedding.clone(),
+                ContentType::Markdown,
+                Some("text/markdown".to_string()),
+                3,
+            ),
+            create_chunk_with_meta(
+                Path::new("notes/plain.txt"),
+                "plain authentication text",
+                embedding.clone(),
+                ContentType::Text,
+                Some("text/plain".to_string()),
+                2,
+            ),
+        ];
+        store.upsert_chunks(&chunks).await.unwrap();
+        (temp, store, embedding)
+    }
+
+    fn search_query(
+        embedding: Vec<f32>,
+        filters: Vec<SearchFilter>,
+        metric: DistanceMetric,
+    ) -> SearchQuery {
+        SearchQuery {
+            text: Some("authentication".to_string()),
+            embedding,
+            limit: 10,
+            filters,
+            metric,
+        }
+    }
+
+    #[test]
+    fn test_filters_to_sql_language_path_type_depth() {
+        let sql = filters_to_sql(&[
+            SearchFilter::Language("Rust".to_string()),
+            SearchFilter::PathPrefix("src/".to_string()),
+            SearchFilter::MimeType("code".to_string()),
+            SearchFilter::MaxDepth(2),
+        ])
+        .unwrap();
+
+        assert!(sql.contains("LOWER(language) = 'rust'"));
+        assert!(sql.contains("LOWER(content_type) = 'code:rust'"));
+        assert!(sql.contains("file_path LIKE 'src/%' ESCAPE '\\'"));
+        assert!(sql.contains("LOWER(content_type) LIKE 'code:%'"));
+        assert!(sql.contains("depth <= 2"));
+        assert!(sql.contains(" AND "));
+    }
+
+    #[test]
+    fn test_filters_to_sql_path_glob_and_mime() {
+        let sql = filters_to_sql(&[
+            SearchFilter::PathGlob("src/**/*.rs".to_string()),
+            SearchFilter::MimeType("text/x-rust".to_string()),
+            SearchFilter::MinDepth(1),
+        ])
+        .unwrap();
+
+        assert!(sql.contains("file_path LIKE 'src/%.rs' ESCAPE '\\'"));
+        assert!(sql.contains("LOWER(file_mime_type) = 'text/x-rust'"));
+        assert!(sql.contains("depth >= 1"));
+    }
+
+    #[test]
+    fn test_filters_to_sql_escapes_quotes() {
+        let sql = filters_to_sql(&[SearchFilter::PathPrefix("o'brien".to_string())]).unwrap();
+        assert!(sql.contains("o''brien"));
+    }
+
+    #[test]
+    fn test_filters_to_sql_empty() {
+        assert!(filters_to_sql(&[]).is_none());
+    }
+
+    #[test]
+    fn test_glob_to_like_pattern() {
+        assert_eq!(glob_to_like_pattern("src/**"), "src/%");
+        assert_eq!(glob_to_like_pattern("src/**/*.rs"), "src/%.rs");
+        assert_eq!(glob_to_like_pattern("file?.txt"), "file_.txt");
+        assert_eq!(glob_to_like_pattern("100%_done"), "100\\%\\_done");
+    }
+
+    #[test]
+    fn test_distance_type_from_metric() {
+        assert_eq!(
+            distance_type_from_metric(DistanceMetric::Cosine),
+            DistanceType::Cosine
+        );
+        assert_eq!(
+            distance_type_from_metric(DistanceMetric::L2),
+            DistanceType::L2
+        );
+        assert_eq!(
+            distance_type_from_metric(DistanceMetric::Dot),
+            DistanceType::Dot
+        );
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_language() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::Language("rust".to_string())],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, PathBuf::from("src/lib.rs"));
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_path_prefix() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::PathPrefix("src/".to_string())],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        let paths: Vec<_> = results.iter().map(|r| r.file_path.clone()).collect();
+        assert_eq!(results.len(), 2);
+        assert!(paths.contains(&PathBuf::from("src/lib.rs")));
+        assert!(paths.contains(&PathBuf::from("src/app.py")));
+        assert!(!paths.contains(&PathBuf::from("docs/readme.md")));
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_path_glob() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::PathGlob("src/**".to_string())],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        let paths: Vec<_> = results.iter().map(|r| r.file_path.clone()).collect();
+        assert_eq!(results.len(), 2);
+        assert!(paths.contains(&PathBuf::from("src/lib.rs")));
+        assert!(paths.contains(&PathBuf::from("src/app.py")));
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_type_code() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::MimeType("code".to_string())],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        let paths: Vec<_> = results.iter().map(|r| r.file_path.clone()).collect();
+        assert_eq!(results.len(), 2);
+        assert!(paths.contains(&PathBuf::from("src/lib.rs")));
+        assert!(paths.contains(&PathBuf::from("src/app.py")));
+        assert!(!paths.contains(&PathBuf::from("notes/plain.txt")));
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_mime_type() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::MimeType("text/plain".to_string())],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, PathBuf::from("notes/plain.txt"));
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_max_depth() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::MaxDepth(1)],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        let paths: Vec<_> = results.iter().map(|r| r.file_path.clone()).collect();
+        assert_eq!(results.len(), 2);
+        assert!(paths.contains(&PathBuf::from("src/lib.rs")));
+        assert!(paths.contains(&PathBuf::from("src/app.py")));
+        assert!(!paths.contains(&PathBuf::from("docs/readme.md")));
+        assert!(!paths.contains(&PathBuf::from("notes/plain.txt")));
+    }
+
+    #[tokio::test]
+    async fn test_search_combines_filters() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![
+                    SearchFilter::PathPrefix("src/".to_string()),
+                    SearchFilter::Language("python".to_string()),
+                    SearchFilter::MaxDepth(2),
+                ],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, PathBuf::from("src/app.py"));
+    }
+
+    #[tokio::test]
+    async fn test_search_applies_l2_and_dot_metrics() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let filters = vec![SearchFilter::Language("rust".to_string())];
+
+        for metric in [
+            DistanceMetric::L2,
+            DistanceMetric::Dot,
+            DistanceMetric::Cosine,
+        ] {
+            let results = store
+                .search(search_query(embedding.clone(), filters.clone(), metric))
+                .await
+                .unwrap();
+            assert_eq!(
+                results.len(),
+                1,
+                "metric {metric:?} should still honor language filter"
+            );
+            assert_eq!(results[0].file_path, PathBuf::from("src/lib.rs"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hybrid_search_applies_filters_and_metric() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .hybrid_search(search_query(
+                embedding,
+                vec![
+                    SearchFilter::Language("rust".to_string()),
+                    SearchFilter::MimeType("code".to_string()),
+                    SearchFilter::MaxDepth(1),
+                ],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, PathBuf::from("src/lib.rs"));
+        assert!(results[0].content.contains("rust_auth"));
     }
 }

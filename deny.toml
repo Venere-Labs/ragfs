@@ -12,7 +12,7 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 
 # How to handle advisories
 vulnerability = "deny"
-unmaintained = "warn"
+unmaintained = "deny"
 yanked = "warn"
 notice = "warn"
 
@@ -60,9 +60,6 @@ wildcards = "deny"
 
 # Allow workspace dependencies
 workspace-default-features = "allow"
-
-# Don't allow build scripts to do network operations
-build-script-allow-network = false
 
 # Deny specific crates
 deny = []

@@ -4,7 +4,9 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3_async_runtimes::tokio::future_into_py;
 use ragfs_core::ContentExtractor;
-use ragfs_extract::{ExtractorRegistry, ImageExtractor, PdfExtractor, TextExtractor};
+use ragfs_extract::{
+    ExtractorRegistry, ImageExtractor, OfficeExtractor, PdfExtractor, TextExtractor,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,8 +16,9 @@ use crate::vectorstore::Document;
 /// Document loader that extracts content from various file formats.
 ///
 /// Supports:
-/// - Text files (40+ formats: .txt, .md, .rs, .py, .js, .json, .yaml, etc.)
+/// - Text files (UTF-8 source/markup: .txt, .md, .rs, .py, .js, .json, .yaml, etc.)
 /// - PDF files (with embedded image extraction)
+/// - Office OOXML/ODT (`.docx`, `.xlsx`, `.pptx`, `.odt` — not binary `.doc`)
 /// - Images (metadata extraction)
 ///
 /// Example:
@@ -37,15 +40,21 @@ impl RagfsDocumentLoader {
     ///
     /// Args:
     ///     extractors: List of extractors to enable. Defaults to all.
-    ///                 Options: "text", "pdf", "image"
+    ///                 Options: "text", "pdf", "image", "office"
     #[new]
     #[pyo3(signature = (extractors=None))]
     fn new(extractors: Option<Vec<String>>) -> Self {
         let mut registry = ExtractorRegistry::new();
         let mut supported_mimes = Vec::new();
 
-        let enabled = extractors
-            .unwrap_or_else(|| vec!["text".to_string(), "pdf".to_string(), "image".to_string()]);
+        let enabled = extractors.unwrap_or_else(|| {
+            vec![
+                "text".to_string(),
+                "pdf".to_string(),
+                "image".to_string(),
+                "office".to_string(),
+            ]
+        });
 
         for ext in enabled {
             match ext.as_str() {
@@ -66,6 +75,12 @@ impl RagfsDocumentLoader {
                     supported_mimes
                         .extend(extractor.supported_types().iter().map(|s| (*s).to_string()));
                     registry.register("image", extractor);
+                }
+                "office" => {
+                    let extractor = OfficeExtractor::new();
+                    supported_mimes
+                        .extend(extractor.supported_types().iter().map(|s| (*s).to_string()));
+                    registry.register("office", extractor);
                 }
                 _ => {} // Ignore unknown extractors
             }

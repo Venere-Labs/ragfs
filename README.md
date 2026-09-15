@@ -18,7 +18,7 @@ An agentic FUSE filesystem that makes file management safe and structured for LL
 - **Local Embeddings** - Runs entirely offline using the `gte-small` model via Candle
 - **FUSE Integration** - Mount indexed directories as a virtual filesystem
 - **Real-time Indexing** - Watch directories for changes and update the index automatically
-- **Multimodal Support** - Extract content from text, code, markdown, PDF, and images
+- **Multimodal Support** - Extract content from text, code, markdown, PDF, images, and Office OOXML/ODT
 - **Code-aware Chunking** - Syntax-aware splitting using tree-sitter for source code
 - **Hybrid Search** - Combine vector similarity with full-text search
 - **MCP Server** - Claude Desktop integration for AI assistants
@@ -32,7 +32,7 @@ An agentic FUSE filesystem that makes file management safe and structured for LL
 | FUSE mount | Stable | Linux only |
 | Semantic search | Stable | Vector similarity with LanceDB |
 | Hybrid search | Stable | Vector + full-text |
-| Text extraction | Stable | 40+ formats |
+| Text extraction | Stable | UTF-8 text/code, PDF, images, OOXML (docx/xlsx/pptx/odt). No binary `.doc` |
 | Code chunking | Stable | Tree-sitter based |
 | PDF extraction | Stable | Text + embedded images |
 | Agent operations (.ops/) | Stable | JSON feedback, batch support |

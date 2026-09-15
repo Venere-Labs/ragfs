@@ -36,7 +36,9 @@ use ragfs_core::{ChunkConfig, Embedder, EmbeddingConfig, Indexer, VectorStore};
 #[cfg(feature = "candle")]
 use ragfs_embed::CandleEmbedder;
 use ragfs_embed::EmbedderPool;
-use ragfs_extract::{ExtractorRegistry, ImageExtractor, PdfExtractor, TextExtractor};
+use ragfs_extract::{
+    ExtractorRegistry, ImageExtractor, OfficeExtractor, PdfExtractor, TextExtractor,
+};
 use ragfs_index::{IndexerConfig, IndexerService};
 use ragfs_query::QueryExecutor;
 #[cfg(feature = "lancedb")]
@@ -240,6 +242,7 @@ async fn create_components(
     extractors.register("text", TextExtractor::new());
     extractors.register("pdf", PdfExtractor::new());
     extractors.register("image", ImageExtractor::new());
+    extractors.register("office", OfficeExtractor::new());
     let extractors = Arc::new(extractors);
 
     // Create chunker registry

@@ -764,7 +764,7 @@ fn calculate_dir_size(path: &Path) -> u64 {
     total_size
 }
 
-/// Map [`DistanceMetric`] to the LanceDB distance type used at query time.
+/// Map [`DistanceMetric`] to the `LanceDB` distance type used at query time.
 fn distance_type_from_metric(metric: DistanceMetric) -> DistanceType {
     match metric {
         DistanceMetric::Cosine => DistanceType::Cosine,
@@ -800,7 +800,9 @@ fn glob_to_like_pattern(glob: &str) -> String {
                         chars.next();
                     }
                 }
-                pattern.push('%');
+                if !pattern.ends_with('%') {
+                    pattern.push('%');
+                }
             }
             '?' => pattern.push('_'),
             '%' | '_' => {
@@ -815,7 +817,7 @@ fn glob_to_like_pattern(glob: &str) -> String {
     pattern
 }
 
-/// Convert one [`SearchFilter`] into a LanceDB/DataFusion SQL predicate.
+/// Convert one [`SearchFilter`] into a `LanceDB`/`DataFusion` SQL predicate.
 fn filter_to_sql(filter: &SearchFilter) -> String {
     match filter {
         SearchFilter::PathPrefix(prefix) => {

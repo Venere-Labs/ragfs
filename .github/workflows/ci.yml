@@ -161,7 +161,7 @@ jobs:
           pytest tests/ -v --ignore=tests/test_llamaindex --ignore=tests/test_haystack -m "not slow and not requires_model"
       - name: Install MCP dependencies
         run: |
-          pip install mcp
+          pip install "mcp>=1.2.0,<2"
           cd crates/ragfs-mcp
           pip install -e .
       - name: Run MCP tests

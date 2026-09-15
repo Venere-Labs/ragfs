@@ -9,8 +9,8 @@ use ragfs_core::{
 use ragfs_embed::EmbedderPool;
 use ragfs_extract::ExtractorRegistry;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Notify, RwLock, broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -102,9 +102,11 @@ pub fn path_matches_pattern(path: &str, pattern: &str) -> bool {
         return true;
     }
     if pattern == "**/.*" || pattern == ".*" {
+        // Hidden *files* only — do not treat `/tmp/.tmpXXXX/file.txt` as hidden.
         return path
-            .split('/')
-            .any(|component| !component.is_empty() && component.starts_with('.'));
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| !name.is_empty() && name.starts_with('.'));
     }
 
     let suffix = pattern.strip_prefix("**/").unwrap_or(pattern.as_str());
@@ -580,13 +582,7 @@ fn scan_directory(
             }
 
             if path.is_dir() {
-                visit_dir(
-                    &path,
-                    event_tx,
-                    exclude_patterns,
-                    include_patterns,
-                    pending,
-                );
+                visit_dir(&path, event_tx, exclude_patterns, include_patterns, pending);
             } else if path.is_file() {
                 let included = include_patterns.is_empty()
                     || include_patterns
@@ -600,13 +596,7 @@ fn scan_directory(
         }
     }
 
-    visit_dir(
-        root,
-        event_tx,
-        exclude_patterns,
-        include_patterns,
-        pending,
-    );
+    visit_dir(root, event_tx, exclude_patterns, include_patterns, pending);
 }
 
 fn queue_event_blocking(
@@ -1467,17 +1457,30 @@ mod tests {
     #[test]
     fn test_path_matches_exclude_and_include_patterns() {
         assert!(path_matches_pattern("/proj/src/main.rs", "**/*"));
-        assert!(path_matches_pattern("/proj/node_modules/pkg/index.js", "**/node_modules/**"));
+        assert!(path_matches_pattern(
+            "/proj/node_modules/pkg/index.js",
+            "**/node_modules/**"
+        ));
         assert!(path_matches_pattern("/proj/.git/config", "**/.git/**"));
         assert!(path_matches_pattern("/proj/foo.pyc", "**/*.pyc"));
         assert!(path_matches_pattern("/proj/.env", "**/.env"));
-        assert!(!path_matches_pattern("/proj/src/main.rs", "**/node_modules/**"));
+        assert!(path_matches_pattern("/proj/.env", "**/.*"));
+        assert!(
+            !path_matches_pattern("/tmp/.tmpABC/file.txt", "**/.*"),
+            "hidden parent dirs must not exclude a visible file"
+        );
+        assert!(!path_matches_pattern(
+            "/proj/src/main.rs",
+            "**/node_modules/**"
+        ));
         assert!(path_matches_pattern("/proj/src/main.rs", "**/*.rs"));
         assert!(!path_matches_pattern("/proj/readme.md", "**/*.rs"));
 
-        let mut config = IndexerConfig::default();
-        config.include_patterns = vec!["**/*.rs".to_string()];
-        config.exclude_patterns = vec!["**/target/**".to_string()];
+        let config = IndexerConfig {
+            include_patterns: vec!["**/*.rs".to_string()],
+            exclude_patterns: vec!["**/target/**".to_string()],
+            ..Default::default()
+        };
         assert!(config.should_process_path(Path::new("/proj/src/lib.rs")));
         assert!(!config.should_process_path(Path::new("/proj/src/lib.md")));
         assert!(!config.should_process_path(Path::new("/proj/target/debug/lib.rs")));
@@ -1518,8 +1521,10 @@ mod tests {
         std::fs::write(&file_path, "this file is definitely larger than 8 bytes").unwrap();
 
         let store = Arc::new(MockStore::new());
-        let mut config = IndexerConfig::default();
-        config.max_file_size = 8;
+        let config = IndexerConfig {
+            max_file_size: 8,
+            ..Default::default()
+        };
         let indexer =
             create_test_indexer_with_config(Arc::clone(&store) as Arc<dyn VectorStore>, config);
 
@@ -1545,8 +1550,10 @@ mod tests {
         let skipped_id = store.files.read().await.get(&file_path).unwrap().id;
         assert_eq!(first_id, skipped_id);
 
-        let mut force_config = IndexerConfig::default();
-        force_config.force = true;
+        let force_config = IndexerConfig {
+            force: true,
+            ..Default::default()
+        };
         let force_indexer = create_test_indexer_with_config(
             Arc::clone(&store) as Arc<dyn VectorStore>,
             force_config,
@@ -1573,15 +1580,14 @@ mod tests {
         let mut chunkers = ChunkerRegistry::new();
         chunkers.register("fixed", FixedSizeChunker::new());
         chunkers.set_default("fixed");
-        let embedder_pool = Arc::new(EmbedderPool::new(
-            Arc::new(MockEmbedder::new(TEST_DIM)),
-            1,
-        ));
+        let embedder_pool = Arc::new(EmbedderPool::new(Arc::new(MockEmbedder::new(TEST_DIM)), 1));
 
-        let mut config = IndexerConfig::default();
-        config.include_patterns = vec!["**/*.txt".to_string()];
-        config.exclude_patterns = vec!["**/skip_me/**".to_string()];
-        config.debounce_ms = 50;
+        let config = IndexerConfig {
+            include_patterns: vec!["**/*.txt".to_string()],
+            exclude_patterns: vec!["**/skip_me/**".to_string()],
+            debounce_ms: 50,
+            ..Default::default()
+        };
 
         let indexer = IndexerService::new(
             temp_dir.path().to_path_buf(),
@@ -1613,10 +1619,15 @@ mod tests {
         std::fs::write(&file_path, body).unwrap();
 
         let store = Arc::new(MockStore::new());
-        let mut config = IndexerConfig::default();
-        config.chunk_config.target_size = 8;
-        config.chunk_config.max_size = 16;
-        config.chunk_config.overlap = 0;
+        let config = IndexerConfig {
+            chunk_config: ChunkConfig {
+                target_size: 8,
+                max_size: 16,
+                overlap: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let indexer =
             create_test_indexer_with_config(Arc::clone(&store) as Arc<dyn VectorStore>, config);
 

@@ -84,7 +84,7 @@ pub mod candle;
 #[cfg(feature = "candle")]
 pub use cache::EmbeddingCache;
 #[cfg(feature = "candle")]
-pub use candle::{resolve_supported_model, CandleEmbedder};
+pub use candle::{CandleEmbedder, resolve_supported_model};
 
 // Always available modules
 pub mod noop;

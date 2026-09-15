@@ -20,7 +20,7 @@ use tracing::{debug, info};
 /// Model identifier on `HuggingFace` Hub.
 const MODEL_ID: &str = "thenlper/gte-small";
 
-/// Resolve a user-facing model name to the implemented HuggingFace id.
+/// Resolve a user-facing model name to the implemented Hugging Face id.
 ///
 /// RAGFS currently implements only `thenlper/gte-small` (alias: `gte-small`).
 pub fn resolve_supported_model(model: &str) -> Result<&'static str, EmbedError> {
@@ -425,12 +425,12 @@ mod tests {
     #[test]
     fn test_unsupported_model_errors_before_download() {
         let cache_dir = tempdir().unwrap();
-        let err = CandleEmbedder::try_new(
-            cache_dir.path().to_path_buf(),
-            "jina-embeddings-v3",
-            false,
-        )
-        .unwrap_err();
+        let result =
+            CandleEmbedder::try_new(cache_dir.path().to_path_buf(), "jina-embeddings-v3", false);
+        let err = match result {
+            Ok(_) => panic!("unsupported model should not construct an embedder"),
+            Err(e) => e,
+        };
         let message = err.to_string();
         assert!(
             message.contains("jina-embeddings-v3"),

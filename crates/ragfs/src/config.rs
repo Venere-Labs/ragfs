@@ -167,10 +167,10 @@ impl Config {
     }
 }
 
-/// HuggingFace id of the only implemented embedding model.
+    /// Hugging Face id of the only implemented embedding model.
 pub const SUPPORTED_EMBEDDING_MODEL: &str = "thenlper/gte-small";
 
-/// Resolve a user-facing model name to the implemented HuggingFace id.
+    /// Resolve a user-facing model name to the implemented Hugging Face id.
 pub fn resolve_supported_model(model: &str) -> Result<&'static str, ConfigError> {
     match model.trim() {
         "thenlper/gte-small" | "gte-small" => Ok(SUPPORTED_EMBEDDING_MODEL),
@@ -518,12 +518,12 @@ mod tests {
     #[test]
     fn toml_overrides_drive_query_options() {
         let config = parse(
-            r#"
+            r"
             [query]
             default_limit = 3
             max_limit = 7
             hybrid = false
-            "#,
+            ",
         );
 
         assert!(!config.query.hybrid);

@@ -346,10 +346,7 @@ async fn main() -> Result<()> {
             ));
 
             // Initial scan + file watcher so a cold mount is not an empty index
-            indexer
-                .start()
-                .await
-                .context("Failed to start indexer")?;
+            indexer.start().await.context("Failed to start indexer")?;
             info!("Indexing and watching {}", source.display());
 
             // Create channel for reindex requests
@@ -654,36 +651,33 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Config { action } => {
-            match action {
-                ConfigAction::Show => match cli.format {
-                    OutputFormat::Json => {
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&config)
-                                .context("Failed to serialize config")?
-                        );
-                    }
-                    OutputFormat::Text => {
-                        println!(
-                            "{}",
-                            toml::to_string_pretty(&config)
-                                .context("Failed to serialize config")?
-                        );
-                    }
-                },
-                ConfigAction::Init => {
-                    println!("{}", Config::sample_toml());
+        Commands::Config { action } => match action {
+            ConfigAction::Show => match cli.format {
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&config)
+                            .context("Failed to serialize config")?
+                    );
                 }
-                ConfigAction::Path => {
-                    if let Some(path) = Config::config_path() {
-                        println!("{}", path.display());
-                    } else {
-                        println!("Could not determine config directory");
-                    }
+                OutputFormat::Text => {
+                    println!(
+                        "{}",
+                        toml::to_string_pretty(&config).context("Failed to serialize config")?
+                    );
+                }
+            },
+            ConfigAction::Init => {
+                println!("{}", Config::sample_toml());
+            }
+            ConfigAction::Path => {
+                if let Some(path) = Config::config_path() {
+                    println!("{}", path.display());
+                } else {
+                    println!("Could not determine config directory");
                 }
             }
-        }
+        },
     }
 
     Ok(())

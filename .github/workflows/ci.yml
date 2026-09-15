@@ -146,25 +146,29 @@ jobs:
       - name: Create virtual environment
         run: |
           python -m venv .venv
-          echo "$PWD/.venv/bin" >> $GITHUB_PATH
       - name: Install Python dependencies
         run: |
+          source .venv/bin/activate
           pip install maturin pytest pytest-asyncio pytest-cov
       - name: Build ragfs Python package
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
           maturin develop --features "candle,lancedb"
       - name: Run ragfs Python tests
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
           pytest tests/ -v --ignore=tests/test_llamaindex --ignore=tests/test_haystack -m "not slow and not requires_model"
       - name: Install MCP dependencies
         run: |
+          source .venv/bin/activate
           pip install mcp
           cd crates/ragfs-mcp
           pip install -e .
       - name: Run MCP tests
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-mcp
           pytest tests/ -v -m "not slow"
 

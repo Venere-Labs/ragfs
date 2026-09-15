@@ -41,10 +41,10 @@ Tools exposed:
 
 from __future__ import annotations
 
-import os
 import json
+import os
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
@@ -216,7 +216,7 @@ async def ragfs_similar(
         return json.dumps({"error": f"File not found: {file_path}"})
 
     try:
-        from ragfs import RagfsRetriever, RagfsDocumentLoader
+        from ragfs import RagfsDocumentLoader, RagfsRetriever
     except ImportError:
         return '{"error": "ragfs package not installed"}'
 
@@ -458,7 +458,7 @@ async def ragfs_restore_from_trash(
 @mcp.tool()
 async def ragfs_get_history(
     limit: int = 50,
-    path: Optional[str] = None,
+    path: str | None = None,
     index: str = "default",
 ) -> str:
     """Get operation history for audit trail.
@@ -703,7 +703,7 @@ async def ragfs_propose_organization(
         JSON with plan_id and proposed actions for review.
     """
     try:
-        from ragfs import RagfsSemanticManager, OrganizeStrategy, OrganizeRequest
+        from ragfs import OrganizeRequest, OrganizeStrategy, RagfsSemanticManager
     except ImportError:
         return json.dumps({"error": "ragfs package not installed"})
 
@@ -777,7 +777,7 @@ async def ragfs_propose_cleanup(index: str = "default") -> str:
         JSON with plan_id and proposed cleanup actions.
     """
     try:
-        from ragfs import RagfsSemanticManager, OrganizeStrategy, OrganizeRequest
+        from ragfs import OrganizeRequest, OrganizeStrategy, RagfsSemanticManager
     except ImportError:
         return json.dumps({"error": "ragfs package not installed"})
 
@@ -1034,7 +1034,7 @@ async def ragfs_reject_plan(
 
 @mcp.tool()
 async def ragfs_batch_operations(
-    operations: List[Dict[str, Any]],
+    operations: list[dict[str, Any]],
     atomic: bool = True,
     dry_run: bool = False,
     index: str = "default",
@@ -1063,7 +1063,7 @@ async def ragfs_batch_operations(
         JSON with batch result and undo IDs.
     """
     try:
-        from ragfs import RagfsOpsManager, Operation
+        from ragfs import Operation, RagfsOpsManager
     except ImportError:
         return json.dumps({"error": "ragfs package not installed"})
 

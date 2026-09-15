@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
-
 from ragfs import (
-    RagfsSemanticManager,
-    OrganizeStrategy,
-    OrganizeRequest,
-    SemanticPlan,
-    PlanAction,
-    SimilarFile,
-    SimilarFilesResult,
-    DuplicateGroups,
     CleanupAnalysis,
+    DuplicateGroups,
+    OrganizeRequest,
+    OrganizeStrategy,
+    RagfsSemanticManager,
+    SemanticPlan,
+    SimilarFilesResult,
 )
 
 
@@ -65,7 +61,7 @@ class LlamaIndexRagfsOrganizer:
         self,
         source_path: str,
         db_path: str,
-        model_path: Optional[str] = None,
+        model_path: str | None = None,
         duplicate_threshold: float = 0.95,
         similar_limit: int = 10,
     ):
@@ -106,7 +102,7 @@ class LlamaIndexRagfsOrganizer:
     async def find_similar(
         self,
         file_path: str,
-        k: Optional[int] = None,
+        k: int | None = None,
     ) -> SimilarFilesResult:
         """Find files semantically similar to a given file.
 
@@ -222,7 +218,7 @@ class LlamaIndexRagfsOrganizer:
 
         return await self._semantic.create_organize_plan(request)
 
-    async def list_pending_plans(self) -> List[SemanticPlan]:
+    async def list_pending_plans(self) -> list[SemanticPlan]:
         """List all pending plans awaiting approval.
 
         Returns:
@@ -231,7 +227,7 @@ class LlamaIndexRagfsOrganizer:
         await self.init()
         return await self._semantic.list_pending_plans()
 
-    async def get_plan(self, plan_id: str) -> Optional[SemanticPlan]:
+    async def get_plan(self, plan_id: str) -> SemanticPlan | None:
         """Get a specific plan by ID.
 
         Args:

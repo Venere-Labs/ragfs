@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -213,9 +212,9 @@ class TestServerConfiguration:
 
     def test_get_source_path(self):
         """Test source path."""
-        from ragfs_mcp.server import get_source_path
-
         import os
+
+        from ragfs_mcp.server import get_source_path
         path = get_source_path()
         # Should return current directory by default
         assert path == os.getcwd() or path is not None

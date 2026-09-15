@@ -167,10 +167,10 @@ impl Config {
     }
 }
 
-    /// Hugging Face id of the only implemented embedding model.
+/// Hugging Face id of the only implemented embedding model.
 pub const SUPPORTED_EMBEDDING_MODEL: &str = "thenlper/gte-small";
 
-    /// Resolve a user-facing model name to the implemented Hugging Face id.
+/// Resolve a user-facing model name to the implemented Hugging Face id.
 pub fn resolve_supported_model(model: &str) -> Result<&'static str, ConfigError> {
     match model.trim() {
         "thenlper/gte-small" | "gte-small" => Ok(SUPPORTED_EMBEDDING_MODEL),

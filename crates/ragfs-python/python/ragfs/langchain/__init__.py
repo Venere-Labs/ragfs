@@ -14,11 +14,11 @@ Example:
     store = InMemoryVectorStore(embeddings)
 """
 
-from .embeddings import LangChainRagfsEmbeddings as RagfsEmbeddings
-from .vectorstore import LangChainRagfsVectorStore as RagfsVectorStore
 from .document_loader import LangChainRagfsLoader as RagfsLoader
-from .text_splitter import LangChainRagfsTextSplitter as RagfsTextSplitter
+from .embeddings import LangChainRagfsEmbeddings as RagfsEmbeddings
 from .retriever import LangChainRagfsRetriever as RagfsRetriever
+from .text_splitter import LangChainRagfsTextSplitter as RagfsTextSplitter
+from .vectorstore import LangChainRagfsVectorStore as RagfsVectorStore
 
 __all__ = [
     "RagfsEmbeddings",

@@ -1,12 +1,29 @@
-# Keep Python Lint green on existing code without mass rewrites.
-# Unpinned `pip install ruff` now enables pyupgrade/isort by default
-# (hundreds of I001/UP* findings). Restrict to classic pycodestyle + Pyflakes.
+# Ruff configuration for ragfs Python packages  
+# https://docs.astral.sh/ruff/configuration/
 
 [lint]
-select = ["E", "W", "F"]
-ignore = [
-    "E501",  # long docstrings and generated-style comments
-    "F401",  # unused imports for optional adapters / availability checks
-    "F541",  # f-strings without placeholders in examples
-    "F841",  # unused variables in examples
+# Enable specific rule sets
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings  
+    "F",     # Pyflakes
+    "I",     # isort
 ]
+
+# Ignore specific rules that are too strict for this codebase
+ignore = [
+    "E501",    # Line too long - many docstrings exceed reasonable limits
+    "F401",    # Unused imports - many are for optional dependencies/examples
+    "F841",    # Unused variable - some intentional in examples
+    "BLE001",  # Allow catching Exception - common pattern in MCP servers
+    "DTZ006",  # Allow datetime.fromtimestamp() without tz - timestamps are already UTC
+    "UP035",   # Allow typing.Dict, typing.List for Python 3.9 compatibility
+]
+
+# Allow autofix for all enabled rules
+fixable = ["ALL"]
+unfixable = []
+
+[lint.isort]
+# Configure import sorting
+known-first-party = ["ragfs", "ragfs_mcp"]

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Iterable, List, Optional, Type
+from typing import Any, Iterable
 
-from ragfs import RagfsVectorStore as CoreVectorStore, PyChunk
+from ragfs import PyChunk
+from ragfs import RagfsVectorStore as CoreVectorStore
 
 try:
     from langchain_core.documents import Document
@@ -72,9 +73,9 @@ class LangChainRagfsVectorStore(VectorStore):
     def add_texts(
         self,
         texts: Iterable[str],
-        metadatas: Optional[List[dict]] = None,
+        metadatas: list[dict] | None = None,
         **kwargs: Any,
-    ) -> List[str]:
+    ) -> list[str]:
         """Add texts synchronously."""
         import asyncio
 
@@ -85,10 +86,10 @@ class LangChainRagfsVectorStore(VectorStore):
     async def aadd_texts(
         self,
         texts: Iterable[str],
-        metadatas: Optional[List[dict]] = None,
-        ids: Optional[List[str]] = None,
+        metadatas: list[dict] | None = None,
+        ids: list[str] | None = None,
         **kwargs: Any,
-    ) -> List[str]:
+    ) -> list[str]:
         """Add texts to the vector store.
 
         Args:
@@ -153,10 +154,10 @@ class LangChainRagfsVectorStore(VectorStore):
 
     async def aadd_documents(
         self,
-        documents: List[Document],
-        ids: Optional[List[str]] = None,
+        documents: list[Document],
+        ids: list[str] | None = None,
         **kwargs: Any,
-    ) -> List[str]:
+    ) -> list[str]:
         """Add LangChain documents to the vector store.
 
         Args:
@@ -172,10 +173,10 @@ class LangChainRagfsVectorStore(VectorStore):
 
     def add_documents(
         self,
-        documents: List[Document],
-        ids: Optional[List[str]] = None,
+        documents: list[Document],
+        ids: list[str] | None = None,
         **kwargs: Any,
-    ) -> List[str]:
+    ) -> list[str]:
         """Add documents synchronously."""
         import asyncio
 
@@ -185,9 +186,9 @@ class LangChainRagfsVectorStore(VectorStore):
 
     async def adelete(
         self,
-        ids: Optional[List[str]] = None,
+        ids: list[str] | None = None,
         **kwargs: Any,
-    ) -> Optional[bool]:
+    ) -> bool | None:
         """Delete documents by their file paths.
 
         Note: RAGFS deletes by file path, not by chunk ID.
@@ -213,9 +214,9 @@ class LangChainRagfsVectorStore(VectorStore):
 
     def delete(
         self,
-        ids: Optional[List[str]] = None,
+        ids: list[str] | None = None,
         **kwargs: Any,
-    ) -> Optional[bool]:
+    ) -> bool | None:
         """Delete documents synchronously."""
         import asyncio
 
@@ -228,7 +229,7 @@ class LangChainRagfsVectorStore(VectorStore):
         query: str,
         k: int = 4,
         **kwargs: Any,
-    ) -> List[Document]:
+    ) -> list[Document]:
         """Search synchronously."""
         import asyncio
 
@@ -241,7 +242,7 @@ class LangChainRagfsVectorStore(VectorStore):
         query: str,
         k: int = 4,
         **kwargs: Any,
-    ) -> List[Document]:
+    ) -> list[Document]:
         """Search for similar documents."""
         await self.ainit()
 
@@ -265,7 +266,7 @@ class LangChainRagfsVectorStore(VectorStore):
         query: str,
         k: int = 4,
         **kwargs: Any,
-    ) -> List[tuple[Document, float]]:
+    ) -> list[tuple[Document, float]]:
         """Search with relevance scores."""
         await self.ainit()
 
@@ -288,7 +289,7 @@ class LangChainRagfsVectorStore(VectorStore):
         query: str,
         k: int = 4,
         **kwargs: Any,
-    ) -> List[Document]:
+    ) -> list[Document]:
         """Hybrid search (vector + full-text)."""
         await self.ainit()
 
@@ -305,12 +306,12 @@ class LangChainRagfsVectorStore(VectorStore):
 
     @classmethod
     def from_texts(
-        cls: Type["LangChainRagfsVectorStore"],
-        texts: List[str],
+        cls: type[LangChainRagfsVectorStore],
+        texts: list[str],
         embedding: Embeddings,
-        metadatas: Optional[List[dict]] = None,
+        metadatas: list[dict] | None = None,
         **kwargs: Any,
-    ) -> "LangChainRagfsVectorStore":
+    ) -> LangChainRagfsVectorStore:
         """Create from texts synchronously.
 
         Note: Use afrom_texts for async version.
@@ -323,14 +324,14 @@ class LangChainRagfsVectorStore(VectorStore):
 
     @classmethod
     async def afrom_texts(
-        cls: Type["LangChainRagfsVectorStore"],
-        texts: List[str],
+        cls: type[LangChainRagfsVectorStore],
+        texts: list[str],
         embedding: Embeddings,
-        metadatas: Optional[List[dict]] = None,
-        db_path: Optional[str] = None,
+        metadatas: list[dict] | None = None,
+        db_path: str | None = None,
         dimension: int = 384,
         **kwargs: Any,
-    ) -> "LangChainRagfsVectorStore":
+    ) -> LangChainRagfsVectorStore:
         """Create a vector store from texts asynchronously.
 
         Args:
@@ -359,17 +360,17 @@ class LangChainRagfsVectorStore(VectorStore):
         embedding: Embeddings,
         db_path: str,
         dimension: int = 384,
-    ) -> "LangChainRagfsVectorStore":
+    ) -> LangChainRagfsVectorStore:
         """Create a vector store from an embeddings instance."""
         return cls(embedding=embedding, db_path=db_path, dimension=dimension)
 
     @classmethod
     def from_documents(
-        cls: Type["LangChainRagfsVectorStore"],
-        documents: List[Document],
+        cls: type[LangChainRagfsVectorStore],
+        documents: list[Document],
         embedding: Embeddings,
         **kwargs: Any,
-    ) -> "LangChainRagfsVectorStore":
+    ) -> LangChainRagfsVectorStore:
         """Create from documents synchronously."""
         import asyncio
 
@@ -379,13 +380,13 @@ class LangChainRagfsVectorStore(VectorStore):
 
     @classmethod
     async def afrom_documents(
-        cls: Type["LangChainRagfsVectorStore"],
-        documents: List[Document],
+        cls: type[LangChainRagfsVectorStore],
+        documents: list[Document],
         embedding: Embeddings,
-        db_path: Optional[str] = None,
+        db_path: str | None = None,
         dimension: int = 384,
         **kwargs: Any,
-    ) -> "LangChainRagfsVectorStore":
+    ) -> LangChainRagfsVectorStore:
         """Create a vector store from documents asynchronously.
 
         Args:

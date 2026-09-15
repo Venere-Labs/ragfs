@@ -48,7 +48,7 @@
 //! | Type | Description |
 //! |------|-------------|
 //! | [`ExtractorRegistry`] | Routes files to appropriate extractors by MIME type |
-//! | [`TextExtractor`] | Handles text-based files (40+ types) |
+//! | [`TextExtractor`] | UTF-8 text/code/markup by extension (not Office parsers) |
 //! | [`PdfExtractor`] | PDF text and image extraction |
 //! | [`ImageExtractor`] | Image metadata and optional captioning |
 //! | [`ImageCaptioner`] | Trait for vision model integration |

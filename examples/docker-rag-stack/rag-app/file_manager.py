@@ -101,7 +101,7 @@ ALLOWED_EXTENSIONS = {
     ".py", ".rs", ".go", ".java", ".js", ".ts", ".jsx", ".tsx",
     ".c", ".cpp", ".h", ".hpp", ".cs", ".rb", ".php", ".swift",
     ".json", ".yaml", ".yml", ".toml", ".xml", ".csv",
-    ".pdf", ".doc", ".docx",
+    ".pdf",
     ".sh", ".bash", ".zsh", ".fish",
     ".sql", ".graphql",
     ".dockerfile", ".makefile",

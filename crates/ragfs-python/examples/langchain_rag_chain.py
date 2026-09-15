@@ -6,8 +6,8 @@ This example demonstrates building a complete RAG (Retrieval Augmented Generatio
 pipeline using ragfs components with LangChain Expression Language (LCEL).
 
 Features demonstrated:
-- Multi-format document loading (40+ formats including PDF, images)
-- Code-aware text chunking with tree-sitter
+- Multi-format document loading (UTF-8 text/code, PDF, images)
+- Code-aware text chunking (pattern-based function/class splits)
 - Local embeddings (GTE-small, 384 dimensions, no API calls)
 - Hybrid search (vector + full-text)
 - Configurable LLM providers (OpenAI, Anthropic, Ollama)
@@ -171,7 +171,7 @@ async def index_documents(
     """
     print(f"Loading documents from: {source_path}")
 
-    # Load documents (supports 40+ formats)
+    # Load documents (UTF-8 text/code, PDF, images)
     loader = RagfsLoader(source_path)
     documents = await loader.aload()
     print(f"Loaded {len(documents)} documents")

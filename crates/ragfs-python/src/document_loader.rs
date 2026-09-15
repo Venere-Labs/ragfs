@@ -14,7 +14,7 @@ use crate::vectorstore::Document;
 /// Document loader that extracts content from various file formats.
 ///
 /// Supports:
-/// - Text files (40+ formats: .txt, .md, .rs, .py, .js, .json, .yaml, etc.)
+/// - Text files (UTF-8 source/markup: .txt, .md, .rs, .py, .js, .json, .yaml, etc.)
 /// - PDF files (with embedded image extraction)
 /// - Images (metadata extraction)
 ///

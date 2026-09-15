@@ -22,7 +22,7 @@ Typical indexing throughput on modern hardware (SSD, 8+ cores):
 | File Type | Files/min | Notes |
 |-----------|-----------|-------|
 | Plain text (.txt, .md) | 300-500 | Fastest |
-| Source code (.rs, .py, .js) | 200-400 | Tree-sitter parsing adds overhead |
+| Source code (.rs, .py, .js) | 200-400 | Pattern-based code chunking |
 | PDF documents | 50-100 | Depends on page count and images |
 | Large files (>1MB) | 10-50 | Limited by embedding batch size |
 

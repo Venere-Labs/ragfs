@@ -56,6 +56,7 @@ An agentic FUSE filesystem that makes file management safe and structured for LL
 **Limitations:**
 - Linux only (FUSE requirement)
 - Embedding model requires ~500MB disk
+- Vector search is an exact scan until IVF-PQ is built (≥256 chunks)
 - Large repositories (100K+ files) may need tuning
 
 ## Requirements

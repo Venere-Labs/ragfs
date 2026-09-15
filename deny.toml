@@ -47,7 +47,6 @@ ignore = [
     "RUSTSEC-2026-0099",
 
     # quick-xml — transitive via datafusion/arrow
-    "RUSTSEC-2026-0187",
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
     "RUSTSEC-2026-0204",

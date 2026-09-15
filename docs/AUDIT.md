@@ -106,7 +106,7 @@ the reason and what would have to change upstream.
 | RUSTSEC-2026-0192 | ttf-parser 0.24.1 | `ragfs-extract → pdf_oxide` | Same |
 | RUSTSEC-2026-0192 | ttf-parser 0.25.1 | `ragfs-extract → lopdf 0.42` | `lopdf` 0.45 replaced `ttf-parser` with `skrifa`, but moving to it re-introduces a second lopdf unless `pdf-extract` is also dropped |
 
-If the `pdf_oxide` extractor is ever retired (see issue #53), three of these rows
+If the `pdf_oxide` extractor is ever retired (see issue #58), three of these rows
 disappear with it.
 
 ### 1.3 Review
@@ -164,7 +164,7 @@ recommended. Merge order: **#42 → #40 → #41 → #38 → #39**.
       Issue #50.
 - [ ] CLI integration tests for config precedence, `--force`, `--hybrid`. Issue #51.
 - [ ] Split `crates/ragfs-fuse/src/filesystem.rs` (2 189 lines). Issue #52.
-- [ ] Decide the fate of the `pdf_oxide` feature (§1.2). Issue #53.
+- [ ] Decide the fate of the `pdf_oxide` feature (§1.2). Issue #58.
 
 ### P2
 

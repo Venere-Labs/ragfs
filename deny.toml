@@ -43,7 +43,6 @@ ignore = [
     "RUSTSEC-2026-0204",
 
     # Other transitive
-    "RUSTSEC-2026-0041",
     "RUSTSEC-2026-0009",
     "RUSTSEC-2026-0176",
     "RUSTSEC-2026-0177",

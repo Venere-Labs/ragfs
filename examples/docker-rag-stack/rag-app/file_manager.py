@@ -89,6 +89,10 @@ ALLOWED_MIME_TYPES = {
     "application/toml",
     # Documents
     "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.oasis.opendocument.text",
     # Fallback for unknown text
     "application/octet-stream",
 }
@@ -99,7 +103,7 @@ ALLOWED_EXTENSIONS = {
     ".py", ".rs", ".go", ".java", ".js", ".ts", ".jsx", ".tsx",
     ".c", ".cpp", ".h", ".hpp", ".cs", ".rb", ".php", ".swift",
     ".json", ".yaml", ".yml", ".toml", ".xml", ".csv",
-    ".pdf",
+    ".pdf", ".docx", ".xlsx", ".pptx", ".odt",
     ".sh", ".bash", ".zsh", ".fish",
     ".sql", ".graphql",
     ".dockerfile", ".makefile",

@@ -20,13 +20,16 @@ python -m ragfs_mcp
 
 ## Claude Desktop Configuration
 
-Add to your Claude Desktop config:
+Add to your Claude Desktop config. Set `RAGFS_SOURCE_PATH` to the same directory you indexed with `ragfs index` — MCP hashes that canonical path (blake3, first 16 hex chars) and opens `~/.local/share/ragfs/indices/{16hex}/index.lance`, matching the CLI.
 
 ```json
 {
   "mcpServers": {
     "ragfs": {
-      "command": "ragfs-mcp"
+      "command": "ragfs-mcp",
+      "env": {
+        "RAGFS_SOURCE_PATH": "/path/to/project"
+      }
     }
   }
 }

@@ -189,20 +189,86 @@ class TestBatchOperations:
 class TestServerConfiguration:
     """Tests for server configuration."""
 
-    def test_get_db_path_default(self):
-        """Test default database path."""
+    def test_get_db_path_matches_cli_blake3_scheme(self, tmp_path, monkeypatch):
+        """MCP must hash the canonical source path the same way as the CLI."""
+        import blake3
+        from ragfs_mcp.server import get_db_path, index_id_for_source
+
+        monkeypatch.delenv("RAGFS_DB_PATH", raising=False)
+        monkeypatch.delenv("RAGFS_DATA_DIR", raising=False)
+        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+
+        source = tmp_path / "project"
+        source.mkdir()
+        canonical = str(source.resolve())
+        expected_id = blake3.blake3(canonical.encode()).hexdigest()[:16]
+
+        assert index_id_for_source(str(source)) == expected_id
+        assert index_id_for_source(canonical) == expected_id
+
+        path = get_db_path(str(source))
+        assert path.endswith(f"indices/{expected_id}/index.lance")
+        assert "default" not in Path(path).parts
+
+    def test_get_db_path_relative_and_absolute_match(self, tmp_path, monkeypatch):
+        """Relative and absolute forms of the same directory share one index id."""
         from ragfs_mcp.server import get_db_path
 
+        monkeypatch.delenv("RAGFS_DB_PATH", raising=False)
+        monkeypatch.chdir(tmp_path)
+        source = tmp_path / "docs"
+        source.mkdir()
+
+        assert get_db_path("docs") == get_db_path(str(source.resolve()))
+
+    def test_get_db_path_default_uses_source_path(self, tmp_path, monkeypatch):
+        """Default index follows RAGFS_SOURCE_PATH, not a literal 'default' folder."""
+        import blake3
+        from ragfs_mcp.server import get_db_path
+
+        monkeypatch.delenv("RAGFS_DB_PATH", raising=False)
+        monkeypatch.delenv("RAGFS_DATA_DIR", raising=False)
+        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+        monkeypatch.setenv("RAGFS_SOURCE_PATH", str(tmp_path))
+
+        expected_id = blake3.blake3(str(tmp_path.resolve()).encode()).hexdigest()[:16]
         path = get_db_path()
-        assert "indices" in path
-        assert "default" in path
+        assert path.endswith(f"indices/{expected_id}/index.lance")
 
-    def test_get_db_path_custom_index(self):
-        """Test custom index name."""
+    def test_get_db_path_hex_id_passthrough(self, monkeypatch):
+        """A 16-hex id from ragfs_list_indices is used as-is."""
         from ragfs_mcp.server import get_db_path
 
-        path = get_db_path("my_custom_index")
-        assert "my_custom_index" in path
+        monkeypatch.delenv("RAGFS_DB_PATH", raising=False)
+        monkeypatch.delenv("RAGFS_DATA_DIR", raising=False)
+        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+
+        hex_id = "0123456789abcdef"
+        path = get_db_path(hex_id)
+        assert path.endswith(f"indices/{hex_id}/index.lance")
+
+    def test_get_db_path_env_override(self, monkeypatch, tmp_path):
+        """RAGFS_DB_PATH still wins when an explicit store path is set."""
+        from ragfs_mcp.server import get_db_path
+
+        override = str(tmp_path / "custom.lance")
+        monkeypatch.setenv("RAGFS_DB_PATH", override)
+        assert get_db_path("/some/source") == override
+        assert get_db_path() == override
+
+    def test_get_db_path_respects_data_dir(self, tmp_path, monkeypatch):
+        """RAGFS_DATA_DIR is the same override the CLI data_dir() uses."""
+        import blake3
+        from ragfs_mcp.server import get_db_path
+
+        monkeypatch.delenv("RAGFS_DB_PATH", raising=False)
+        monkeypatch.setenv("RAGFS_DATA_DIR", str(tmp_path))
+        source = tmp_path / "src"
+        source.mkdir()
+        expected_id = blake3.blake3(str(source.resolve()).encode()).hexdigest()[:16]
+        assert get_db_path(str(source)) == str(
+            tmp_path / "indices" / expected_id / "index.lance"
+        )
 
     def test_get_model_path(self):
         """Test model path."""
@@ -217,5 +283,10 @@ class TestServerConfiguration:
 
         import os
         path = get_source_path()
-        # Should return current directory by default
         assert path == os.getcwd() or path is not None
+
+    def test_get_source_path_uses_index_directory(self, tmp_path):
+        """Passing a source directory as index resolves that directory."""
+        from ragfs_mcp.server import get_source_path
+
+        assert get_source_path(str(tmp_path)) == str(tmp_path.resolve())

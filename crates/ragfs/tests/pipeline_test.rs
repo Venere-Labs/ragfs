@@ -112,7 +112,7 @@ fn create_chunk(
 }
 
 /// Mock embeddings are blake3 hashes, not semantic vectors. Honoring
-/// `DistanceMetric::Cosine` (previously ignored; LanceDB defaulted to L2)
+/// `DistanceMetric::Cosine` (previously ignored; `LanceDB` defaulted to L2)
 /// can change nearest-neighbor order, so tests assert the expected file is
 /// present rather than that it is always rank 1.
 fn assert_results_include(results: &[SearchResult], file_name: &str) {

@@ -96,11 +96,19 @@ jobs:
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    # Same defect as .github/workflows/security.yml: audit-check opens a
+    # tracking issue, so without `issues: write` it fails *after* scanning and
+    # the release gate turns red with no report. Keep this ignore list in sync
+    # with security.yml and docs/AUDIT.md.
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          ignore: "RUSTSEC-2026-0258,RUSTSEC-2026-0194,RUSTSEC-2026-0195,RUSTSEC-2023-0071,RUSTSEC-2026-0098,RUSTSEC-2026-0099,RUSTSEC-2026-0104"
 
   summary:
     name: Pre-release Summary

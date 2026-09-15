@@ -349,7 +349,8 @@ Search and index
   .index          Read index statistics (JSON).
   .config         Read mount wiring (JSON). Includes api_version.
                   This is not ~/.config/ragfs/config.toml.
-  .reindex        Write a relative path to queue reindex.
+  .reindex        Write a path to queue reindex (relative paths join source).
+                  Absolute paths are used as written; .reindex is not path-jailed.
                   Example: echo "src/main.rs" > .ragfs/.reindex
   .query/<q>      Semantic search. Filename is the query.
                   Returns JSON results.
@@ -389,7 +390,8 @@ Semantic (.semantic/) — Beta
 
 Limits (honest)
 ---------------
-  - Write relative paths. Absolute paths that leave the source are rejected when path jail is enabled.
+  - .ops/.semantic paths: write relative paths. Absolute paths that leave the source
+    are rejected when path jail is enabled. .reindex does not apply that jail.
   - .ops/.result is the last operation only; concurrent agents overwrite it.
   - Semantic ByProject/cleanup is Beta: organize may only mkdir; cleanup is mostly duplicates.
   - allow_other (if enabled) exposes .ops/.safety/.semantic to every local user.

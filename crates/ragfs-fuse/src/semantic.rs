@@ -15,7 +15,7 @@ use ragfs_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
@@ -478,16 +478,16 @@ impl SemanticManager {
         self.store.is_some() && self.embedder.is_some()
     }
 
+    /// Resolve a path and reject anything that escapes the source root.
+    fn resolve_path(&self, path: &Path) -> Result<PathBuf, String> {
+        crate::path_jail::resolve_under_root(&self.source, path)
+    }
+
     /// Find files similar to a given path.
     pub async fn find_similar(&self, path: &PathBuf) -> Result<SimilarFilesResult, String> {
+        let full_path = self.resolve_path(path)?;
         let store = self.store.as_ref().ok_or("Vector store not available")?;
         let embedder = self.embedder.as_ref().ok_or("Embedder not available")?;
-
-        let full_path = if path.is_absolute() {
-            path.clone()
-        } else {
-            self.source.join(path)
-        };
 
         debug!("Finding files similar to: {}", full_path.display());
 
@@ -780,6 +780,7 @@ impl SemanticManager {
         &self,
         request: OrganizeRequest,
     ) -> Result<SemanticPlan, String> {
+        let scope_path = self.resolve_path(&request.scope)?;
         let store = self.store.as_ref().ok_or("Vector store not available")?;
         let embedder = self.embedder.as_ref();
 
@@ -798,13 +799,6 @@ impl SemanticManager {
             .get_all_files()
             .await
             .map_err(|e| format!("Failed to get files: {e}"))?;
-
-        // Filter files within scope
-        let scope_path = if request.scope.is_absolute() {
-            request.scope.clone()
-        } else {
-            self.source.join(&request.scope)
-        };
 
         let scoped_files: Vec<&FileRecord> = all_files
             .iter()
@@ -1751,5 +1745,42 @@ mod tests {
         } else {
             panic!("Expected Custom strategy");
         }
+    }
+
+    #[tokio::test]
+    async fn test_find_similar_rejects_escaped_path() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let manager = SemanticManager::new(temp.path().to_path_buf(), None, None, None);
+        let err = manager
+            .find_similar(&PathBuf::from("../secret.txt"))
+            .await
+            .unwrap_err();
+        assert!(err.contains("escapes"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_find_similar_rejects_absolute_outside_root() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let outside = tempfile::TempDir::new().unwrap();
+        let manager = SemanticManager::new(temp.path().to_path_buf(), None, None, None);
+        let err = manager
+            .find_similar(&outside.path().join("other.txt"))
+            .await
+            .unwrap_err();
+        assert!(err.contains("escapes"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_create_organize_plan_rejects_escaped_scope() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let manager = SemanticManager::new(temp.path().to_path_buf(), None, None, None);
+        let request = OrganizeRequest {
+            scope: PathBuf::from("../../etc"),
+            strategy: OrganizeStrategy::ByTopic,
+            max_groups: 5,
+            similarity_threshold: 0.8,
+        };
+        let err = manager.create_organize_plan(request).await.unwrap_err();
+        assert!(err.contains("escapes"), "{err}");
     }
 }

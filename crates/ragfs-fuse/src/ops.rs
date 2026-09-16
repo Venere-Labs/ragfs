@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use ragfs_core::VectorStore;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, info, warn};
@@ -271,6 +271,23 @@ impl OpsManager {
     /// Rejects paths that escape the source root (absolute, `..`, symlink).
     fn resolve_path(&self, path: &PathBuf) -> Result<PathBuf, String> {
         crate::path_jail::resolve_under_root(&self.source, path)
+    }
+
+    /// Jail-check a symlink target the way Unix will resolve it: relative
+    /// targets are interpreted from the link's parent, not the source root.
+    fn jail_symlink_target(
+        &self,
+        target: &PathBuf,
+        resolved_link: &Path,
+    ) -> Result<PathBuf, String> {
+        let validation_target = if target.is_absolute() {
+            target.clone()
+        } else if let Some(parent) = resolved_link.parent() {
+            parent.join(target)
+        } else {
+            target.clone()
+        };
+        self.resolve_path(&validation_target)
     }
 
     async fn fail_and_store(
@@ -962,13 +979,13 @@ impl OpsManager {
     /// Create a symbolic link.
     #[cfg(unix)]
     pub async fn symlink(&self, target: &PathBuf, link: &PathBuf) -> OperationResult {
-        if let Err(e) = self.resolve_path(target) {
-            return self.fail_and_store("symlink", link.clone(), e).await;
-        }
         let resolved_link = match self.resolve_path(link) {
             Ok(p) => p,
             Err(e) => return self.fail_and_store("symlink", link.clone(), e).await,
         };
+        if let Err(e) = self.jail_symlink_target(target, &resolved_link) {
+            return self.fail_and_store("symlink", link.clone(), e).await;
+        }
         debug!("ops::symlink {:?} -> {:?}", resolved_link, target);
 
         if resolved_link.exists() {
@@ -991,8 +1008,7 @@ impl OpsManager {
             );
         }
 
-        // Jail checks use resolved_target; pass the original target so a
-        // relative link stays relative instead of being rewritten absolute.
+        // Pass the original target so a relative link stays relative.
         match std::os::unix::fs::symlink(target, &resolved_link) {
             Ok(()) => {
                 info!("Created symlink: {:?} -> {:?}", resolved_link, target);
@@ -1250,13 +1266,13 @@ impl OpsManager {
                 }
             }
             Operation::Symlink { target, link } => {
-                if let Err(e) = self.resolve_path(target) {
-                    return OperationResult::failure("symlink", link.clone(), e);
-                }
                 let resolved_link = match self.resolve_path(link) {
                     Ok(p) => p,
                     Err(e) => return OperationResult::failure("symlink", link.clone(), e),
                 };
+                if let Err(e) = self.jail_symlink_target(target, &resolved_link) {
+                    return OperationResult::failure("symlink", link.clone(), e);
+                }
                 if resolved_link.exists() {
                     OperationResult::failure(
                         "symlink",
@@ -1849,6 +1865,45 @@ mod tests {
             std::fs::read_link(&link_path).unwrap(),
             PathBuf::from("target_file.txt")
         );
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_symlink_relative_target_from_link_parent() {
+        let (manager, temp) = create_test_manager();
+        fs::create_dir(temp.path().join("sub")).unwrap();
+        fs::write(temp.path().join("ok.txt"), "ok").unwrap();
+
+        let target = PathBuf::from("../ok.txt");
+        let link = PathBuf::from("sub/link");
+        let result = manager.symlink(&target, &link).await;
+
+        assert!(result.success, "{:?}", result.error);
+        assert_eq!(
+            std::fs::read_link(temp.path().join("sub/link")).unwrap(),
+            PathBuf::from("../ok.txt")
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_symlink_rejects_parent_relative_escape_via_existing_link() {
+        let (manager, temp) = create_test_manager();
+        let outside = TempDir::new().unwrap();
+        fs::create_dir(temp.path().join("sub")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), temp.path().join("sub/out")).unwrap();
+
+        let target = PathBuf::from("out/secret.txt");
+        let link = PathBuf::from("sub/link");
+        let result = manager.symlink(&target, &link).await;
+
+        assert!(!result.success);
+        assert!(
+            result.error.as_ref().unwrap().contains("escapes"),
+            "{:?}",
+            result.error
+        );
+        assert!(!temp.path().join("sub/link").exists());
     }
 
     #[tokio::test]

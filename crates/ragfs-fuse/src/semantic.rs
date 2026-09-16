@@ -488,6 +488,11 @@ impl SemanticManager {
         path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
     }
 
+    /// Async canonicalize so FUSE-driven tokio workers are not blocked on stat.
+    async fn canonical_or_owned_async(path: PathBuf) -> PathBuf {
+        tokio::fs::canonicalize(&path).await.unwrap_or(path)
+    }
+
     /// Find files similar to a given path.
     pub async fn find_similar(&self, path: &PathBuf) -> Result<SimilarFilesResult, String> {
         let full_path = self.resolve_path(path)?;
@@ -522,17 +527,22 @@ impl SemanticManager {
 
         // Convert results, excluding the source file itself.
         // Index paths may be non-canonical; compare after canonicalize.
-        let source_canonical = Self::canonical_or_owned(&full_path);
-        let similar: Vec<SimilarFile> = results
-            .into_iter()
-            .filter(|r| Self::canonical_or_owned(&r.file_path) != source_canonical)
-            .take(self.config.similar_limit)
-            .map(|r| SimilarFile {
-                path: r.file_path,
-                similarity: r.score, // score is already similarity (higher = more similar)
-                preview: Some(truncate_content(&r.content, 200)),
-            })
-            .collect();
+        let source_canonical = Self::canonical_or_owned_async(full_path.clone()).await;
+        let similar_limit = self.config.similar_limit;
+        let similar: Vec<SimilarFile> = tokio::task::spawn_blocking(move || {
+            results
+                .into_iter()
+                .filter(|r| Self::canonical_or_owned(&r.file_path) != source_canonical)
+                .take(similar_limit)
+                .map(|r| SimilarFile {
+                    path: r.file_path,
+                    similarity: r.score, // score is already similarity (higher = more similar)
+                    preview: Some(truncate_content(&r.content, 200)),
+                })
+                .collect()
+        })
+        .await
+        .map_err(|e| format!("Failed to canonicalize similar-file paths: {e}"))?;
 
         let result = SimilarFilesResult {
             source: full_path,
@@ -787,7 +797,7 @@ impl SemanticManager {
         &self,
         request: OrganizeRequest,
     ) -> Result<SemanticPlan, String> {
-        let scope_path = Self::canonical_or_owned(&self.resolve_path(&request.scope)?);
+        let scope_path = Self::canonical_or_owned_async(self.resolve_path(&request.scope)?).await;
         let store = self.store.as_ref().ok_or("Vector store not available")?;
         let embedder = self.embedder.as_ref();
 
@@ -807,9 +817,26 @@ impl SemanticManager {
             .await
             .map_err(|e| format!("Failed to get files: {e}"))?;
 
+        let scope_for_cmp = scope_path.clone();
+        let file_paths: Vec<PathBuf> = all_files.iter().map(|f| f.path.clone()).collect();
+        let chunk_paths: Vec<PathBuf> = all_chunks.iter().map(|c| c.file_path.clone()).collect();
+        let (in_scope_files, in_scope_chunks) = tokio::task::spawn_blocking(move || {
+            let files: HashSet<PathBuf> = file_paths
+                .into_iter()
+                .filter(|p| Self::canonical_or_owned(p).starts_with(&scope_for_cmp))
+                .collect();
+            let chunks: HashSet<PathBuf> = chunk_paths
+                .into_iter()
+                .filter(|p| Self::canonical_or_owned(p).starts_with(&scope_for_cmp))
+                .collect();
+            (files, chunks)
+        })
+        .await
+        .map_err(|e| format!("Failed to canonicalize scoped paths: {e}"))?;
+
         let scoped_files: Vec<&FileRecord> = all_files
             .iter()
-            .filter(|f| Self::canonical_or_owned(&f.path).starts_with(&scope_path))
+            .filter(|f| in_scope_files.contains(&f.path))
             .collect();
 
         if scoped_files.is_empty() {
@@ -830,9 +857,7 @@ impl SemanticManager {
         // Build file embeddings map
         let mut file_chunks: HashMap<PathBuf, Vec<&Chunk>> = HashMap::new();
         for chunk in &all_chunks {
-            if chunk.embedding.is_some()
-                && Self::canonical_or_owned(&chunk.file_path).starts_with(&scope_path)
-            {
+            if chunk.embedding.is_some() && in_scope_chunks.contains(&chunk.file_path) {
                 file_chunks
                     .entry(chunk.file_path.clone())
                     .or_default()

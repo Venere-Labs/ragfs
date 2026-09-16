@@ -405,10 +405,13 @@ impl SafetyManager {
         Ok(())
     }
 
-    /// Log a successful operation.
-    pub fn log_success(&self, operation: HistoryOperation, undo_data: Option<UndoData>) {
+    /// Log a successful operation and return the history entry id.
+    ///
+    /// This id is the `undo_id` written to `.ops/.result`.
+    pub fn log_success(&self, operation: HistoryOperation, undo_data: Option<UndoData>) -> Uuid {
+        let id = Uuid::new_v4();
         let entry = HistoryEntry {
-            id: Uuid::new_v4(),
+            id,
             operation,
             timestamp: Utc::now(),
             success: true,
@@ -420,6 +423,7 @@ impl SafetyManager {
         if let Err(e) = self.log(entry) {
             warn!("Failed to log history: {e}");
         }
+        id
     }
 
     /// Log a failed operation.
@@ -492,17 +496,17 @@ impl SafetyManager {
 
         match undo_data {
             UndoData::Create { path } => {
-                // Undo create by deleting the file
+                // Undo create by moving the file to trash (recoverable).
                 if path.exists() {
-                    fs::remove_file(&path).map_err(|e| format!("Failed to undo create: {e}"))?;
+                    let entry = self.soft_delete(&path).await?;
                     self.log_success(
                         HistoryOperation::Delete {
                             path: path.clone(),
-                            trash_id: None,
+                            trash_id: Some(entry.id),
                         },
-                        None,
+                        Some(UndoData::Delete { trash_id: entry.id }),
                     );
-                    Ok(format!("Undone: deleted {}", path.display()))
+                    Ok(format!("Undone: moved {} to trash", path.display()))
                 } else {
                     Err("File no longer exists".into())
                 }
@@ -743,5 +747,49 @@ mod tests {
         let parsed: HistoryEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.id, entry.id);
         assert!(parsed.success);
+    }
+
+    #[test]
+    fn test_log_success_returns_history_id() {
+        let (manager, _source_dir, _data_dir) = create_test_manager();
+
+        let id = manager.log_success(
+            HistoryOperation::Create {
+                path: PathBuf::from("/test.txt"),
+            },
+            Some(UndoData::Create {
+                path: PathBuf::from("/test.txt"),
+            }),
+        );
+
+        let history = manager.read_history(None);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].id, id);
+    }
+
+    #[tokio::test]
+    async fn test_undo_create_uses_trash() {
+        let (manager, source_dir, _data_dir) = create_test_manager();
+
+        let test_file = source_dir.path().join("created.txt");
+        fs::write(&test_file, "created content").unwrap();
+
+        let undo_id = manager.log_success(
+            HistoryOperation::Create {
+                path: test_file.clone(),
+            },
+            Some(UndoData::Create {
+                path: test_file.clone(),
+            }),
+        );
+
+        let msg = manager.undo(undo_id).await.unwrap();
+        assert!(msg.contains("trash"), "{msg}");
+        assert!(!test_file.exists(), "undo create must not hard-delete");
+
+        let trash = manager.list_trash().await;
+        assert_eq!(trash.len(), 1);
+        let content = manager.get_trash_content(trash[0].id).unwrap();
+        assert_eq!(content, b"created content");
     }
 }

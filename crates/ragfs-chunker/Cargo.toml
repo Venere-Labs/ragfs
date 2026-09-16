@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Document chunking strategies for RAGFS"
-keywords = ["chunking", "text-processing", "tree-sitter", "rag"]
+keywords = ["chunking", "text-processing", "code-aware", "rag"]
 categories = ["text-processing", "parser-implementations"]
 
 [dependencies]
@@ -14,7 +14,6 @@ async-trait.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tiktoken-rs.workspace = true
-tree-sitter.workspace = true
 serde.workspace = true
 tracing.workspace = true
 

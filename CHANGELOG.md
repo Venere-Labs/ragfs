@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Documented actual code chunking (pattern matching) and removed unused `tree-sitter` dependency
+- FUSE `.help` now covers `.ops/`, `.safety/`, `.semantic/` and product limits
+- FUSE `.config` includes `api_version` and states it is mount wiring, not user TOML
+
 ### Added
 - **Python bindings**: New `ragfs-python` crate with PyO3 bindings
   - `RAGFSIndex` class for indexing and querying

@@ -19,10 +19,10 @@
 //!
 //! When the `lancedb` feature is enabled:
 //!
-//! - **Vector Search**: Fast approximate nearest neighbor search using HNSW
+//! - **Vector Search**: Exact kNN scan by default; IVF-PQ ANN when enough rows exist
 //! - **Hybrid Search**: Combined FTS and vector search for better relevance
 //! - **Full CRUD**: Create, read, update, delete operations for chunks and files
-//! - **Automatic Indexing**: Creates vector and FTS indices automatically
+//! - **Automatic Indexing**: Creates an FTS index on `content` at table creation
 //!
 //! ## Example
 //!

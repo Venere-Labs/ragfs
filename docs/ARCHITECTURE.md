@@ -144,7 +144,7 @@ Content extraction from various file formats.
 
 **Components:**
 - `ExtractorRegistry` - Routes files to appropriate extractors by MIME type
-- `TextExtractor` - Handles text-based files (40+ types supported)
+- `TextExtractor` - UTF-8 text and source/markup extensions (not Office binary)
 
 **Supported Formats:**
 - Text: `.txt`, `.md`, `.rst`
@@ -201,7 +201,7 @@ Vector storage and search using LanceDB.
 - `LanceStore` - LanceDB-based vector store implementation
 
 **Tables:**
-- `chunks` - Vectors, content, metadata with ANN indexing
+- `chunks` - Vectors, content, metadata (FTS on `content`; IVF-PQ ANN when enough rows)
 - `files` - File records with status and timestamps
 
 **Features:**

@@ -56,7 +56,7 @@ Note: macOS support is experimental.
 ### Development Build
 
 ```bash
-git clone https://github.com/user/ragfs.git
+git clone https://github.com/Venere-Labs/ragfs.git
 cd ragfs
 
 # Build all crates

@@ -57,7 +57,7 @@ const EMBEDDING_DIM: usize = 384;
 
 #[derive(Parser)]
 #[command(name = "ragfs")]
-#[command(about = "A FUSE filesystem for RAG architectures")]
+#[command(about = "Agentic FUSE filesystem: semantic search, JSON file ops, undo, and organize")]
 #[command(version)]
 struct Cli {
     /// Path to config file (default: ~/.config/ragfs/config.toml)

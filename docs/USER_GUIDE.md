@@ -29,7 +29,7 @@ This guide provides comprehensive documentation for using RAGFS.
 
 ```bash
 # Clone the repository
-git clone https://github.com/user/ragfs.git
+git clone https://github.com/Venere-Labs/ragfs.git
 cd ragfs
 
 # Build in release mode (recommended)

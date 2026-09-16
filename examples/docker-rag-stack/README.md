@@ -214,7 +214,7 @@ OLLAMA_MODEL=phi3 docker compose up
 - **Text**: .txt, .md, .rst, .html
 - **Code**: .py, .rs, .js, .ts, .go, .java, .c, .cpp (40+ languages)
 - **Data**: .json, .yaml, .yml, .toml, .xml, .csv
-- **Documents**: .pdf, .doc, .docx
+- **Documents**: .pdf, .docx, .xlsx, .pptx, .odt (not binary `.doc`)
 
 ## Resources
 

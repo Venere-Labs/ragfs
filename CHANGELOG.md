@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Office text extraction for `.docx`, `.xlsx`, `.pptx`, and `.odt` (ZIP+XML; not binary `.doc`)
 - **Python bindings**: New `ragfs-python` crate with PyO3 bindings
   - `RAGFSIndex` class for indexing and querying
   - `RAGFSStore` for direct vector store access

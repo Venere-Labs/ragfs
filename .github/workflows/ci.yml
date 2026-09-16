@@ -143,6 +143,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
+      - name: Create virtual environment
+        run: |
+          python -m venv .venv
+          echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> "$GITHUB_ENV"
+          echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
       - name: Install Python dependencies
         run: |
           pip install maturin pytest pytest-asyncio pytest-cov
@@ -156,7 +161,7 @@ jobs:
           pytest tests/ -v --ignore=tests/test_llamaindex --ignore=tests/test_haystack -m "not slow and not requires_model"
       - name: Install MCP dependencies
         run: |
-          pip install mcp
+          pip install "mcp>=1.2.0,<2"
           cd crates/ragfs-mcp
           pip install -e .
       - name: Run MCP tests
@@ -177,6 +182,11 @@ jobs:
           python-version: '3.12'
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
+      - name: Create virtual environment
+        run: |
+          python -m venv .venv
+          echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> "$GITHUB_ENV"
+          echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
       - name: Install Python dependencies
         run: |
           pip install maturin pytest pytest-asyncio pytest-cov
@@ -185,11 +195,28 @@ jobs:
         run: |
           cd crates/ragfs-python
           maturin develop --features "candle,lancedb"
+      # All LlamaIndex/Haystack tests are marked requires_model, so this
+      # marker expression deselects every test (pytest exit 5). Treat that
+      # as success; real failures still fail the job.
       - name: Run LlamaIndex tests
         run: |
           cd crates/ragfs-python
-          pytest tests/test_llamaindex/ -v -m "not slow and not requires_model"
+          pytest tests/test_llamaindex/ -v -m "not slow and not requires_model" || {
+            status=$?
+            if [ "$status" -eq 5 ]; then
+              echo "No tests selected (pytest exit 5); treating as success"
+              exit 0
+            fi
+            exit "$status"
+          }
       - name: Run Haystack tests
         run: |
           cd crates/ragfs-python
-          pytest tests/test_haystack/ -v -m "not slow and not requires_model"
+          pytest tests/test_haystack/ -v -m "not slow and not requires_model" || {
+            status=$?
+            if [ "$status" -eq 5 ]; then
+              echo "No tests selected (pytest exit 5); treating as success"
+              exit 0
+            fi
+            exit "$status"
+          }

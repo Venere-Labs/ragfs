@@ -225,6 +225,9 @@ IndexerConfig {
     embed_config: EmbeddingConfig,
     include_patterns: Vec<String>,  // default: ["**/*"]
     exclude_patterns: Vec<String>,  // default: [".git", "node_modules", ...]
+    debounce_ms: u64,               // from [index].debounce_ms
+    max_file_size: u64,             // from [index].max_file_size
+    force: bool,                    // from ragfs index --force
 }
 ```
 

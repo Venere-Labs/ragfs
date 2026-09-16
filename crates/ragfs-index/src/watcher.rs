@@ -4,6 +4,8 @@ use notify_debouncer_full::notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{DebounceEventResult, Debouncer, RecommendedCache, new_debouncer};
 use ragfs_core::FileEvent;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 use tokio::sync::mpsc as tokio_mpsc;
@@ -20,13 +22,23 @@ impl FileWatcher {
         event_tx: tokio_mpsc::Sender<FileEvent>,
         debounce_duration: Duration,
     ) -> Result<Self, notify::Error> {
+        Self::with_pending(event_tx, debounce_duration, None)
+    }
+
+    /// Create a watcher that increments `pending` for each queued event.
+    pub fn with_pending(
+        event_tx: tokio_mpsc::Sender<FileEvent>,
+        debounce_duration: Duration,
+        pending: Option<Arc<AtomicUsize>>,
+    ) -> Result<Self, notify::Error> {
         let (tx, rx) = mpsc::channel();
 
         // Spawn thread to convert events
         let event_tx_clone = event_tx.clone();
         std::thread::spawn(move || {
             while let Ok(result) = rx.recv() {
-                if let Err(e) = handle_debounced_events(result, &event_tx_clone) {
+                if let Err(e) = handle_debounced_events(result, &event_tx_clone, pending.as_deref())
+                {
                     error!("Error handling file events: {e}");
                 }
             }
@@ -57,13 +69,20 @@ impl FileWatcher {
 fn handle_debounced_events(
     result: DebounceEventResult,
     event_tx: &tokio_mpsc::Sender<FileEvent>,
+    pending: Option<&AtomicUsize>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match result {
         Ok(events) => {
             for event in events {
                 if let Some(file_event) = convert_event(&event) {
+                    if let Some(pending) = pending {
+                        pending.fetch_add(1, Ordering::SeqCst);
+                    }
                     // Use blocking send since we're in a std thread
                     if event_tx.blocking_send(file_event).is_err() {
+                        if let Some(pending) = pending {
+                            pending.fetch_sub(1, Ordering::SeqCst);
+                        }
                         warn!("Event channel closed");
                         break;
                     }

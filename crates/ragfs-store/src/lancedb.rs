@@ -10,6 +10,7 @@ use chrono::Utc;
 use futures::TryStreamExt;
 use lancedb::index::Index;
 use lancedb::index::scalar::{FtsIndexBuilder, FullTextSearchQuery};
+use lancedb::index::vector::IvfPqIndexBuilder;
 use lancedb::query::{ExecutableQuery, QueryBase, QueryExecutionOptions};
 use lancedb::{Connection, Table, connect};
 use ragfs_core::{
@@ -25,6 +26,8 @@ use uuid::Uuid;
 
 const CHUNKS_TABLE: &str = "chunks";
 const FILES_TABLE: &str = "files";
+/// Lance IVF training uses a default sample rate of 256. Below this, stay on exact scan.
+const MIN_ANN_ROWS: usize = 256;
 
 /// LanceDB-based vector store.
 pub struct LanceStore {
@@ -61,6 +64,52 @@ impl LanceStore {
     /// Get the embedding dimension.
     pub fn embedding_dim(&self) -> usize {
         self.embedding_dim
+    }
+
+    /// Whether the table is large enough for Lance IVF-PQ training.
+    pub(crate) fn should_build_ann_index(row_count: usize) -> bool {
+        row_count >= MIN_ANN_ROWS
+    }
+
+    async fn has_vector_index(table: &Table) -> bool {
+        match table.list_indices().await {
+            Ok(indices) => indices
+                .iter()
+                .any(|idx| idx.columns.iter().any(|col| col == "vector")),
+            Err(_) => false,
+        }
+    }
+
+    /// Best-effort IVF-PQ on `vector`. Small tables keep exact scan.
+    async fn ensure_vector_index(&self) -> Result<(), StoreError> {
+        let table = self.get_chunks_table().await?;
+        if Self::has_vector_index(&table).await {
+            return Ok(());
+        }
+
+        let count = match table.count_rows(None).await {
+            Ok(n) => n,
+            Err(e) => {
+                debug!("Skipping ANN index; could not count rows: {e}");
+                return Ok(());
+            }
+        };
+
+        if !Self::should_build_ann_index(count) {
+            debug!("Skipping IVF-PQ ANN index: {count} rows < {MIN_ANN_ROWS} (exact scan)");
+            return Ok(());
+        }
+
+        info!("Creating IVF-PQ ANN index on vector ({count} rows)");
+        match table
+            .create_index(&["vector"], Index::IvfPq(IvfPqIndexBuilder::default()))
+            .execute()
+            .await
+        {
+            Ok(()) => info!("IVF-PQ ANN index ready"),
+            Err(e) => warn!("IVF-PQ ANN index not created (search stays exact scan): {e}"),
+        }
+        Ok(())
     }
 
     /// Get or create connection.
@@ -380,6 +429,11 @@ impl VectorStore for LanceStore {
                 .map_err(|e| StoreError::Init(format!("Failed to create files table: {e}")))?;
         }
 
+        // Existing tables may already have enough rows for ANN.
+        if let Err(e) = self.ensure_vector_index().await {
+            warn!("ANN index check on init failed: {e}");
+        }
+
         info!("LanceDB initialized successfully");
         Ok(())
     }
@@ -404,6 +458,9 @@ impl VectorStore for LanceStore {
             .map_err(|e| StoreError::Insert(format!("Failed to insert chunks: {e}")))?;
 
         debug!("Successfully upserted {} chunks", chunks.len());
+        if let Err(e) = self.ensure_vector_index().await {
+            warn!("ANN index check after upsert failed: {e}");
+        }
         Ok(())
     }
 
@@ -1506,6 +1563,44 @@ mod tests {
         // Deleting a nonexistent file should not error
         let result = store.delete_by_file_path(&path).await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_ann_threshold() {
+        assert!(!LanceStore::should_build_ann_index(0));
+        assert!(!LanceStore::should_build_ann_index(255));
+        assert!(LanceStore::should_build_ann_index(256));
+        assert!(LanceStore::should_build_ann_index(10_000));
+    }
+
+    #[tokio::test]
+    async fn test_small_table_skips_ann_and_still_searches() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path, TEST_DIM);
+        store.init().await.unwrap();
+
+        let file_path = PathBuf::from("/test/small.txt");
+        let chunk = create_test_chunk(
+            &file_path,
+            "hello ann",
+            create_random_embedding(TEST_DIM),
+            0,
+        );
+        store.upsert_chunks(&[chunk]).await.unwrap();
+        store.ensure_vector_index().await.unwrap();
+
+        let results = store
+            .search(SearchQuery {
+                text: None,
+                embedding: create_random_embedding(TEST_DIM),
+                limit: 5,
+                filters: vec![],
+                metric: DistanceMetric::Cosine,
+            })
+            .await
+            .unwrap();
+        assert!(!results.is_empty());
     }
 
     #[tokio::test]

@@ -201,7 +201,7 @@ Vector storage and search using LanceDB.
 - `LanceStore` - LanceDB-based vector store implementation
 
 **Tables:**
-- `chunks` - Vectors, content, metadata with ANN indexing
+- `chunks` - Vectors, content, metadata (FTS on `content`; IVF-PQ ANN at ≥256 rows)
 - `files` - File records with status and timestamps
 
 **Features:**

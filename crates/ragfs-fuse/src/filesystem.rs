@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Handle;
@@ -160,6 +160,11 @@ impl RagFs {
     #[must_use]
     pub fn source(&self) -> &PathBuf {
         &self.source
+    }
+
+    /// Resolve a `.reindex` path and reject anything that escapes the source root.
+    fn jail_reindex_path(&self, path: &Path) -> Result<PathBuf, String> {
+        crate::path_jail::resolve_under_root(&self.source, path)
     }
 
     /// Convert a real path to a FUSE inode.
@@ -1331,12 +1336,13 @@ impl Filesystem for RagFs {
             }
 
             let path = PathBuf::from(&path_str);
-
-            // Convert relative paths to absolute paths relative to source
-            let absolute_path = if path.is_absolute() {
-                path
-            } else {
-                self.source.join(&path)
+            let absolute_path = match self.jail_reindex_path(&path) {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!("Rejected reindex path: {e}");
+                    reply.error(EINVAL);
+                    return;
+                }
             };
 
             info!("Reindex requested for: {:?}", absolute_path);
@@ -2138,6 +2144,25 @@ mod tests {
 
         // Should be parseable JSON
         let _json: serde_json::Value = serde_json::from_str(&result_str).expect("Valid JSON");
+    }
+
+    #[tokio::test]
+    async fn test_jail_reindex_rejects_absolute_outside_source() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let fs = RagFs::new(temp.path().to_path_buf());
+        let outside = tempfile::TempDir::new().unwrap();
+        let err = fs
+            .jail_reindex_path(&outside.path().join("secret.txt"))
+            .unwrap_err();
+        assert!(err.contains("escapes"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_jail_reindex_allows_relative_inside_source() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let fs = RagFs::new(temp.path().to_path_buf());
+        let resolved = fs.jail_reindex_path(Path::new("src/main.rs")).unwrap();
+        assert!(resolved.starts_with(temp.path().canonicalize().unwrap()));
     }
 
     // ========== Constants Tests ==========

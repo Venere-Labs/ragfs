@@ -69,7 +69,8 @@ def get_data_dir() -> Path:
     """Return the RAGFS data root, matching the CLI `data_dir()` lookup."""
     override = os.environ.get("RAGFS_DATA_DIR")
     if override:
-        return Path(override).expanduser()
+        # CLI `data_dir()` uses PathBuf::from — no ~ expansion.
+        return Path(override)
     xdg = os.environ.get("XDG_DATA_HOME")
     if xdg:
         return Path(xdg).expanduser() / "ragfs"

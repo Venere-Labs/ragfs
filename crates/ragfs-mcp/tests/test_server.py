@@ -271,6 +271,18 @@ class TestServerConfiguration:
             tmp_path / "indices" / expected_id / "index.lance"
         )
 
+    def test_get_data_dir_keeps_literal_tilde(self, monkeypatch):
+        """CLI keeps RAGFS_DATA_DIR as-is; MCP must not expanduser()."""
+        from ragfs_mcp.server import get_data_dir, get_db_path
+
+        monkeypatch.delenv("RAGFS_DB_PATH", raising=False)
+        monkeypatch.setenv("RAGFS_DATA_DIR", "~/ragfs-data")
+
+        assert get_data_dir() == Path("~/ragfs-data")
+        path = get_db_path("0123456789abcdef")
+        assert path == str(Path("~/ragfs-data") / "indices" / "0123456789abcdef" / "index.lance")
+        assert not path.startswith(str(Path.home() / "ragfs-data"))
+
     def test_get_model_path(self):
         """Test model path."""
         from ragfs_mcp.server import get_model_path

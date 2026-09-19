@@ -15,7 +15,7 @@ use ragfs_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
@@ -478,16 +478,26 @@ impl SemanticManager {
         self.store.is_some() && self.embedder.is_some()
     }
 
+    /// Resolve a path and reject anything that escapes the source root.
+    fn resolve_path(&self, path: &Path) -> Result<PathBuf, String> {
+        crate::path_jail::resolve_under_root(&self.source, path)
+    }
+
+    /// Canonicalize for comparison; keep the original path if it is gone.
+    fn canonical_or_owned(path: &Path) -> PathBuf {
+        path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    }
+
+    /// Async canonicalize so FUSE-driven tokio workers are not blocked on stat.
+    async fn canonical_or_owned_async(path: PathBuf) -> PathBuf {
+        tokio::fs::canonicalize(&path).await.unwrap_or(path)
+    }
+
     /// Find files similar to a given path.
     pub async fn find_similar(&self, path: &PathBuf) -> Result<SimilarFilesResult, String> {
+        let full_path = self.resolve_path(path)?;
         let store = self.store.as_ref().ok_or("Vector store not available")?;
         let embedder = self.embedder.as_ref().ok_or("Embedder not available")?;
-
-        let full_path = if path.is_absolute() {
-            path.clone()
-        } else {
-            self.source.join(path)
-        };
 
         debug!("Finding files similar to: {}", full_path.display());
 
@@ -515,17 +525,24 @@ impl SemanticManager {
             .await
             .map_err(|e| format!("Search failed: {e}"))?;
 
-        // Convert results, excluding the source file itself
-        let similar: Vec<SimilarFile> = results
-            .into_iter()
-            .filter(|r| r.file_path != full_path)
-            .take(self.config.similar_limit)
-            .map(|r| SimilarFile {
-                path: r.file_path,
-                similarity: r.score, // score is already similarity (higher = more similar)
-                preview: Some(truncate_content(&r.content, 200)),
-            })
-            .collect();
+        // Convert results, excluding the source file itself.
+        // Index paths may be non-canonical; compare after canonicalize.
+        let source_canonical = Self::canonical_or_owned_async(full_path.clone()).await;
+        let similar_limit = self.config.similar_limit;
+        let similar: Vec<SimilarFile> = tokio::task::spawn_blocking(move || {
+            results
+                .into_iter()
+                .filter(|r| Self::canonical_or_owned(&r.file_path) != source_canonical)
+                .take(similar_limit)
+                .map(|r| SimilarFile {
+                    path: r.file_path,
+                    similarity: r.score, // score is already similarity (higher = more similar)
+                    preview: Some(truncate_content(&r.content, 200)),
+                })
+                .collect()
+        })
+        .await
+        .map_err(|e| format!("Failed to canonicalize similar-file paths: {e}"))?;
 
         let result = SimilarFilesResult {
             source: full_path,
@@ -780,6 +797,7 @@ impl SemanticManager {
         &self,
         request: OrganizeRequest,
     ) -> Result<SemanticPlan, String> {
+        let scope_path = Self::canonical_or_owned_async(self.resolve_path(&request.scope)?).await;
         let store = self.store.as_ref().ok_or("Vector store not available")?;
         let embedder = self.embedder.as_ref();
 
@@ -799,16 +817,26 @@ impl SemanticManager {
             .await
             .map_err(|e| format!("Failed to get files: {e}"))?;
 
-        // Filter files within scope
-        let scope_path = if request.scope.is_absolute() {
-            request.scope.clone()
-        } else {
-            self.source.join(&request.scope)
-        };
+        let scope_for_cmp = scope_path.clone();
+        let file_paths: Vec<PathBuf> = all_files.iter().map(|f| f.path.clone()).collect();
+        let chunk_paths: Vec<PathBuf> = all_chunks.iter().map(|c| c.file_path.clone()).collect();
+        let (in_scope_files, in_scope_chunks) = tokio::task::spawn_blocking(move || {
+            let files: HashSet<PathBuf> = file_paths
+                .into_iter()
+                .filter(|p| Self::canonical_or_owned(p).starts_with(&scope_for_cmp))
+                .collect();
+            let chunks: HashSet<PathBuf> = chunk_paths
+                .into_iter()
+                .filter(|p| Self::canonical_or_owned(p).starts_with(&scope_for_cmp))
+                .collect();
+            (files, chunks)
+        })
+        .await
+        .map_err(|e| format!("Failed to canonicalize scoped paths: {e}"))?;
 
         let scoped_files: Vec<&FileRecord> = all_files
             .iter()
-            .filter(|f| f.path.starts_with(&scope_path))
+            .filter(|f| in_scope_files.contains(&f.path))
             .collect();
 
         if scoped_files.is_empty() {
@@ -829,7 +857,7 @@ impl SemanticManager {
         // Build file embeddings map
         let mut file_chunks: HashMap<PathBuf, Vec<&Chunk>> = HashMap::new();
         for chunk in &all_chunks {
-            if chunk.embedding.is_some() && chunk.file_path.starts_with(&scope_path) {
+            if chunk.embedding.is_some() && in_scope_chunks.contains(&chunk.file_path) {
                 file_chunks
                     .entry(chunk.file_path.clone())
                     .or_default()
@@ -1751,5 +1779,63 @@ mod tests {
         } else {
             panic!("Expected Custom strategy");
         }
+    }
+
+    #[tokio::test]
+    async fn test_find_similar_rejects_escaped_path() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let manager = SemanticManager::new(temp.path().to_path_buf(), None, None, None);
+        let err = manager
+            .find_similar(&PathBuf::from("../secret.txt"))
+            .await
+            .unwrap_err();
+        assert!(err.contains("escapes"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_find_similar_rejects_absolute_outside_root() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let outside = tempfile::TempDir::new().unwrap();
+        let manager = SemanticManager::new(temp.path().to_path_buf(), None, None, None);
+        let err = manager
+            .find_similar(&outside.path().join("other.txt"))
+            .await
+            .unwrap_err();
+        assert!(err.contains("escapes"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_create_organize_plan_rejects_escaped_scope() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let manager = SemanticManager::new(temp.path().to_path_buf(), None, None, None);
+        let request = OrganizeRequest {
+            scope: PathBuf::from("../../etc"),
+            strategy: OrganizeStrategy::ByTopic,
+            max_groups: 5,
+            similarity_threshold: 0.8,
+        };
+        let err = manager.create_organize_plan(request).await.unwrap_err();
+        assert!(err.contains("escapes"), "{err}");
+    }
+
+    #[test]
+    fn test_canonical_or_owned_equalizes_dot_components() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let file = temp.path().join("a.txt");
+        std::fs::write(&file, "x").unwrap();
+        let dotted = temp.path().join(".").join("a.txt");
+        assert_eq!(
+            SemanticManager::canonical_or_owned(&dotted),
+            SemanticManager::canonical_or_owned(&file)
+        );
+        let scope = temp.path().join("docs");
+        std::fs::create_dir(&scope).unwrap();
+        let nested = scope.join("a.txt");
+        std::fs::write(&nested, "x").unwrap();
+        let dotted_nested = temp.path().join(".").join("docs").join("a.txt");
+        assert!(
+            SemanticManager::canonical_or_owned(&dotted_nested)
+                .starts_with(SemanticManager::canonical_or_owned(&scope))
+        );
     }
 }

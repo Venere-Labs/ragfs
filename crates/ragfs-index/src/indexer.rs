@@ -10,7 +10,8 @@ use ragfs_embed::EmbedderPool;
 use ragfs_extract::ExtractorRegistry;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::{RwLock, broadcast, mpsc};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::sync::{Notify, RwLock, broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -36,6 +37,12 @@ pub struct IndexerConfig {
     pub include_patterns: Vec<String>,
     /// Exclude patterns (glob)
     pub exclude_patterns: Vec<String>,
+    /// Debounce duration for the file watcher (milliseconds)
+    pub debounce_ms: u64,
+    /// Maximum file size to index (bytes)
+    pub max_file_size: u64,
+    /// Skip the content-hash short-circuit and reindex every eligible file
+    pub force: bool,
 }
 
 impl Default for IndexerConfig {
@@ -52,7 +59,101 @@ impl Default for IndexerConfig {
                 "**/__pycache__/**".to_string(),
                 "**/*.lock".to_string(),
             ],
+            debounce_ms: 500,
+            max_file_size: 52_428_800,
+            force: false,
         }
+    }
+}
+
+impl IndexerConfig {
+    /// Whether `path` is eligible for indexing given include/exclude patterns.
+    #[must_use]
+    pub fn should_process_path(&self, path: &Path) -> bool {
+        let path_str = path.to_string_lossy();
+        if self
+            .exclude_patterns
+            .iter()
+            .any(|pattern| path_matches_pattern(&path_str, pattern))
+        {
+            return false;
+        }
+        if self.include_patterns.is_empty() {
+            return true;
+        }
+        self.include_patterns
+            .iter()
+            .any(|pattern| path_matches_pattern(&path_str, pattern))
+    }
+}
+
+/// Match a path against a glob-style include/exclude pattern.
+///
+/// Supports `**` (any directories), `*` / `?` within a path segment, and
+/// basename-only patterns such as `test_*.rs` (matched against any component).
+/// Patterns that do not start with `**/` also match as a suffix of an absolute
+/// path (`src/**/*.rs` matches `/proj/src/lib.rs`).
+#[must_use]
+pub fn path_matches_pattern(path: &str, pattern: &str) -> bool {
+    let path = path.replace('\\', "/");
+    let pattern = pattern.replace('\\', "/");
+
+    if pattern.is_empty() {
+        return false;
+    }
+    if pattern == "**/*" || pattern == "**" || pattern == "*" {
+        return true;
+    }
+    if pattern == "**/.*" || pattern == ".*" {
+        // Hidden *files* only — do not treat `/tmp/.tmpXXXX/file.txt` as hidden.
+        return path
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| !name.is_empty() && name.starts_with('.'));
+    }
+
+    if glob_match_path(&path, &pattern) {
+        return true;
+    }
+    // Absolute indexed paths should still match repo-relative globs.
+    if !pattern.starts_with("**/") && !pattern.starts_with('/') {
+        return glob_match_path(&path, &format!("**/{pattern}"));
+    }
+    false
+}
+
+fn glob_match_path(path: &str, pattern: &str) -> bool {
+    let path: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let pat: Vec<&str> = pattern.split('/').filter(|s| !s.is_empty()).collect();
+    glob_match_segments(&path, &pat)
+}
+
+fn glob_match_segments(path: &[&str], pat: &[&str]) -> bool {
+    match pat.split_first() {
+        None => path.is_empty(),
+        Some((&"**", rest)) => {
+            if rest.is_empty() {
+                return true;
+            }
+            glob_match_segments(path, rest)
+                || (!path.is_empty() && glob_match_segments(&path[1..], pat))
+        }
+        Some((seg, rest)) => path.split_first().is_some_and(|(head, tail)| {
+            glob_match_segment(head, seg) && glob_match_segments(tail, rest)
+        }),
+    }
+}
+
+fn glob_match_segment(name: &str, pat: &str) -> bool {
+    glob_match_bytes(name.as_bytes(), pat.as_bytes())
+}
+
+fn glob_match_bytes(name: &[u8], pat: &[u8]) -> bool {
+    match pat.split_first() {
+        None => name.is_empty(),
+        Some((b'*', rest)) => (0..=name.len()).any(|i| glob_match_bytes(&name[i..], rest)),
+        Some((b'?', rest)) => !name.is_empty() && glob_match_bytes(&name[1..], rest),
+        Some((c, rest)) => name.first() == Some(c) && glob_match_bytes(&name[1..], rest),
     }
 }
 
@@ -82,6 +183,10 @@ pub struct IndexerService {
     watcher: Arc<RwLock<Option<FileWatcher>>>,
     /// Running flag
     running: Arc<RwLock<bool>>,
+    /// Outstanding file events (queued or in flight)
+    pending: Arc<AtomicUsize>,
+    /// Signaled when [`Self::pending`] reaches zero
+    idle_notify: Arc<Notify>,
 }
 
 impl IndexerService {
@@ -110,6 +215,33 @@ impl IndexerService {
             update_tx,
             watcher: Arc::new(RwLock::new(None)),
             running: Arc::new(RwLock::new(false)),
+            pending: Arc::new(AtomicUsize::new(0)),
+            idle_notify: Arc::new(Notify::new()),
+        }
+    }
+
+    /// Configuration used by this indexer (include/exclude, chunk, force, …).
+    #[must_use]
+    pub fn config(&self) -> &IndexerConfig {
+        &self.config
+    }
+
+    /// Wait until every queued file event has been processed.
+    ///
+    /// Call this after [`Self::start`] for a one-shot index so the CLI does not
+    /// return while the background worker is still embedding files.
+    pub async fn wait_until_idle(&self) {
+        loop {
+            if self.pending.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+                if self.pending.load(Ordering::SeqCst) == 0 {
+                    return;
+                }
+            }
+            tokio::select! {
+                () = self.idle_notify.notified() => {}
+                () = tokio::time::sleep(std::time::Duration::from_millis(20)) => {}
+            }
         }
     }
 
@@ -139,10 +271,13 @@ impl IndexerService {
         // Initialize store
         self.store.init().await.map_err(Error::Store)?;
 
-        // Start file watcher
-        let watcher =
-            FileWatcher::new(self.event_tx.clone(), std::time::Duration::from_millis(500))
-                .map_err(|e| Error::Other(format!("watcher error: {e}")))?;
+        // Start file watcher (debounce from config)
+        let watcher = FileWatcher::with_pending(
+            self.event_tx.clone(),
+            std::time::Duration::from_millis(self.config.debounce_ms),
+            Some(Arc::clone(&self.pending)),
+        )
+        .map_err(|e| Error::Other(format!("watcher error: {e}")))?;
         {
             let mut w = self.watcher.write().await;
             *w = Some(watcher);
@@ -168,6 +303,8 @@ impl IndexerService {
         let embedder = Arc::clone(&self.embedder);
         let config = self.config.clone();
         let stats = Arc::clone(&self.stats);
+        let pending = Arc::clone(&self.pending);
+        let idle_notify = Arc::clone(&self.idle_notify);
 
         // Spawn event processing task
         tokio::spawn(async move {
@@ -258,6 +395,7 @@ impl IndexerService {
                                 }
                             }
                         }
+                        finish_pending(&pending, &idle_notify);
                     }
                     None => break,
                 }
@@ -277,10 +415,18 @@ impl IndexerService {
         let root = self.root.clone();
         let event_tx = self.event_tx.clone();
         let exclude_patterns = self.config.exclude_patterns.clone();
+        let include_patterns = self.config.include_patterns.clone();
+        let pending = Arc::clone(&self.pending);
 
         // Walk directory in background thread (blocking I/O)
         tokio::task::spawn_blocking(move || {
-            scan_directory(&root, &event_tx, &exclude_patterns);
+            scan_directory(
+                &root,
+                &event_tx,
+                &exclude_patterns,
+                &include_patterns,
+                &pending,
+            );
         })
         .await
         .map_err(|e| Error::Other(format!("scan task failed: {e}")))?;
@@ -369,34 +515,21 @@ impl IndexerService {
             let entry = entry.map_err(|e| Error::Other(format!("Failed to read entry: {e}")))?;
             let path = entry.path();
 
-            // Check exclusion patterns
-            let path_str = path.to_string_lossy();
-            let should_exclude = self.config.exclude_patterns.iter().any(|pattern| {
-                if pattern.contains("**") {
-                    let parts: Vec<&str> = pattern.split("**").collect();
-                    if parts.len() == 2 {
-                        let prefix = parts[0].trim_matches('/');
-                        let suffix = parts[1].trim_matches('/');
-                        (prefix.is_empty() || path_str.contains(prefix))
-                            && (suffix.is_empty() || path_str.contains(suffix))
-                    } else {
-                        false
-                    }
-                } else if pattern.starts_with('*') {
-                    path_str.ends_with(pattern.trim_start_matches('*'))
-                } else {
-                    path_str.contains(pattern.trim_matches('*'))
-                }
-            });
-
-            if should_exclude {
-                continue;
-            }
-
             if path.is_dir() {
+                if self
+                    .config
+                    .exclude_patterns
+                    .iter()
+                    .any(|pattern| path_matches_pattern(&path.to_string_lossy(), pattern))
+                {
+                    continue;
+                }
                 // Recurse into subdirectory using a boxed future to avoid infinite recursion
                 Box::pin(self.reindex_directory(&path)).await?;
             } else if path.is_file() {
+                if !self.config.should_process_path(&path) {
+                    continue;
+                }
                 // Reindex file - use process_file directly to avoid recursion
                 let _ = self.store.delete_by_file_path(&path).await;
 
@@ -438,10 +571,22 @@ impl IndexerService {
 }
 
 /// Scan a directory and send file events.
-fn scan_directory(root: &Path, event_tx: &mpsc::Sender<FileEvent>, exclude_patterns: &[String]) {
+fn scan_directory(
+    root: &Path,
+    event_tx: &mpsc::Sender<FileEvent>,
+    exclude_patterns: &[String],
+    include_patterns: &[String],
+    pending: &AtomicUsize,
+) {
     use std::fs;
 
-    fn visit_dir(dir: &Path, event_tx: &mpsc::Sender<FileEvent>, exclude_patterns: &[String]) {
+    fn visit_dir(
+        dir: &Path,
+        event_tx: &mpsc::Sender<FileEvent>,
+        exclude_patterns: &[String],
+        include_patterns: &[String],
+        pending: &AtomicUsize,
+    ) {
         let entries = match fs::read_dir(dir) {
             Ok(e) => e,
             Err(e) => {
@@ -452,44 +597,50 @@ fn scan_directory(root: &Path, event_tx: &mpsc::Sender<FileEvent>, exclude_patte
 
         for entry in entries.flatten() {
             let path = entry.path();
-
-            // Check exclusion patterns
             let path_str = path.to_string_lossy();
-            let should_exclude = exclude_patterns.iter().any(|pattern| {
-                // Simple glob matching
-                if pattern.contains("**") {
-                    let parts: Vec<&str> = pattern.split("**").collect();
-                    if parts.len() == 2 {
-                        let prefix = parts[0].trim_matches('/');
-                        let suffix = parts[1].trim_matches('/');
-                        (prefix.is_empty() || path_str.contains(prefix))
-                            && (suffix.is_empty() || path_str.contains(suffix))
-                    } else {
-                        false
-                    }
-                } else if pattern.starts_with('*') {
-                    path_str.ends_with(pattern.trim_start_matches('*'))
-                } else {
-                    path_str.contains(pattern.trim_matches('*'))
-                }
-            });
 
-            if should_exclude {
+            if exclude_patterns
+                .iter()
+                .any(|pattern| path_matches_pattern(&path_str, pattern))
+            {
                 continue;
             }
 
             if path.is_dir() {
-                visit_dir(&path, event_tx, exclude_patterns);
+                visit_dir(&path, event_tx, exclude_patterns, include_patterns, pending);
             } else if path.is_file() {
-                // Send as Created event
-                if let Err(e) = event_tx.blocking_send(FileEvent::Created(path.clone())) {
-                    warn!("Failed to queue file {:?}: {}", path, e);
+                let included = include_patterns.is_empty()
+                    || include_patterns
+                        .iter()
+                        .any(|pattern| path_matches_pattern(&path_str, pattern));
+                if !included {
+                    continue;
                 }
+                queue_event_blocking(event_tx, pending, FileEvent::Created(path));
             }
         }
     }
 
-    visit_dir(root, event_tx, exclude_patterns);
+    visit_dir(root, event_tx, exclude_patterns, include_patterns, pending);
+}
+
+fn queue_event_blocking(
+    event_tx: &mpsc::Sender<FileEvent>,
+    pending: &AtomicUsize,
+    event: FileEvent,
+) {
+    pending.fetch_add(1, Ordering::SeqCst);
+    if let Err(e) = event_tx.blocking_send(event) {
+        pending.fetch_sub(1, Ordering::SeqCst);
+        warn!("Failed to queue file event: {e}");
+    }
+}
+
+fn finish_pending(pending: &AtomicUsize, idle_notify: &Notify) {
+    let prev = pending.fetch_sub(1, Ordering::SeqCst);
+    if prev <= 1 {
+        idle_notify.notify_waiters();
+    }
 }
 
 /// Process a file through the full pipeline: extract → chunk → embed → store.
@@ -510,11 +661,28 @@ async fn process_file(
         return Ok(0);
     }
 
+    if !config.should_process_path(path) {
+        debug!("Skipping {:?} (include/exclude patterns)", path);
+        return Ok(0);
+    }
+
+    if metadata.len() > config.max_file_size {
+        debug!(
+            "Skipping {:?} ({} bytes > max_file_size {})",
+            path,
+            metadata.len(),
+            config.max_file_size
+        );
+        let _ = store.delete_by_file_path(path).await;
+        return Ok(0);
+    }
+
     // Compute content hash
     let content_hash = compute_hash(path).await?;
 
-    // Check if already indexed with same hash
-    if let Ok(Some(existing)) = store.get_file(path).await
+    // Check if already indexed with same hash (unless --force)
+    if !config.force
+        && let Ok(Some(existing)) = store.get_file(path).await
         && existing.content_hash == content_hash
         && existing.status == FileStatus::Indexed
     {
@@ -752,11 +920,15 @@ impl Indexer for IndexerService {
             let _ = self.store.delete_by_file_path(path).await;
         }
 
-        // Queue file for indexing
-        self.event_tx
+        self.pending.fetch_add(1, Ordering::SeqCst);
+        if let Err(e) = self
+            .event_tx
             .send(FileEvent::Modified(path.to_path_buf()))
             .await
-            .map_err(|e| Error::Other(format!("send error: {e}")))?;
+        {
+            self.pending.fetch_sub(1, Ordering::SeqCst);
+            return Err(Error::Other(format!("send error: {e}")));
+        }
         Ok(())
     }
 
@@ -1302,6 +1474,241 @@ mod tests {
             config
                 .exclude_patterns
                 .contains(&"**/target/**".to_string())
+        );
+        assert_eq!(config.debounce_ms, 500);
+        assert_eq!(config.max_file_size, 52_428_800);
+        assert!(!config.force);
+    }
+
+    #[test]
+    fn test_path_matches_exclude_and_include_patterns() {
+        assert!(path_matches_pattern("/proj/src/main.rs", "**/*"));
+        assert!(path_matches_pattern(
+            "/proj/node_modules/pkg/index.js",
+            "**/node_modules/**"
+        ));
+        assert!(path_matches_pattern("/proj/.git/config", "**/.git/**"));
+        assert!(path_matches_pattern("/proj/foo.pyc", "**/*.pyc"));
+        assert!(path_matches_pattern("/proj/.env", "**/.env"));
+        assert!(path_matches_pattern("/proj/.env", "**/.*"));
+        assert!(
+            !path_matches_pattern("/tmp/.tmpABC/file.txt", "**/.*"),
+            "hidden parent dirs must not exclude a visible file"
+        );
+        assert!(!path_matches_pattern(
+            "/proj/src/main.rs",
+            "**/node_modules/**"
+        ));
+        assert!(path_matches_pattern("/proj/src/main.rs", "**/*.rs"));
+        assert!(!path_matches_pattern("/proj/readme.md", "**/*.rs"));
+        assert!(
+            path_matches_pattern("src/lib.rs", "src/**/*.rs"),
+            "nested ** must match a file directly under the prefix"
+        );
+        assert!(path_matches_pattern("/proj/src/lib.rs", "src/**/*.rs"));
+        assert!(path_matches_pattern(
+            "/proj/src/nested/lib.rs",
+            "src/**/*.rs"
+        ));
+        assert!(path_matches_pattern("test_unit.rs", "test_*.rs"));
+        assert!(path_matches_pattern(
+            "/proj/tests/test_unit.rs",
+            "test_*.rs"
+        ));
+        assert!(!path_matches_pattern("/proj/src/lib.rs", "test_*.rs"));
+
+        let config = IndexerConfig {
+            include_patterns: vec!["**/*.rs".to_string()],
+            exclude_patterns: vec!["**/target/**".to_string()],
+            ..Default::default()
+        };
+        assert!(config.should_process_path(Path::new("/proj/src/lib.rs")));
+        assert!(!config.should_process_path(Path::new("/proj/src/lib.md")));
+        assert!(!config.should_process_path(Path::new("/proj/target/debug/lib.rs")));
+    }
+
+    fn create_test_indexer_with_config(
+        store: Arc<dyn VectorStore>,
+        config: IndexerConfig,
+    ) -> IndexerService {
+        use ragfs_extract::TextExtractor;
+
+        let mut extractors = ExtractorRegistry::new();
+        extractors.register("text", TextExtractor::new());
+        let extractors = Arc::new(extractors);
+
+        let mut chunkers = ChunkerRegistry::new();
+        chunkers.register("fixed", FixedSizeChunker::new());
+        chunkers.set_default("fixed");
+        let chunkers = Arc::new(chunkers);
+
+        let embedder = Arc::new(MockEmbedder::new(TEST_DIM));
+        let embedder_pool = Arc::new(EmbedderPool::new(embedder, 1));
+
+        IndexerService::new(
+            PathBuf::from("/tmp"),
+            store,
+            extractors,
+            chunkers,
+            embedder_pool,
+            config,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_max_file_size_skips_large_files() {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("big.txt");
+        std::fs::write(&file_path, "this file is definitely larger than 8 bytes").unwrap();
+
+        let store = Arc::new(MockStore::new());
+        let config = IndexerConfig {
+            max_file_size: 8,
+            ..Default::default()
+        };
+        let indexer =
+            create_test_indexer_with_config(Arc::clone(&store) as Arc<dyn VectorStore>, config);
+
+        let chunk_count = indexer.process_single(&file_path).await.unwrap();
+        assert_eq!(chunk_count, 0);
+        assert!(store.files.read().await.is_empty());
+        assert!(store.chunks.read().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_oversized_previously_indexed_file_is_removed() {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("grow.txt");
+        std::fs::write(&file_path, "small").unwrap();
+
+        let store = Arc::new(MockStore::new());
+        let indexer = create_test_indexer(Arc::clone(&store) as Arc<dyn VectorStore>);
+        let chunk_count = indexer.process_single(&file_path).await.unwrap();
+        assert!(chunk_count > 0);
+        assert!(store.files.read().await.contains_key(&file_path));
+        assert!(!store.chunks.read().await.is_empty());
+
+        std::fs::write(&file_path, "this file is now much larger than eight bytes").unwrap();
+
+        let limited = IndexerConfig {
+            max_file_size: 8,
+            ..Default::default()
+        };
+        let limited_indexer =
+            create_test_indexer_with_config(Arc::clone(&store) as Arc<dyn VectorStore>, limited);
+        let skipped = limited_indexer.process_single(&file_path).await.unwrap();
+        assert_eq!(skipped, 0);
+        assert!(
+            store.files.read().await.is_empty(),
+            "growing past max_file_size must drop the file record"
+        );
+        assert!(
+            store.chunks.read().await.is_empty(),
+            "growing past max_file_size must drop indexed chunks"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_force_reindexes_unchanged_file() {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("stable.txt");
+        std::fs::write(&file_path, "unchanged payload").unwrap();
+
+        let store = Arc::new(MockStore::new());
+        let indexer = create_test_indexer(Arc::clone(&store) as Arc<dyn VectorStore>);
+        indexer.process_single(&file_path).await.unwrap();
+        let first_id = store.files.read().await.get(&file_path).unwrap().id;
+
+        // Incremental path skips when the hash matches.
+        indexer.process_single(&file_path).await.unwrap();
+        let skipped_id = store.files.read().await.get(&file_path).unwrap().id;
+        assert_eq!(first_id, skipped_id);
+
+        let force_config = IndexerConfig {
+            force: true,
+            ..Default::default()
+        };
+        let force_indexer = create_test_indexer_with_config(
+            Arc::clone(&store) as Arc<dyn VectorStore>,
+            force_config,
+        );
+        force_indexer.process_single(&file_path).await.unwrap();
+        let forced_id = store.files.read().await.get(&file_path).unwrap().id;
+        assert_ne!(
+            first_id, forced_id,
+            "--force must replace the existing file record"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_wait_until_idle_indexes_all_files() {
+        let temp_dir = tempdir().unwrap();
+        std::fs::write(temp_dir.path().join("a.txt"), "alpha file contents").unwrap();
+        std::fs::write(temp_dir.path().join("b.txt"), "bravo file contents").unwrap();
+        std::fs::create_dir(temp_dir.path().join("skip_me")).unwrap();
+        std::fs::write(temp_dir.path().join("skip_me").join("c.bin"), "nope").unwrap();
+
+        let store = Arc::new(MockStore::new());
+        let mut extractors = ExtractorRegistry::new();
+        extractors.register("text", ragfs_extract::TextExtractor::new());
+        let mut chunkers = ChunkerRegistry::new();
+        chunkers.register("fixed", FixedSizeChunker::new());
+        chunkers.set_default("fixed");
+        let embedder_pool = Arc::new(EmbedderPool::new(Arc::new(MockEmbedder::new(TEST_DIM)), 1));
+
+        let config = IndexerConfig {
+            include_patterns: vec!["**/*.txt".to_string()],
+            exclude_patterns: vec!["**/skip_me/**".to_string()],
+            debounce_ms: 50,
+            ..Default::default()
+        };
+
+        let indexer = IndexerService::new(
+            temp_dir.path().to_path_buf(),
+            Arc::clone(&store) as Arc<dyn VectorStore>,
+            Arc::new(extractors),
+            Arc::new(chunkers),
+            embedder_pool,
+            config,
+        );
+
+        indexer.start().await.unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            indexer.wait_until_idle(),
+        )
+        .await
+        .expect("indexer should become idle");
+
+        let files = store.get_all_files().await.unwrap();
+        assert_eq!(files.len(), 2, "only included .txt files should be indexed");
+        indexer.stop().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_chunk_config_from_indexer_is_used() {
+        let temp_dir = tempdir().unwrap();
+        let file_path = temp_dir.path().join("chunky.txt");
+        let body = "word ".repeat(80);
+        std::fs::write(&file_path, body).unwrap();
+
+        let store = Arc::new(MockStore::new());
+        let config = IndexerConfig {
+            chunk_config: ChunkConfig {
+                target_size: 8,
+                max_size: 16,
+                overlap: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let indexer =
+            create_test_indexer_with_config(Arc::clone(&store) as Arc<dyn VectorStore>, config);
+
+        let chunk_count = indexer.process_single(&file_path).await.unwrap();
+        assert!(
+            chunk_count > 1,
+            "small chunk target should produce multiple chunks, got {chunk_count}"
         );
     }
 

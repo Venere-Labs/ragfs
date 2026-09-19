@@ -32,12 +32,12 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use daemonize::Daemonize;
 use ragfs_chunker::{ChunkerRegistry, CodeChunker, FixedSizeChunker, SemanticChunker};
-use ragfs_core::{ChunkConfig, Embedder, EmbeddingConfig, Indexer, VectorStore};
+use ragfs_core::{Embedder, Indexer, VectorStore};
 #[cfg(feature = "candle")]
 use ragfs_embed::CandleEmbedder;
 use ragfs_embed::EmbedderPool;
 use ragfs_extract::{ExtractorRegistry, ImageExtractor, PdfExtractor, TextExtractor};
-use ragfs_index::{IndexerConfig, IndexerService};
+use ragfs_index::IndexerService;
 use ragfs_query::QueryExecutor;
 #[cfg(feature = "lancedb")]
 use ragfs_store::LanceStore;
@@ -48,9 +48,7 @@ use std::sync::Arc;
 use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
-mod config;
-
-use config::{Config, data_dir};
+use ragfs::config::{Config, data_dir};
 
 /// Embedding dimension for gte-small model.
 const EMBEDDING_DIM: usize = 384;
@@ -124,9 +122,13 @@ enum Commands {
         /// Query string
         query: String,
 
-        /// Maximum results
-        #[arg(short, long, default_value = "10")]
-        limit: usize,
+        /// Maximum results (overrides `[query].default_limit`)
+        #[arg(short, long)]
+        limit: Option<usize>,
+
+        /// Enable hybrid search (vector + full-text). Overrides `[query].hybrid`.
+        #[arg(long)]
+        hybrid: bool,
     },
 
     /// Show index status
@@ -222,9 +224,10 @@ fn get_log_path(source: &PathBuf) -> Result<PathBuf> {
     Ok(dir.join(format!("{hash_str}.log")))
 }
 
-/// Create the standard component stack.
+/// Create the standard component stack, applying `[embedding]` from config.
 async fn create_components(
     source: PathBuf,
+    config: &Config,
 ) -> Result<(
     Arc<LanceStore>,
     Arc<ExtractorRegistry>,
@@ -250,11 +253,15 @@ async fn create_components(
     chunkers.set_default("fixed");
     let chunkers = Arc::new(chunkers);
 
-    // Create embedder
+    // Create embedder from config (model, GPU). Unknown models fail before download.
+    let model = config
+        .resolve_embedding_model()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     let cache_dir = data_dir()
         .context("Failed to get data directory")?
         .join("models");
-    let embedder = CandleEmbedder::new(cache_dir);
+    let embedder = CandleEmbedder::try_new(cache_dir, model, config.embedding.use_gpu)
+        .context("Failed to create embedder")?;
 
     // Initialize embedder (downloads model if needed)
     info!("Initializing embedder (this may download the model on first run)...");
@@ -265,30 +272,131 @@ async fn create_components(
 
     let embedder_pool = Arc::new(EmbedderPool::new(
         Arc::new(embedder) as Arc<dyn Embedder>,
-        4,
+        config.embedder_pool_size(),
     ));
 
     Ok((store, extractors, chunkers, embedder_pool))
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let cli = Cli::parse();
-
-    // Setup logging
-    let level = if cli.verbose {
-        Level::DEBUG
+fn load_config(cli: &Cli) -> Result<Config> {
+    if let Some(ref path) = cli.config {
+        Config::load_from(Some(path.clone()))
+            .with_context(|| format!("Failed to load config from {}", path.display()))
     } else {
-        Level::INFO
-    };
+        Config::load().context("Failed to load config")
+    }
+}
 
+fn setup_logging(verbose: bool) -> Result<()> {
+    let level = if verbose { Level::DEBUG } else { Level::INFO };
     let subscriber = FmtSubscriber::builder()
         .with_max_level(level)
         .with_target(false)
         .finish();
+    tracing::subscriber::set_global_default(subscriber).context("Failed to set tracing subscriber")
+}
 
-    tracing::subscriber::set_global_default(subscriber)
-        .context("Failed to set tracing subscriber")?;
+fn print_config_meta(action: &ConfigAction) {
+    match action {
+        ConfigAction::Init => {
+            println!("{}", Config::sample_toml());
+        }
+        ConfigAction::Path => {
+            if let Some(path) = Config::config_path() {
+                println!("{}", path.display());
+            } else {
+                println!("Could not determine config directory");
+            }
+        }
+        ConfigAction::Show => {}
+    }
+}
+
+/// Fork to the background before Tokio or indexer threads are created.
+///
+/// `daemonize` 0.5 keeps only the calling thread in the child, so the
+/// watcher and event-loop threads started by `IndexerService::start` would
+/// not survive a later fork.
+fn maybe_daemonize_background_mount(cli: &mut Cli) -> Result<()> {
+    let is_background = matches!(
+        &cli.command,
+        Commands::Mount {
+            foreground: false,
+            ..
+        }
+    );
+    if !is_background {
+        return Ok(());
+    }
+
+    // Fail in the parent if config.toml is invalid.
+    load_config(cli)?;
+
+    let Commands::Mount {
+        source, mountpoint, ..
+    } = &mut cli.command
+    else {
+        return Ok(());
+    };
+
+    if !source.exists() {
+        anyhow::bail!("Source directory does not exist: {}", source.display());
+    }
+    if !mountpoint.exists() {
+        anyhow::bail!("Mount point does not exist: {}", mountpoint.display());
+    }
+
+    *source = source.canonicalize()?;
+    *mountpoint = mountpoint.canonicalize()?;
+
+    let pid_path = get_pid_path(source)?;
+    let log_path = get_log_path(source)?;
+
+    println!("Mounting in background...");
+    println!("PID file: {}", pid_path.display());
+    println!("Log file: {}", log_path.display());
+    println!("Try: cat {}/.ragfs/.index", mountpoint.display());
+    println!("Unmount: fusermount -u {}", mountpoint.display());
+
+    let stdout = File::create(&log_path).context("Failed to create log file for stdout")?;
+    let stderr = File::create(&log_path).context("Failed to create log file for stderr")?;
+
+    let daemonize = Daemonize::new()
+        .pid_file(&pid_path)
+        .chown_pid_file(true)
+        .working_directory("/")
+        .stdout(stdout)
+        .stderr(stderr);
+
+    daemonize
+        .start()
+        .map_err(|e| anyhow::anyhow!("Failed to daemonize: {e}"))?;
+    Ok(())
+}
+
+fn main() -> Result<()> {
+    let mut cli = Cli::parse();
+    setup_logging(cli.verbose)?;
+
+    // `config init` / `config path` must work even if config.toml is invalid.
+    if let Commands::Config { action } = &cli.command
+        && matches!(action, ConfigAction::Init | ConfigAction::Path)
+    {
+        print_config_meta(action);
+        return Ok(());
+    }
+
+    maybe_daemonize_background_mount(&mut cli)?;
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("Failed to start async runtime")?
+        .block_on(run(cli))
+}
+
+async fn run(cli: Cli) -> Result<()> {
+    let config = load_config(&cli)?;
 
     match cli.command {
         Commands::Mount {
@@ -311,17 +419,12 @@ async fn main() -> Result<()> {
 
             // Create components for RAG functionality
             let (store, extractors, chunkers, embedder_pool) =
-                create_components(source.clone()).await?;
+                create_components(source.clone(), &config).await?;
 
             // Initialize store
             store.init().await.context("Failed to initialize store")?;
 
-            // Create indexer for reindex requests
-            let indexer_config = IndexerConfig {
-                chunk_config: ChunkConfig::default(),
-                embed_config: EmbeddingConfig::default(),
-                ..Default::default()
-            };
+            let indexer_config = config.to_indexer_config(false);
 
             let indexer = Arc::new(IndexerService::new(
                 source.clone(),
@@ -331,6 +434,10 @@ async fn main() -> Result<()> {
                 embedder_pool.clone(),
                 indexer_config,
             ));
+
+            // Initial scan + file watcher so a cold mount is not an empty index
+            indexer.start().await.context("Failed to start indexer")?;
+            info!("Indexing and watching {}", source.display());
 
             // Create channel for reindex requests
             let (reindex_tx, mut reindex_rx) = tokio::sync::mpsc::channel::<PathBuf>(32);
@@ -355,12 +462,15 @@ async fn main() -> Result<()> {
             let runtime = tokio::runtime::Handle::current();
 
             // Create filesystem with RAG capabilities
-            let fs = ragfs_fuse::RagFs::with_rag(
+            let fs = ragfs_fuse::RagFs::with_rag_query(
                 source.clone(),
                 store as Arc<dyn VectorStore>,
                 embedder_pool.document_embedder(),
                 runtime,
                 Some(reindex_tx),
+                config.query.default_limit,
+                config.query.hybrid,
+                config.query.max_limit,
             );
 
             // Build mount options
@@ -370,11 +480,11 @@ async fn main() -> Result<()> {
                 fuser::MountOption::DefaultPermissions,
             ];
 
-            if allow_other {
+            if allow_other || config.mount.allow_other {
                 options.push(fuser::MountOption::AllowOther);
             }
 
-            // Mount
+            // Mount. Background forks happen in `main` before Tokio starts.
             if foreground {
                 info!("Running in foreground (Ctrl+C to unmount)");
                 info!("Try: cat {:?}/.ragfs/.index", mountpoint);
@@ -382,43 +492,8 @@ async fn main() -> Result<()> {
                     "Reindex: echo 'path/to/file' > {:?}/.ragfs/.reindex",
                     mountpoint
                 );
-                fuser::mount2(fs, &mountpoint, &options)?;
-            } else {
-                // Daemonize: fork to background
-                let pid_path = get_pid_path(&source)?;
-                let log_path = get_log_path(&source)?;
-
-                // Print info before daemonizing (these won't be visible after fork)
-                println!("Mounting in background...");
-                println!("PID file: {}", pid_path.display());
-                println!("Log file: {}", log_path.display());
-                println!("Try: cat {}/.ragfs/.index", mountpoint.display());
-                println!("Unmount: fusermount -u {}", mountpoint.display());
-
-                // Open log file for stdout/stderr redirection
-                let stdout =
-                    File::create(&log_path).context("Failed to create log file for stdout")?;
-                let stderr =
-                    File::create(&log_path).context("Failed to create log file for stderr")?;
-
-                let daemonize = Daemonize::new()
-                    .pid_file(&pid_path)
-                    .chown_pid_file(true)
-                    .working_directory("/")
-                    .stdout(stdout)
-                    .stderr(stderr);
-
-                match daemonize.start() {
-                    Ok(()) => {
-                        // We're now in the daemon process
-                        // Re-initialize tracing to log file since we've forked
-                        fuser::mount2(fs, &mountpoint, &options)?;
-                    }
-                    Err(e) => {
-                        anyhow::bail!("Failed to daemonize: {e}");
-                    }
-                }
             }
+            fuser::mount2(fs, &mountpoint, &options)?;
 
             // Cleanup reindex handler on unmount
             reindex_handler.abort();
@@ -432,14 +507,10 @@ async fn main() -> Result<()> {
             let path = path.canonicalize()?;
             info!("Indexing {:?} (force={})", path, force);
 
-            let (store, extractors, chunkers, embedder) = create_components(path.clone()).await?;
+            let (store, extractors, chunkers, embedder) =
+                create_components(path.clone(), &config).await?;
 
-            // Create indexer config
-            let config = IndexerConfig {
-                chunk_config: ChunkConfig::default(),
-                embed_config: EmbeddingConfig::default(),
-                ..Default::default()
-            };
+            let indexer_config = config.to_indexer_config(force);
 
             // Create indexer
             let indexer = IndexerService::new(
@@ -448,7 +519,7 @@ async fn main() -> Result<()> {
                 extractors,
                 chunkers,
                 embedder,
-                config,
+                indexer_config,
             );
 
             // Subscribe to updates for progress
@@ -478,29 +549,33 @@ async fn main() -> Result<()> {
             // Start indexer
             indexer.start().await.context("Failed to start indexer")?;
 
+            indexer.wait_until_idle().await;
+
+            let stats = store.stats().await?;
+            info!(
+                "Indexing complete: {} files, {} chunks",
+                stats.total_files, stats.total_chunks
+            );
+
             if watch {
                 info!("Watching for changes. Press Ctrl+C to stop.");
-                // Wait indefinitely
                 tokio::signal::ctrl_c()
                     .await
                     .context("Failed to wait for Ctrl+C")?;
                 indexer.stop().await?;
             } else {
-                // Give some time for initial indexing
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
-                // Check stats
-                let stats = store.stats().await?;
-                info!(
-                    "Indexing complete: {} files, {} chunks",
-                    stats.total_files, stats.total_chunks
-                );
+                indexer.stop().await?;
             }
 
             drop(progress_handle);
         }
 
-        Commands::Query { path, query, limit } => {
+        Commands::Query {
+            path,
+            query,
+            limit,
+            hybrid,
+        } => {
             if !path.exists() {
                 anyhow::bail!("Directory does not exist: {}", path.display());
             }
@@ -517,18 +592,23 @@ async fn main() -> Result<()> {
                 );
             }
 
-            let (store, _extractors, _chunkers, embedder) = create_components(path).await?;
+            let (store, _extractors, _chunkers, embedder) =
+                create_components(path, &config).await?;
 
             // Initialize store
             store.init().await.context("Failed to initialize store")?;
+
+            let limit = config.query_limit(limit);
+            let use_hybrid = config.query_hybrid(hybrid);
 
             // Create query executor
             let executor = QueryExecutor::new(
                 store as Arc<dyn VectorStore>,
                 embedder.document_embedder(),
                 limit,
-                false, // hybrid search
-            );
+                use_hybrid,
+            )
+            .with_max_limit(config.query.max_limit);
 
             // Execute query
             let results = executor
@@ -627,44 +707,26 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Config { action } => {
-            // Load config from file or CLI-specified path
-            let config = if let Some(ref path) = cli.config {
-                Config::load_from(Some(path.clone()))
-                    .context(format!("Failed to load config from {}", path.display()))?
-            } else {
-                Config::load().context("Failed to load config")?
-            };
-
-            match action {
-                ConfigAction::Show => match cli.format {
-                    OutputFormat::Json => {
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&config)
-                                .context("Failed to serialize config")?
-                        );
-                    }
-                    OutputFormat::Text => {
-                        println!(
-                            "{}",
-                            toml::to_string_pretty(&config)
-                                .context("Failed to serialize config")?
-                        );
-                    }
-                },
-                ConfigAction::Init => {
-                    println!("{}", Config::sample_toml());
+        Commands::Config { action } => match action {
+            ConfigAction::Show => match cli.format {
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&config)
+                            .context("Failed to serialize config")?
+                    );
                 }
-                ConfigAction::Path => {
-                    if let Some(path) = Config::config_path() {
-                        println!("{}", path.display());
-                    } else {
-                        println!("Could not determine config directory");
-                    }
+                OutputFormat::Text => {
+                    println!(
+                        "{}",
+                        toml::to_string_pretty(&config).context("Failed to serialize config")?
+                    );
                 }
+            },
+            ConfigAction::Init | ConfigAction::Path => {
+                // Handled in `main` before config load.
             }
-        }
+        },
     }
 
     Ok(())

@@ -8,6 +8,11 @@ description = "A FUSE filesystem for semantic search and RAG architectures"
 keywords = ["rag", "semantic-search", "fuse", "filesystem", "embeddings"]
 categories = ["command-line-utilities", "filesystem"]
 
+[lib]
+name = "ragfs"
+path = "src/lib.rs"
+doc = false
+
 [[bin]]
 name = "ragfs"
 path = "src/main.rs"

@@ -18,6 +18,8 @@ pub struct QueryExecutor {
     parser: QueryParser,
     /// Whether to use hybrid search
     hybrid: bool,
+    /// Upper bound applied to parsed / CLI limits
+    max_limit: usize,
 }
 
 impl QueryExecutor {
@@ -33,7 +35,25 @@ impl QueryExecutor {
             embedder,
             parser: QueryParser::new(default_limit),
             hybrid,
+            max_limit: usize::MAX,
         }
+    }
+
+    /// Clamp result counts to `max_limit` from `[query].max_limit`.
+    #[must_use]
+    pub fn with_max_limit(mut self, max_limit: usize) -> Self {
+        self.max_limit = max_limit.max(1);
+        self
+    }
+
+    /// Whether this executor uses hybrid (vector + FTS) search.
+    #[must_use]
+    pub fn is_hybrid(&self) -> bool {
+        self.hybrid
+    }
+
+    fn clamp_limit(&self, limit: usize) -> usize {
+        limit.min(self.max_limit).max(1)
     }
 
     /// Execute a query string.
@@ -41,7 +61,8 @@ impl QueryExecutor {
         debug!("Executing query: {}", query_str);
 
         // Parse query
-        let parsed = self.parser.parse(query_str);
+        let mut parsed = self.parser.parse(query_str);
+        parsed.limit = self.clamp_limit(parsed.limit);
 
         // Embed query text
         let config = EmbeddingConfig::default();
@@ -81,6 +102,9 @@ impl QueryExecutor {
         &self,
         parsed: ParsedQuery,
     ) -> Result<Vec<SearchResult>, ragfs_core::Error> {
+        let mut parsed = parsed;
+        parsed.limit = self.clamp_limit(parsed.limit);
+
         let config = EmbeddingConfig::default();
         let embedding = self
             .embedder
@@ -421,10 +445,19 @@ mod tests {
 
         // Test with hybrid=false
         let executor = QueryExecutor::new(Arc::clone(&store), Arc::clone(&embedder), 10, false);
-        assert!(!executor.hybrid);
+        assert!(!executor.is_hybrid());
 
         // Test with hybrid=true
         let executor2 = QueryExecutor::new(store, embedder, 20, true);
-        assert!(executor2.hybrid);
+        assert!(executor2.is_hybrid());
+    }
+
+    #[test]
+    fn test_max_limit_from_config_is_stored() {
+        let store: Arc<dyn VectorStore> = Arc::new(MockStore::new());
+        let embedder: Arc<dyn Embedder> = Arc::new(MockEmbedder::new(TEST_DIM));
+        let executor = QueryExecutor::new(store, embedder, 10, true).with_max_limit(7);
+        assert_eq!(executor.clamp_limit(100), 7);
+        assert!(executor.is_hybrid());
     }
 }

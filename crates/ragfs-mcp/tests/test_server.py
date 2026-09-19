@@ -283,6 +283,23 @@ class TestServerConfiguration:
         assert path == str(Path("~/ragfs-data") / "indices" / "0123456789abcdef" / "index.lance")
         assert not path.startswith(str(Path.home() / "ragfs-data"))
 
+    def test_get_data_dir_matches_cli_project_dirs(self, tmp_path, monkeypatch):
+        """Fallback matches ProjectDirs::from("", "", "ragfs").data_dir()."""
+        from ragfs_mcp.server import get_data_dir
+
+        monkeypatch.delenv("RAGFS_DATA_DIR", raising=False)
+        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+
+        monkeypatch.setattr("ragfs_mcp.server.sys.platform", "linux")
+        assert get_data_dir() == Path.home() / ".local" / "share" / "ragfs"
+
+        monkeypatch.setattr("ragfs_mcp.server.sys.platform", "darwin")
+        assert get_data_dir() == Path.home() / "Library" / "Application Support" / "ragfs"
+
+        monkeypatch.setattr("ragfs_mcp.server.sys.platform", "win32")
+        monkeypatch.setenv("APPDATA", str(tmp_path))
+        assert get_data_dir() == tmp_path / "ragfs" / "data"
+
     def test_get_model_path(self):
         """Test model path."""
         from ragfs_mcp.server import get_model_path

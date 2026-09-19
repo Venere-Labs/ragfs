@@ -626,7 +626,7 @@ The CLI and MCP share one scheme:
 {data_dir}/indices/{blake3(canonical_source_path)[:16]}/index.lance
 ```
 
-- `data_dir` is `RAGFS_DATA_DIR`, else `$XDG_DATA_HOME/ragfs`, else `~/.local/share/ragfs`
+- `data_dir` is `RAGFS_DATA_DIR`, else `$XDG_DATA_HOME/ragfs`, else the CLI `ProjectDirs` path (`~/.local/share/ragfs` on Linux, `~/Library/Application Support/ragfs` on macOS, `%APPDATA%\\ragfs\\data` on Windows)
 - `canonical_source_path` is the symlink-resolved absolute path (same as Rust `Path::canonicalize`)
 - the folder name is the first 16 hex characters of blake3 over those path bytes
 
@@ -648,7 +648,7 @@ Pass the **source directory** (or the 16-hex id from `ragfs_list_indices`) as `i
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `RAGFS_SOURCE_PATH` | Current directory | Default source directory to hash (must match `ragfs index <path>`) |
-| `RAGFS_DATA_DIR` | `~/.local/share/ragfs` (or `$XDG_DATA_HOME/ragfs`) | Data root; indices are stored under `indices/{16hex}/` |
+| `RAGFS_DATA_DIR` | CLI `ProjectDirs` path (or `$XDG_DATA_HOME/ragfs`) | Data root; indices are stored under `indices/{16hex}/` |
 | `RAGFS_DB_PATH` | *(unset)* | Optional explicit LanceDB path; skips hashing when set |
 | `RAGFS_MODEL_PATH` | `~/.local/share/ragfs/models` | Path to embedding model |
 

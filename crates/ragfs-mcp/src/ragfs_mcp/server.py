@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -65,6 +66,17 @@ DEFAULT_MODEL_PATH = DEFAULT_DATA_DIR / "models"
 _INDEX_HASH_RE = re.compile(r"^[0-9a-f]{16}$", re.IGNORECASE)
 
 
+def _project_data_dir() -> Path:
+    """CLI `ProjectDirs::from("", "", "ragfs").data_dir()` fallback."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "ragfs"
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        root = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+        return root / "ragfs" / "data"
+    return Path.home() / ".local" / "share" / "ragfs"
+
+
 def get_data_dir() -> Path:
     """Return the RAGFS data root, matching the CLI `data_dir()` lookup."""
     override = os.environ.get("RAGFS_DATA_DIR")
@@ -74,7 +86,7 @@ def get_data_dir() -> Path:
     xdg = os.environ.get("XDG_DATA_HOME")
     if xdg:
         return Path(xdg).expanduser() / "ragfs"
-    return DEFAULT_DATA_DIR
+    return _project_data_dir()
 
 
 def get_indices_dir() -> Path:

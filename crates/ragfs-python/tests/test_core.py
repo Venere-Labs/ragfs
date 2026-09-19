@@ -37,6 +37,15 @@ class TestSearchResult:
         assert hasattr(SearchResult, "document")
         assert hasattr(SearchResult, "score")
 
+    def test_search_result_creation(self):
+        """Test creating a SearchResult with proper float handling."""
+        from ragfs import Document, SearchResult
+
+        doc = Document(page_content="Content", metadata={"file": "test.txt"})
+        result = SearchResult(document=doc, score=0.95)
+        assert result.document.page_content == "Content"
+        assert result.score == pytest.approx(0.95, rel=1e-5)
+
 
 class TestOperationTypes:
     """Tests for Operation type."""
@@ -92,21 +101,21 @@ class TestOrganizeTypes:
         from ragfs import OrganizeStrategy
 
         strat = OrganizeStrategy.by_topic()
-        assert strat.name == "by_topic"
+        assert strat.strategy_type == "by_topic"
 
     def test_organize_strategy_by_type(self):
         """Test OrganizeStrategy.by_type factory."""
         from ragfs import OrganizeStrategy
 
         strat = OrganizeStrategy.by_type()
-        assert strat.name == "by_type"
+        assert strat.strategy_type == "by_type"
 
     def test_organize_strategy_by_project(self):
         """Test OrganizeStrategy.by_project factory."""
         from ragfs import OrganizeStrategy
 
         strat = OrganizeStrategy.by_project()
-        assert strat.name == "by_project"
+        assert strat.strategy_type == "by_project"
 
     def test_organize_request(self):
         """Test OrganizeRequest creation."""

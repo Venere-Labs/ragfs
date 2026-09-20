@@ -113,7 +113,7 @@ pub struct Chunk {
     pub embedding: Option<Vec<f32>>,
     /// Relative directory of the source file (e.g. `src/auth`). Empty at the index root.
     pub dir_path: String,
-    /// Number of directory components in [`dir_path`].
+    /// Number of directory components in `dir_path`.
     pub dir_depth: u16,
     /// Comma-separated relative path components, including the filename.
     pub path_components: String,

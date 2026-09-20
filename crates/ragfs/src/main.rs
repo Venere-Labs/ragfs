@@ -30,7 +30,6 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use daemonize::Daemonize;
 use ragfs_chunker::{ChunkerRegistry, CodeChunker, FixedSizeChunker, SemanticChunker};
 use ragfs_core::{Embedder, Indexer, VectorStore};
 #[cfg(feature = "candle")]
@@ -45,12 +44,15 @@ use ragfs_query::QueryExecutor;
 use ragfs_store::LanceStore;
 use serde::Serialize;
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
 use ragfs::config::{Config, data_dir};
+
+#[cfg(unix)]
+mod daemon;
 
 /// Embedding dimension for gte-small model.
 const EMBEDDING_DIM: usize = 384;
@@ -317,9 +319,9 @@ fn print_config_meta(action: &ConfigAction) {
 
 /// Fork to the background before Tokio or indexer threads are created.
 ///
-/// `daemonize` 0.5 keeps only the calling thread in the child, so the
+/// A later fork would keep only the calling thread in the child, so the
 /// watcher and event-loop threads started by `IndexerService::start` would
-/// not survive a later fork.
+/// not survive.
 fn maybe_daemonize_background_mount(cli: &mut Cli) -> Result<()> {
     let is_background = matches!(
         &cli.command,
@@ -372,17 +374,23 @@ fn maybe_daemonize_background_mount(cli: &mut Cli) -> Result<()> {
     let stdout = File::create(&log_path).context("Failed to create log file for stdout")?;
     let stderr = File::create(&log_path).context("Failed to create log file for stderr")?;
 
-    let daemonize = Daemonize::new()
-        .pid_file(&pid_path)
-        .chown_pid_file(true)
-        .working_directory("/")
-        .stdout(stdout)
-        .stderr(stderr);
+    #[cfg(unix)]
+    {
+        daemon::daemonize(daemon::DaemonOptions {
+            pid_file: &pid_path,
+            stdout,
+            stderr,
+            working_directory: Path::new("/"),
+            chown_pid_file: true,
+        })?;
+        Ok(())
+    }
 
-    daemonize
-        .start()
-        .map_err(|e| anyhow::anyhow!("Failed to daemonize: {e}"))?;
-    Ok(())
+    #[cfg(not(unix))]
+    {
+        let _ = (stdout, stderr, pid_path);
+        anyhow::bail!("Background mount is only supported on Unix; use --foreground")
+    }
 }
 
 fn main() -> Result<()> {

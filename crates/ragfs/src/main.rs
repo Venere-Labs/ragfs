@@ -201,7 +201,7 @@ struct StatusOutput {
 }
 
 /// Get the database path for a given source directory.
-fn get_db_path(source: &PathBuf) -> Result<PathBuf> {
+fn get_db_path(source: &Path) -> Result<PathBuf> {
     let data = data_dir().context("Failed to get data directory")?;
     let hash = blake3::hash(source.to_string_lossy().as_bytes());
     let hash_str = &hash.to_hex()[..16];
@@ -212,7 +212,7 @@ fn get_db_path(source: &PathBuf) -> Result<PathBuf> {
 ///
 /// Uses `$XDG_RUNTIME_DIR/ragfs/` if available, otherwise falls back to
 /// `$XDG_CACHE_HOME/ragfs/run/`.
-fn get_pid_path(source: &PathBuf) -> Result<PathBuf> {
+fn get_pid_path(source: &Path) -> Result<PathBuf> {
     let hash = blake3::hash(source.to_string_lossy().as_bytes());
     let hash_str = &hash.to_hex()[..16];
 
@@ -232,7 +232,7 @@ fn get_pid_path(source: &PathBuf) -> Result<PathBuf> {
 }
 
 /// Get the log file path for daemon output.
-fn get_log_path(source: &PathBuf) -> Result<PathBuf> {
+fn get_log_path(source: &Path) -> Result<PathBuf> {
     let hash = blake3::hash(source.to_string_lossy().as_bytes());
     let hash_str = &hash.to_hex()[..16];
 
@@ -548,6 +548,12 @@ async fn run(cli: Cli) -> Result<()> {
 
             // Cleanup reindex handler on unmount
             reindex_handler.abort();
+
+            // `mount2` returns only once the filesystem is unmounted, so the
+            // pid file is stale from here on.
+            if !foreground && let Ok(pid_path) = get_pid_path(&source) {
+                let _ = std::fs::remove_file(pid_path);
+            }
         }
 
         Commands::Index { path, force, watch } => {

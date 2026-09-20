@@ -300,6 +300,31 @@ class TestServerConfiguration:
         monkeypatch.setenv("APPDATA", str(tmp_path))
         assert get_data_dir() == tmp_path / "ragfs" / "data"
 
+    def test_get_data_dir_xdg_matches_directories(self, tmp_path, monkeypatch):
+        """XDG_DATA_HOME only on Linux-like OS and only when absolute."""
+        from ragfs_mcp.server import get_data_dir
+
+        monkeypatch.delenv("RAGFS_DATA_DIR", raising=False)
+        xdg = tmp_path / "xdg-data"
+
+        monkeypatch.setattr("ragfs_mcp.server.sys.platform", "linux")
+        monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
+        assert get_data_dir() == xdg / "ragfs"
+
+        monkeypatch.setenv("XDG_DATA_HOME", "rel-data")
+        assert get_data_dir() == Path.home() / ".local" / "share" / "ragfs"
+
+        monkeypatch.setenv("XDG_DATA_HOME", "~/xdg-data")
+        assert get_data_dir() == Path.home() / ".local" / "share" / "ragfs"
+
+        monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
+        monkeypatch.setattr("ragfs_mcp.server.sys.platform", "darwin")
+        assert get_data_dir() == Path.home() / "Library" / "Application Support" / "ragfs"
+
+        monkeypatch.setattr("ragfs_mcp.server.sys.platform", "win32")
+        monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+        assert get_data_dir() == tmp_path / "Roaming" / "ragfs" / "data"
+
     def test_get_model_path(self):
         """Test model path."""
         from ragfs_mcp.server import get_model_path

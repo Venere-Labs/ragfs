@@ -83,9 +83,10 @@ def get_data_dir() -> Path:
     if override:
         # CLI `data_dir()` uses PathBuf::from — no ~ expansion.
         return Path(override)
+    # directories 5.0.1: XDG_DATA_HOME only on Linux-like OS, and only if absolute.
     xdg = os.environ.get("XDG_DATA_HOME")
-    if xdg:
-        return Path(xdg).expanduser() / "ragfs"
+    if xdg and sys.platform not in ("darwin", "win32") and os.path.isabs(xdg):
+        return Path(xdg) / "ragfs"
     return _project_data_dir()
 
 

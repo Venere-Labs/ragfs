@@ -366,13 +366,14 @@ fn xlsx_sheet_to_text(xml: &str, sst: &[String]) -> String {
     let mut rest = xml;
     let mut shared = false;
     let mut in_v = false;
+    let mut in_f = false;
     let mut index_buf = String::new();
 
     while let Some(start) = rest.find('<') {
         if start > 0 {
             if shared && in_v {
                 index_buf.push_str(&rest[..start]);
-            } else if !shared {
+            } else if !shared && !in_f {
                 push_decoded(&mut out, &rest[..start]);
             }
         }
@@ -381,21 +382,27 @@ fn xlsx_sheet_to_text(xml: &str, sst: &[String]) -> String {
             break;
         };
         let tag = &after[..end_rel];
-        let name = tag_name(tag);
+        let local = local_name(tag_name(tag));
         let is_end = tag.starts_with('/');
 
-        if !is_end && name == "c" {
+        if !is_end && local == "c" {
             shared = cell_is_shared_string(tag);
+            in_f = false;
             index_buf.clear();
-        } else if is_end && name == "c" {
+        } else if is_end && local == "c" {
             shared = false;
             in_v = false;
+            in_f = false;
             index_buf.clear();
             out.push('\n');
-        } else if !is_end && name == "v" {
+        } else if !is_end && local == "f" {
+            in_f = true;
+        } else if is_end && local == "f" {
+            in_f = false;
+        } else if !is_end && local == "v" {
             in_v = true;
             index_buf.clear();
-        } else if is_end && name == "v" {
+        } else if is_end && local == "v" {
             if shared {
                 if let Ok(i) = index_buf.trim().parse::<usize>()
                     && let Some(s) = sst.get(i)
@@ -408,12 +415,12 @@ fn xlsx_sheet_to_text(xml: &str, sst: &[String]) -> String {
                 index_buf.clear();
             }
             in_v = false;
-        } else if is_end && is_block_tag(name) {
+        } else if is_end && is_block_local(local) {
             out.push('\n');
         }
         rest = &after[end_rel + 1..];
     }
-    if !rest.is_empty() && !shared {
+    if !rest.is_empty() && !shared && !in_f {
         push_decoded(&mut out, rest);
     }
     normalize_ws(&out)
@@ -424,34 +431,42 @@ fn cell_is_shared_string(tag: &str) -> bool {
 }
 
 fn inner_elements<'a>(xml: &'a str, local: &str) -> Vec<&'a str> {
-    let open = format!("<{local}");
-    let close = format!("</{local}>");
     let mut rest = xml;
     let mut out = Vec::new();
-    while let Some(i) = rest.find(&open) {
-        let after = &rest[i + open.len()..];
-        let Some(next) = after.chars().next() else {
-            break;
-        };
-        if next != '>' && next != '/' && !next.is_whitespace() {
-            rest = after;
-            continue;
-        }
+    while let Some(i) = rest.find('<') {
+        let after = &rest[i + 1..];
         let Some(gt) = after.find('>') else {
             break;
         };
-        if after[..gt].trim_end().ends_with('/') {
-            rest = &after[gt + 1..];
-            continue;
+        let tag = &after[..gt];
+        let is_end = tag.starts_with('/');
+        let is_empty = tag.ends_with('/');
+        if !is_end && !is_empty && local_name(tag_name(tag)) == local {
+            let inner = &after[gt + 1..];
+            if let Some(end) = find_close_local(inner, local) {
+                out.push(&inner[..end]);
+                rest = &inner[end..];
+                continue;
+            }
         }
-        let inner = &after[gt + 1..];
-        let Some(end) = inner.find(&close) else {
-            break;
-        };
-        out.push(&inner[..end]);
-        rest = &inner[end + close.len()..];
+        rest = &after[gt + 1..];
     }
     out
+}
+
+fn find_close_local(inner: &str, local: &str) -> Option<usize> {
+    let mut offset = 0;
+    let mut rest = inner;
+    while let Some(i) = rest.find("</") {
+        let after = &rest[i + 2..];
+        let gt = after.find('>')?;
+        if local_name(tag_name(&after[..gt])) == local {
+            return Some(offset + i);
+        }
+        offset += i + 2 + gt + 1;
+        rest = &inner[offset..];
+    }
+    None
 }
 
 fn xml_to_text(xml: &str) -> String {
@@ -468,29 +483,37 @@ fn xml_to_text(xml: &str) -> String {
             break;
         };
         let tag = &after[..end_rel];
-        let name = tag_name(tag);
+        let local = local_name(tag_name(tag));
         let is_end = tag.starts_with('/');
         let is_empty = tag.ends_with('/');
 
-        if !is_end && matches!(name, "w:delText" | "w:del") {
+        if !is_end && matches!(local, "delText" | "del") {
             if !is_empty {
                 skip_depth = skip_depth.saturating_add(1);
             }
-        } else if is_end && matches!(name, "w:delText" | "w:del") {
+        } else if is_end && matches!(local, "delText" | "del") {
             skip_depth = skip_depth.saturating_sub(1);
         }
 
-        if !is_end && name == "w:vanish" && !vanish_disabled(tag) {
+        if !is_end && local == "vanish" && !vanish_disabled(tag) {
             vanish_run = true;
         }
-        if is_end && name == "w:r" {
+        if is_end && local == "r" {
             vanish_run = false;
         }
 
-        if skip_depth == 0 && tag.starts_with('/') && is_block_tag(name) {
-            out.push('\n');
-        } else if skip_depth == 0 && !vanish_run && matches!(name, "w:tab" | "w:br" | "br") {
-            out.push(' ');
+        if skip_depth == 0 && !vanish_run {
+            if is_end && is_block_local(local) {
+                out.push('\n');
+            } else if !is_end && local == "s" {
+                for _ in 0..odt_space_count(tag) {
+                    out.push(' ');
+                }
+            } else if matches!(local, "tab" | "br") {
+                out.push(' ');
+            } else if local == "line-break" {
+                out.push('\n');
+            }
         }
         rest = &after[end_rel + 1..];
     }
@@ -501,10 +524,10 @@ fn xml_to_text(xml: &str) -> String {
 }
 
 fn vanish_disabled(tag: &str) -> bool {
-    tag.contains("w:val=\"0\"")
-        || tag.contains("w:val='0'")
-        || tag.contains("w:val=\"false\"")
-        || tag.contains("w:val='false'")
+    tag.contains("val=\"0\"")
+        || tag.contains("val='0'")
+        || tag.contains("val=\"false\"")
+        || tag.contains("val='false'")
 }
 
 fn tag_name(tag: &str) -> &str {
@@ -515,11 +538,29 @@ fn tag_name(tag: &str) -> &str {
         .unwrap_or("")
 }
 
-fn is_block_tag(name: &str) -> bool {
-    matches!(
-        name,
-        "w:p" | "a:p" | "text:p" | "text:h" | "p" | "tr" | "si" | "c"
-    )
+fn local_name(qname: &str) -> &str {
+    qname.rsplit_once(':').map_or(qname, |(_, local)| local)
+}
+
+fn is_block_local(local: &str) -> bool {
+    matches!(local, "p" | "h" | "tr" | "si" | "c")
+}
+
+fn odt_space_count(tag: &str) -> usize {
+    for key in ["text:c=", "c="] {
+        for quote in ['"', '\''] {
+            let pat = format!("{key}{quote}");
+            if let Some(i) = tag.find(&pat) {
+                let rest = &tag[i + pat.len()..];
+                if let Some(end) = rest.find(quote)
+                    && let Ok(n) = rest[..end].parse::<usize>()
+                {
+                    return n.max(1);
+                }
+            }
+        }
+    }
+    1
 }
 
 fn push_decoded(out: &mut String, raw: &str) {
@@ -618,6 +659,14 @@ mod tests {
     }
 
     #[test]
+    fn xml_to_text_emits_odt_whitespace() {
+        assert_eq!(xml_to_text("A<text:s/>B"), "A B");
+        assert_eq!(xml_to_text(r#"A<text:s text:c="3"/>B"#), "A B");
+        assert_eq!(xml_to_text("A<text:tab/>B"), "A B");
+        assert_eq!(xml_to_text("A<text:line-break/>B"), "A\nB");
+    }
+
+    #[test]
     fn xml_to_text_skips_deleted_and_vanished() {
         let xml = r"<w:p><w:r><w:t>Keep</w:t></w:r><w:del><w:r><w:delText>Gone</w:delText></w:r></w:del><w:r><w:rPr><w:vanish/></w:rPr><w:t>Hidden</w:t></w:r><w:r><w:t>Visible</w:t></w:r></w:p>";
         let text = xml_to_text(xml);
@@ -666,6 +715,51 @@ mod tests {
         let extractor = OfficeExtractor::new();
         let content = extractor.extract_bytes(&bytes, DOCX_MIME).await.unwrap();
         assert!(content.text.contains("Indexed from DOCX"));
+    }
+
+    #[tokio::test]
+    async fn extracts_xlsx_skips_formula_keeps_cached_value() {
+        let sheet = r#"<?xml version="1.0"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row><c><f>SUM(A1:A2)</f><v>3</v></c></row>
+  </sheetData>
+</worksheet>"#;
+        let bytes = zip_with(&[("xl/worksheets/sheet1.xml", sheet)]);
+        let extractor = OfficeExtractor::new();
+        let content = extractor.extract_bytes(&bytes, XLSX_MIME).await.unwrap();
+        assert!(content.text.contains('3'));
+        assert!(!content.text.contains("SUM"));
+    }
+
+    #[tokio::test]
+    async fn extracts_xlsx_prefixed_shared_string_cells() {
+        let sst = r#"<?xml version="1.0"?>
+<x:sst xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:si><x:t>Prefixed</x:t></x:si>
+</x:sst>"#;
+        let sheet = r#"<?xml version="1.0"?>
+<x:worksheet xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <x:sheetData>
+    <x:row><x:c t="s"><x:v>0</x:v></x:c></x:row>
+  </x:sheetData>
+</x:worksheet>"#;
+        let bytes = zip_with(&[
+            ("xl/sharedStrings.xml", sst),
+            ("xl/worksheets/sheet1.xml", sheet),
+        ]);
+        let extractor = OfficeExtractor::new();
+        let content = extractor.extract_bytes(&bytes, XLSX_MIME).await.unwrap();
+        assert!(content.text.contains("Prefixed"));
+        assert!(!content.text.split_whitespace().any(|w| w == "0"));
+    }
+
+    #[test]
+    fn xml_to_text_skips_prefixed_deleted_text() {
+        let xml = r"<ns:p><ns:r><ns:t>Keep</ns:t></ns:r><ns:del><ns:r><ns:delText>Gone</ns:delText></ns:r></ns:del></ns:p>";
+        let text = xml_to_text(xml);
+        assert!(text.contains("Keep"));
+        assert!(!text.contains("Gone"));
     }
 
     #[tokio::test]

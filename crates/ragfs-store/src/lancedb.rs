@@ -386,10 +386,9 @@ impl LanceStore {
                  (adding directory-scope columns)"
             );
             table
-                .add_columns(
-                    NewColumnTransform::AllNulls(Arc::new(Schema::new(missing))),
-                    None,
-                )
+                .add_columns()
+                .transform(NewColumnTransform::AllNulls(Arc::new(Schema::new(missing))))
+                .execute()
                 .await
                 .map_err(|e| {
                     StoreError::Schema(Self::schema_migration_failed_message(&self.db_path, &e))

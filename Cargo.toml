@@ -19,7 +19,7 @@ authors = ["Venere Labs"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Venere-Labs/ragfs"
-rust-version = "1.88"
+rust-version = "1.91"
 
 [workspace.dependencies]
 # Internal crates (default-features = false for proper feature propagation)

@@ -203,9 +203,9 @@ jobs:
         run: |
           source .venv/bin/activate
           cd crates/ragfs-python
-          pytest tests/test_llamaindex/ -v -m "not slow and not requires_model"
+          pytest tests/test_llamaindex/ -v -m "not slow"
       - name: Run Haystack tests
         run: |
           source .venv/bin/activate
           cd crates/ragfs-python
-          pytest tests/test_haystack/ -v -m "not slow and not requires_model"
+          pytest tests/test_haystack/ -v -m "not slow"

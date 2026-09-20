@@ -26,7 +26,7 @@
 //! ragfs query ~/Documents "auth" --scope src/auth
 //!
 //! # After upgrading RAGFS, existing indexes are migrated on open.
-//! # Optional: rewrite index-root-relative dir_path values
+//! # Optional: rewrite index-root-relative `dir_path` values
 //! # ragfs index ~/Documents --force
 //!
 //! # Get JSON output
@@ -116,7 +116,7 @@ enum Commands {
 
         /// Force reindexing of all files (skip content-hash reuse; rewrite directory-scope fields).
         /// Schema upgrades for existing Lance indexes run automatically on open — if that
-        /// migration fails, delete the index directory and re-run with --force.
+        /// migration fails, delete the index directory and re-run with `--force`.
         #[arg(short, long)]
         force: bool,
 
@@ -143,7 +143,7 @@ enum Commands {
 
         /// Restrict results to this directory (relative to the index root) and its subdirectories.
         /// Pre-upgrade indexes are migrated on open; run `ragfs index --force` afterward to store
-        /// index-root-relative dir_path values (see `USER_GUIDE`).
+        /// index-root-relative `dir_path` values (see `USER_GUIDE`).
         #[arg(long)]
         scope: Option<String>,
     },

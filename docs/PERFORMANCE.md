@@ -32,7 +32,7 @@ Typical indexing throughput on modern hardware (SSD, 8+ cores):
 
 | Query Type | Latency | Notes |
 |------------|---------|-------|
-| Vector search | 5-50ms | Exact scan on small tables; IVF-PQ ANN at ≥256 rows |
+| Vector search | 5-50ms | Exact scan on small tables; best-effort IVF-PQ ANN at ≥256 rows (exact scan fallback) |
 | Hybrid search | 10-100ms | Adds full-text component |
 | Similar files | 20-100ms | Multiple queries per file |
 

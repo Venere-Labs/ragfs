@@ -12,6 +12,7 @@ use lancedb::index::Index;
 use lancedb::index::scalar::{FtsIndexBuilder, FullTextSearchQuery};
 use lancedb::index::vector::IvfPqIndexBuilder;
 use lancedb::query::{ExecutableQuery, QueryBase, QueryExecutionOptions};
+use lancedb::table::{OptimizeAction, OptimizeOptions};
 use lancedb::{Connection, DistanceType, Table, connect};
 use ragfs_core::{
     Chunk, ChunkMetadata, ContentType, DistanceMetric, FileRecord, FileStatus, SearchFilter,
@@ -28,6 +29,8 @@ const CHUNKS_TABLE: &str = "chunks";
 const FILES_TABLE: &str = "files";
 /// Lance IVF training uses a default sample rate of 256. Below this, stay on exact scan.
 const MIN_ANN_ROWS: usize = 256;
+/// Product default search metric (`gte-small`). Train IVF-PQ with this so ANN is valid.
+const ANN_INDEX_METRIC: DistanceMetric = DistanceMetric::Cosine;
 
 /// LanceDB-based vector store.
 pub struct LanceStore {
@@ -71,19 +74,59 @@ impl LanceStore {
         row_count >= MIN_ANN_ROWS
     }
 
-    async fn has_vector_index(table: &Table) -> bool {
+    /// Refresh IVF-PQ once the unindexed tail is large enough to train another sample.
+    pub(crate) fn should_refresh_ann_index(unindexed_rows: usize) -> bool {
+        unindexed_rows >= MIN_ANN_ROWS
+    }
+
+    /// ANN is trained as cosine; other metrics must not use the index.
+    pub(crate) fn ann_index_covers_metric(metric: DistanceMetric) -> bool {
+        metric == ANN_INDEX_METRIC
+    }
+
+    async fn vector_index_name(table: &Table) -> Option<String> {
         match table.list_indices().await {
             Ok(indices) => indices
-                .iter()
-                .any(|idx| idx.columns.iter().any(|col| col == "vector")),
-            Err(_) => false,
+                .into_iter()
+                .find(|idx| idx.columns.iter().any(|col| col == "vector"))
+                .map(|idx| idx.name),
+            Err(_) => None,
+        }
+    }
+
+    async fn refresh_vector_index(table: &Table, index_name: &str) {
+        let unindexed = match table.index_stats(index_name).await {
+            Ok(Some(stats)) => stats.num_unindexed_rows,
+            Ok(None) => return,
+            Err(e) => {
+                debug!("Skipping ANN refresh; could not read index stats: {e}");
+                return;
+            }
+        };
+
+        if !Self::should_refresh_ann_index(unindexed) {
+            debug!("Skipping ANN refresh: {unindexed} unindexed rows < {MIN_ANN_ROWS}");
+            return;
+        }
+
+        info!("Refreshing IVF-PQ ANN index ({unindexed} unindexed rows)");
+        match table
+            .optimize(OptimizeAction::Index(
+                OptimizeOptions::append().index_names(vec![index_name.to_string()]),
+            ))
+            .await
+        {
+            Ok(_) => info!("IVF-PQ ANN index refreshed"),
+            Err(e) => warn!("IVF-PQ ANN index refresh failed (unindexed tail stays exact): {e}"),
         }
     }
 
     /// Best-effort IVF-PQ on `vector`. Small tables keep exact scan.
+    /// Existing indexes are incrementally refreshed after large post-threshold appends.
     async fn ensure_vector_index(&self) -> Result<(), StoreError> {
         let table = self.get_chunks_table().await?;
-        if Self::has_vector_index(&table).await {
+        if let Some(name) = Self::vector_index_name(&table).await {
+            Self::refresh_vector_index(&table, &name).await;
             return Ok(());
         }
 
@@ -100,9 +143,12 @@ impl LanceStore {
             return Ok(());
         }
 
-        info!("Creating IVF-PQ ANN index on vector ({count} rows)");
+        info!("Creating IVF-PQ ANN index on vector ({count} rows, cosine)");
         match table
-            .create_index(&["vector"], Index::IvfPq(IvfPqIndexBuilder::default()))
+            .create_index(
+                &["vector"],
+                Index::IvfPq(IvfPqIndexBuilder::default().distance_type(DistanceType::Cosine)),
+            )
             .execute()
             .await
         {
@@ -530,6 +576,10 @@ impl VectorStore for LanceStore {
             .distance_type(distance_type_from_metric(query.metric))
             .limit(query.limit);
 
+        if !Self::ann_index_covers_metric(query.metric) {
+            search_q = search_q.bypass_vector_index();
+        }
+
         if let Some(ref filter) = filter_sql {
             debug!("Applying search filter: {filter}");
             search_q = search_q.only_if(filter);
@@ -582,6 +632,10 @@ impl VectorStore for LanceStore {
             .map_err(|e| StoreError::Query(format!("Failed to create hybrid query: {e}")))?
             .distance_type(distance_type_from_metric(query.metric))
             .limit(query.limit);
+
+        if !Self::ann_index_covers_metric(query.metric) {
+            search_q = search_q.bypass_vector_index();
+        }
 
         if let Some(ref filter) = filter_sql {
             debug!("Applying hybrid search filter: {filter}");
@@ -1810,6 +1864,24 @@ mod tests {
         assert!(!LanceStore::should_build_ann_index(255));
         assert!(LanceStore::should_build_ann_index(256));
         assert!(LanceStore::should_build_ann_index(10_000));
+    }
+
+    #[test]
+    fn test_should_refresh_ann_index_after_post_threshold_appends() {
+        // Repeated-batch ingest: first batch crosses 256, later batches are unindexed.
+        assert!(LanceStore::should_build_ann_index(300));
+        assert!(!LanceStore::should_refresh_ann_index(0));
+        assert!(!LanceStore::should_refresh_ann_index(255));
+        assert!(LanceStore::should_refresh_ann_index(256));
+        assert!(LanceStore::should_refresh_ann_index(700));
+        assert!(LanceStore::should_refresh_ann_index(9_700));
+    }
+
+    #[test]
+    fn test_ann_index_covers_cosine_only() {
+        assert!(LanceStore::ann_index_covers_metric(DistanceMetric::Cosine));
+        assert!(!LanceStore::ann_index_covers_metric(DistanceMetric::L2));
+        assert!(!LanceStore::ann_index_covers_metric(DistanceMetric::Dot));
     }
 
     #[tokio::test]

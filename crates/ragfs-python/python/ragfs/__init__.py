@@ -57,40 +57,42 @@ AI-Powered Organization (Propose-Review-Apply pattern):
 """
 
 from ragfs._core import (
+    BatchResult,
+    CleanupAnalysis,
+    CleanupCandidate,
     # Core types
     Document,
-    SearchResultPy as SearchResult,
-    PyChunk,
-    # Core components
-    RagfsEmbeddings,
-    RagfsVectorStore,
-    RagfsDocumentLoader,
-    RagfsTextSplitter,
-    RagfsRetriever,
-    # Safety layer (soft delete, undo, history)
-    RagfsSafetyManager,
-    TrashEntry,
-    HistoryEntry,
-    HistoryOperation,
-    # Semantic operations (AI-powered file organization)
-    RagfsSemanticManager,
-    OrganizeStrategy,
-    OrganizeRequest,
-    SemanticPlan,
-    PlanAction,
-    PlanImpact,
-    SimilarFile,
-    SimilarFilesResult,
     DuplicateEntry,
     DuplicateGroup,
     DuplicateGroups,
-    CleanupCandidate,
-    CleanupAnalysis,
-    # Operations manager (structured file ops with JSON feedback)
-    RagfsOpsManager,
+    HistoryEntry,
+    HistoryOperation,
     Operation,
     OperationResult,
-    BatchResult,
+    OrganizeRequest,
+    OrganizeStrategy,
+    PlanAction,
+    PlanImpact,
+    PyChunk,
+    RagfsDocumentLoader,
+    # Core components
+    RagfsEmbeddings,
+    # Operations manager (structured file ops with JSON feedback)
+    RagfsOpsManager,
+    RagfsRetriever,
+    # Safety layer (soft delete, undo, history)
+    RagfsSafetyManager,
+    # Semantic operations (AI-powered file organization)
+    RagfsSemanticManager,
+    RagfsTextSplitter,
+    RagfsVectorStore,
+    SemanticPlan,
+    SimilarFile,
+    SimilarFilesResult,
+    TrashEntry,
+)
+from ragfs._core import (
+    SearchResultPy as SearchResult,
 )
 
 __all__ = [

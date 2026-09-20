@@ -45,7 +45,6 @@ import asyncio
 import os
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
 
 # Load .env file if present (for API keys and defaults)
 try:
@@ -79,7 +78,7 @@ class LLMProvider(Enum):
     OLLAMA = "ollama"
 
 
-def get_llm(provider: LLMProvider, model: Optional[str] = None):
+def get_llm(provider: LLMProvider, model: str | None = None):
     """Create an LLM instance based on provider.
 
     Args:
@@ -137,7 +136,7 @@ def get_llm(provider: LLMProvider, model: Optional[str] = None):
     raise ValueError(f"Unknown provider: {provider}")
 
 
-def format_docs(docs: List[Document]) -> str:
+def format_docs(docs: list[Document]) -> str:
     """Format retrieved documents as context string.
 
     Args:
@@ -244,7 +243,7 @@ async def query_chain(
     question: str,
     db_path: str,
     provider: LLMProvider,
-    model: Optional[str] = None,
+    model: str | None = None,
     k: int = 4,
     hybrid: bool = True,
     stream: bool = False,
@@ -290,7 +289,7 @@ async def search_only(
     db_path: str,
     k: int = 4,
     hybrid: bool = True,
-) -> List[tuple]:
+) -> list[tuple]:
     """Search without LLM, showing retrieved documents.
 
     Args:

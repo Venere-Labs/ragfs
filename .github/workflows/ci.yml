@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -146,26 +147,29 @@ jobs:
       - name: Create virtual environment
         run: |
           python -m venv .venv
-          echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> "$GITHUB_ENV"
-          echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
       - name: Install Python dependencies
         run: |
+          source .venv/bin/activate
           pip install maturin pytest pytest-asyncio pytest-cov
       - name: Build ragfs Python package
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
           maturin develop --features "candle,lancedb"
       - name: Run ragfs Python tests
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
           pytest tests/ -v --ignore=tests/test_llamaindex --ignore=tests/test_haystack -m "not slow and not requires_model"
       - name: Install MCP dependencies
         run: |
-          pip install "mcp>=1.2.0,<2"
+          source .venv/bin/activate
+          pip install mcp
           cd crates/ragfs-mcp
           pip install -e .
       - name: Run MCP tests
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-mcp
           pytest tests/ -v -m "not slow"
 
@@ -185,38 +189,23 @@ jobs:
       - name: Create virtual environment
         run: |
           python -m venv .venv
-          echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> "$GITHUB_ENV"
-          echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
       - name: Install Python dependencies
         run: |
+          source .venv/bin/activate
           pip install maturin pytest pytest-asyncio pytest-cov
           pip install llama-index-core haystack-ai
       - name: Build ragfs Python package
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
           maturin develop --features "candle,lancedb"
-      # All LlamaIndex/Haystack tests are marked requires_model, so this
-      # marker expression deselects every test (pytest exit 5). Treat that
-      # as success; real failures still fail the job.
       - name: Run LlamaIndex tests
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
-          pytest tests/test_llamaindex/ -v -m "not slow and not requires_model" || {
-            status=$?
-            if [ "$status" -eq 5 ]; then
-              echo "No tests selected (pytest exit 5); treating as success"
-              exit 0
-            fi
-            exit "$status"
-          }
+          pytest tests/test_llamaindex/ -v -m "not slow"
       - name: Run Haystack tests
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
-          pytest tests/test_haystack/ -v -m "not slow and not requires_model" || {
-            status=$?
-            if [ "$status" -eq 5 ]; then
-              echo "No tests selected (pytest exit 5); treating as success"
-              exit 0
-            fi
-            exit "$status"
-          }
+          pytest tests/test_haystack/ -v -m "not slow"

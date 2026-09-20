@@ -184,7 +184,8 @@ Arguments:
   <PATH>  Directory to index
 
 Options:
-  -f, --force  Force reindexing of all files
+  -f, --force  Force reindexing of all files (rewrites directory-scope fields;
+               schema upgrades for old Lance indexes run automatically on open)
   -w, --watch  Watch for changes after initial indexing
 ```
 
@@ -199,6 +200,8 @@ Arguments:
 
 Options:
   -l, --limit <LIMIT>  Maximum results [default: 10]
+      --scope <DIR>    Restrict results to this directory and its subdirectories
+                       (existing indexes are migrated on open; see USER_GUIDE)
 ```
 
 ### status

@@ -198,6 +198,11 @@ impl DirectoryScope {
 /// Match a stored `dir_path` against a scope prefix.
 ///
 /// Empty / `.` scope matches everything (no restriction).
+///
+/// Besides an exact directory or a subdirectory (`src/auth` matches
+/// `src/auth/oauth`), a path-component-aligned suffix also matches. That
+/// covers schema-v1 indexes whose `dir_path` was backfilled from an
+/// absolute `file_path` (`project/src/auth` still matches `--scope src/auth`).
 #[must_use]
 pub fn dir_path_matches_scope(dir_path: &str, scope: &str) -> bool {
     let scope = DirectoryScope::normalize_prefix(scope);
@@ -205,7 +210,10 @@ pub fn dir_path_matches_scope(dir_path: &str, scope: &str) -> bool {
         return true;
     }
     let dir = DirectoryScope::normalize_prefix(dir_path);
-    dir == scope || dir.starts_with(&format!("{scope}/"))
+    dir == scope
+        || dir.starts_with(&format!("{scope}/"))
+        || dir.ends_with(&format!("/{scope}"))
+        || dir.contains(&format!("/{scope}/"))
 }
 
 /// Type of chunk content.
@@ -942,6 +950,18 @@ mod tests {
         assert!(!dir_path_matches_scope("src/auth-backup", "src/auth"));
         assert!(dir_path_matches_scope("src", ""));
         assert!(dir_path_matches_scope("src", "."));
+    }
+
+    #[test]
+    fn test_dir_path_matches_scope_migrated_absolute_suffix() {
+        // from_file_path("/project/src/auth/login.rs") → "project/src/auth"
+        assert!(dir_path_matches_scope("project/src/auth", "src/auth"));
+        assert!(dir_path_matches_scope("project/src/auth/oauth", "src/auth"));
+        assert!(dir_path_matches_scope("project/src", "src"));
+        assert!(dir_path_matches_scope("project/src/auth", "src"));
+        assert!(!dir_path_matches_scope("project/src-backup", "src"));
+        assert!(!dir_path_matches_scope("project/other", "src/auth"));
+        assert!(!dir_path_matches_scope("project/author/notes", "auth"));
     }
 
     // ==================== FileEvent Tests ====================

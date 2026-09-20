@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Directory-scoped vector search: persist relative `dir_path` on chunks and filter with `ragfs query --scope <dir>` (exact directory or subdirectory; IVF-PQ ANN is unchanged)
+- Lance chunks schema v2 migration: existing indexes gain `dir_path` / `dir_depth` / `path_components` on open (sidecar `ragfs-schema.json`); `--force` is not a schema upgrade
 - FUSE `mount2` runs on a dedicated OS thread so callbacks can `block_on` without panicking
 - Best-effort IVF-PQ ANN index on `vector` when a Lance table has at least 256 rows (cosine-trained; incrementally refreshed after large appends; L2/Dot and failed builds stay exact)
 - Office text extraction for `.docx`, `.xlsx`, `.pptx`, and `.odt` (ZIP+XML; not binary `.doc`)

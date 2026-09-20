@@ -12,15 +12,19 @@ use lancedb::index::Index;
 use lancedb::index::scalar::{FtsIndexBuilder, FullTextSearchQuery};
 use lancedb::index::vector::IvfPqIndexBuilder;
 use lancedb::query::{ExecutableQuery, QueryBase, QueryExecutionOptions};
-use lancedb::table::{OptimizeAction, OptimizeOptions};
+use lancedb::table::{NewColumnTransform, OptimizeAction, OptimizeOptions};
 use lancedb::{Connection, DistanceType, Table, connect};
 use ragfs_core::{
     Chunk, ChunkMetadata, ContentType, DirectoryScope, DistanceMetric, FileRecord, FileStatus,
     SearchFilter, SearchQuery, SearchResult, StoreError, StoreStats, VectorStore,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use crate::schema::{
+    CHUNKS_SCHEMA_VERSION, SCHEMA_SIDECAR_FILENAME, SchemaSidecar, missing_scope_columns,
+};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -303,6 +307,169 @@ impl LanceStore {
         Ok(table_lock.as_ref().unwrap().clone())
     }
 
+    fn schema_sidecar_path(&self) -> PathBuf {
+        self.db_path
+            .parent()
+            .unwrap_or(self.db_path.as_path())
+            .join(SCHEMA_SIDECAR_FILENAME)
+    }
+
+    async fn read_schema_sidecar(&self) -> Option<u32> {
+        let bytes = tokio::fs::read(self.schema_sidecar_path()).await.ok()?;
+        serde_json::from_slice::<SchemaSidecar>(&bytes)
+            .ok()
+            .map(|s| s.chunks_schema_version)
+    }
+
+    async fn write_schema_sidecar(&self, version: u32) -> Result<(), StoreError> {
+        let path = self.schema_sidecar_path();
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                StoreError::Schema(format!(
+                    "Failed to create schema sidecar directory {}: {e}",
+                    parent.display()
+                ))
+            })?;
+        }
+        let json = serde_json::to_string_pretty(&SchemaSidecar {
+            chunks_schema_version: version,
+        })
+        .map_err(|e| StoreError::Schema(format!("Failed to serialize schema sidecar: {e}")))?;
+        tokio::fs::write(&path, json).await.map_err(|e| {
+            StoreError::Schema(format!(
+                "Failed to write schema sidecar {}: {e}",
+                path.display()
+            ))
+        })?;
+        Ok(())
+    }
+
+    fn schema_migration_failed_message(db_path: &Path, error: &impl std::fmt::Display) -> String {
+        let index_dir = db_path.parent().unwrap_or(db_path);
+        format!(
+            "Existing Lance index is missing directory-scope columns \
+             (dir_path, dir_depth, path_components) and automatic schema \
+             migration to v{CHUNKS_SCHEMA_VERSION} failed ({error}). \
+             The index was not deleted. Remove `{}` and run \
+             `ragfs index <dir> --force` to rebuild.",
+            index_dir.display()
+        )
+    }
+
+    /// Detect a pre-v2 chunks table, add scope columns, and backfill from `file_path`.
+    ///
+    /// `--force` rewrites index-root-relative `dir_path` on new upserts; it cannot
+    /// add Lance columns. This path is what existing indexes need on upgrade.
+    async fn ensure_chunks_schema_v2(&self) -> Result<(), StoreError> {
+        let table = {
+            let conn = self.get_connection().await?;
+            conn.open_table(CHUNKS_TABLE)
+                .execute()
+                .await
+                .map_err(|e| StoreError::Init(format!("Failed to open chunks table: {e}")))?
+        };
+
+        let schema = table
+            .schema()
+            .await
+            .map_err(|e| StoreError::Schema(format!("Failed to read chunks schema: {e}")))?;
+        let missing = missing_scope_columns(&schema);
+        let sidecar_version = self.read_schema_sidecar().await.unwrap_or(0);
+
+        if missing.is_empty() && sidecar_version >= CHUNKS_SCHEMA_VERSION {
+            return Ok(());
+        }
+
+        if !missing.is_empty() {
+            info!(
+                "Migrating chunks table to schema v{CHUNKS_SCHEMA_VERSION} \
+                 (adding directory-scope columns)"
+            );
+            table
+                .add_columns(
+                    NewColumnTransform::AllNulls(Arc::new(Schema::new(missing))),
+                    None,
+                )
+                .await
+                .map_err(|e| {
+                    StoreError::Schema(Self::schema_migration_failed_message(&self.db_path, &e))
+                })?;
+
+            // Drop the cached handle so later ops see the evolved schema.
+            *self.chunks_table.write().await = None;
+        }
+
+        self.backfill_scope_columns().await?;
+        self.write_schema_sidecar(CHUNKS_SCHEMA_VERSION).await?;
+        info!("Chunks table schema is v{CHUNKS_SCHEMA_VERSION}");
+        Ok(())
+    }
+
+    async fn backfill_scope_columns(&self) -> Result<(), StoreError> {
+        let table = self.get_chunks_table().await?;
+        let mut results = table
+            .query()
+            .only_if("dir_path IS NULL OR dir_path = ''")
+            .execute()
+            .await
+            .map_err(|e| {
+                StoreError::Schema(format!(
+                    "Failed to scan chunks for directory-scope backfill: {e}"
+                ))
+            })?;
+
+        let mut paths = HashSet::new();
+        while let Some(batch) = results.try_next().await.map_err(|e| {
+            StoreError::Schema(format!(
+                "Failed to read chunks for directory-scope backfill: {e}"
+            ))
+        })? {
+            let Some(file_paths) = batch
+                .column_by_name("file_path")
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+            else {
+                continue;
+            };
+            for i in 0..batch.num_rows() {
+                if !file_paths.is_null(i) {
+                    paths.insert(file_paths.value(i).to_string());
+                }
+            }
+        }
+
+        if paths.is_empty() {
+            return Ok(());
+        }
+
+        info!(
+            "Backfilling directory-scope columns for {} file path(s)",
+            paths.len()
+        );
+        for path in paths {
+            let scope = DirectoryScope::from_file_path(Path::new(&path));
+            table
+                .update()
+                .only_if(format!("file_path = '{}'", escape_sql_literal(&path)))
+                .column(
+                    "dir_path",
+                    format!("'{}'", escape_sql_literal(&scope.dir_path)),
+                )
+                .column("dir_depth", scope.dir_depth.to_string())
+                .column(
+                    "path_components",
+                    format!("'{}'", escape_sql_literal(&scope.path_components)),
+                )
+                .execute()
+                .await
+                .map_err(|e| {
+                    StoreError::Schema(format!(
+                        "Failed to backfill directory-scope columns for '{path}': {e}"
+                    ))
+                })?;
+        }
+        Ok(())
+    }
+
     /// Convert chunks to Arrow `RecordBatch`.
     fn chunks_to_batch(&self, chunks: &[Chunk]) -> Result<RecordBatch, StoreError> {
         let chunk_ids: Vec<_> = chunks.iter().map(|c| c.id.to_string()).collect();
@@ -523,8 +690,9 @@ impl VectorStore for LanceStore {
             .await
             .map_err(|e| StoreError::Init(format!("Failed to list tables: {e}")))?;
 
-        // Create chunks table if not exists
-        if !tables.contains(&CHUNKS_TABLE.to_string()) {
+        if tables.contains(&CHUNKS_TABLE.to_string()) {
+            self.ensure_chunks_schema_v2().await?;
+        } else {
             info!("Creating chunks table");
             let schema = Arc::new(self.chunks_schema());
             conn.create_empty_table(CHUNKS_TABLE, schema)
@@ -547,6 +715,8 @@ impl VectorStore for LanceStore {
             {
                 warn!("Failed to create FTS index (may already exist): {e}");
             }
+
+            self.write_schema_sidecar(CHUNKS_SCHEMA_VERSION).await?;
         }
 
         // Create files table if not exists
@@ -1120,18 +1290,22 @@ fn type_or_mime_sql(value: &str) -> String {
     }
 }
 
-/// Pre-filter for directory-scoped search (exact dir or subdirectory).
+/// Pre-filter for directory-scoped search (exact dir, subdirectory, or suffix).
 ///
 /// Used with IVF-PQ ANN via `only_if`; this is not a replacement for ANN.
+/// Suffix `LIKE` clauses cover schema-v1 rows backfilled from absolute `file_path`.
 fn scope_prefix_sql(scope: &str) -> Option<String> {
     let scope = DirectoryScope::normalize_prefix(scope);
     if scope.is_empty() || scope == "." {
         return None;
     }
     let exact = escape_sql_literal(&scope);
-    let like = escape_sql_literal(&format!("{}/%", escape_like_literal(&scope)));
+    let prefix = escape_sql_literal(&format!("{}/%", escape_like_literal(&scope)));
+    let suffix = escape_sql_literal(&format!("%/{}", escape_like_literal(&scope)));
+    let mid = escape_sql_literal(&format!("%/{}/%", escape_like_literal(&scope)));
     Some(format!(
-        "dir_path = '{exact}' OR dir_path LIKE '{like}' ESCAPE '\\'"
+        "dir_path = '{exact}' OR dir_path LIKE '{prefix}' ESCAPE '\\' \
+         OR dir_path LIKE '{suffix}' ESCAPE '\\' OR dir_path LIKE '{mid}' ESCAPE '\\'"
     ))
 }
 
@@ -1534,6 +1708,7 @@ fn batch_to_file_records(batch: &RecordBatch) -> Result<Vec<FileRecord>, StoreEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schema::{CHUNKS_SCHEMA_VERSION, SCHEMA_SIDECAR_FILENAME, SchemaSidecar};
     use ragfs_core::{DistanceMetric, SearchFilter};
     use std::collections::HashMap;
     use tempfile::tempdir;
@@ -2635,6 +2810,8 @@ mod tests {
         let sql = scope_prefix_sql("src/auth/").unwrap();
         assert!(sql.contains("dir_path = 'src/auth'"));
         assert!(sql.contains("dir_path LIKE 'src/auth/%'"));
+        assert!(sql.contains("dir_path LIKE '%/src/auth'"));
+        assert!(sql.contains("dir_path LIKE '%/src/auth/%'"));
         assert!(scope_prefix_sql("").is_none());
         assert!(scope_prefix_sql(".").is_none());
     }
@@ -2701,5 +2878,146 @@ mod tests {
                 .to_string_lossy()
                 .ends_with("docs/readme.md")
         );
+    }
+
+    fn v1_chunks_schema(dim: usize) -> Schema {
+        Schema::new(vec![
+            Field::new("chunk_id", DataType::Utf8, false),
+            Field::new("file_id", DataType::Utf8, false),
+            Field::new("file_path", DataType::Utf8, false),
+            Field::new("content", DataType::Utf8, false),
+            Field::new("content_type", DataType::Utf8, false),
+            Field::new("chunk_index", DataType::UInt32, false),
+            Field::new("start_byte", DataType::UInt64, false),
+            Field::new("end_byte", DataType::UInt64, false),
+            Field::new("start_line", DataType::UInt32, true),
+            Field::new("end_line", DataType::UInt32, true),
+            Field::new("parent_chunk_id", DataType::Utf8, true),
+            Field::new("depth", DataType::UInt8, false),
+            Field::new(
+                "vector",
+                DataType::FixedSizeList(
+                    Arc::new(Field::new("item", DataType::Float32, true)),
+                    dim as i32,
+                ),
+                false,
+            ),
+            Field::new("embedding_model", DataType::Utf8, true),
+            Field::new("indexed_at", DataType::Utf8, false),
+            Field::new("file_mime_type", DataType::Utf8, true),
+            Field::new("language", DataType::Utf8, true),
+            Field::new("symbol_type", DataType::Utf8, true),
+            Field::new("symbol_name", DataType::Utf8, true),
+        ])
+    }
+
+    async fn seed_v1_chunks_table(
+        db_path: &Path,
+        file_path: &str,
+        content: &str,
+        embedding: &[f32],
+    ) {
+        let conn = connect(db_path.to_str().unwrap()).execute().await.unwrap();
+        let schema = Arc::new(v1_chunks_schema(TEST_DIM));
+        conn.create_empty_table(CHUNKS_TABLE, schema.clone())
+            .execute()
+            .await
+            .unwrap();
+
+        let embeddings = vec![Some(embedding.iter().copied().map(Some).collect())];
+        let vector = build_vector_array(&embeddings, TEST_DIM).unwrap();
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec![Uuid::new_v4().to_string()])),
+                Arc::new(StringArray::from(vec![Uuid::new_v4().to_string()])),
+                Arc::new(StringArray::from(vec![file_path.to_string()])),
+                Arc::new(StringArray::from(vec![content.to_string()])),
+                Arc::new(StringArray::from(vec!["text".to_string()])),
+                Arc::new(UInt32Array::from(vec![0u32])),
+                Arc::new(UInt64Array::from(vec![0u64])),
+                Arc::new(UInt64Array::from(vec![content.len() as u64])),
+                Arc::new(UInt32Array::from(vec![Some(0u32)])),
+                Arc::new(UInt32Array::from(vec![Some(1u32)])),
+                Arc::new(StringArray::from(vec![None::<String>])),
+                Arc::new(UInt8Array::from(vec![0u8])),
+                vector,
+                Arc::new(StringArray::from(vec![Some("test-model".to_string())])),
+                Arc::new(StringArray::from(vec![Utc::now().to_rfc3339()])),
+                Arc::new(StringArray::from(vec![Some("text/plain".to_string())])),
+                Arc::new(StringArray::from(vec![None::<String>])),
+                Arc::new(StringArray::from(vec![None::<String>])),
+                Arc::new(StringArray::from(vec![None::<String>])),
+            ],
+        )
+        .unwrap();
+
+        let table = conn.open_table(CHUNKS_TABLE).execute().await.unwrap();
+        let schema = batch.schema();
+        let batches = RecordBatchIterator::new(vec![Ok(batch)], schema);
+        table.add(Box::new(batches)).execute().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_schema_v2_migrates_existing_index() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let file_path = "/project/src/auth/login.rs";
+        let embedding = create_random_embedding(TEST_DIM);
+        seed_v1_chunks_table(&db_path, file_path, "login handler", &embedding).await;
+
+        assert!(!temp.path().join(SCHEMA_SIDECAR_FILENAME).exists());
+
+        let store = LanceStore::new(db_path, TEST_DIM);
+        store.init().await.unwrap();
+
+        let sidecar: SchemaSidecar = serde_json::from_slice(
+            &std::fs::read(temp.path().join(SCHEMA_SIDECAR_FILENAME)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(sidecar.chunks_schema_version, CHUNKS_SCHEMA_VERSION);
+
+        let chunks = store
+            .get_chunks_for_file(Path::new(file_path))
+            .await
+            .unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].dir_path, "project/src/auth");
+        assert_eq!(chunks[0].dir_depth, 3);
+        assert_eq!(chunks[0].path_components, "project,src,auth,login.rs");
+
+        let results = store
+            .search(scoped_query(embedding, "src/auth"))
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0]
+                .file_path
+                .to_string_lossy()
+                .ends_with("src/auth/login.rs")
+        );
+
+        // Second init is idempotent (sidecar already v2, columns present).
+        store.init().await.unwrap();
+        let again = store
+            .get_chunks_for_file(Path::new(file_path))
+            .await
+            .unwrap();
+        assert_eq!(again[0].dir_path, "project/src/auth");
+    }
+
+    #[tokio::test]
+    async fn test_new_index_writes_schema_v2_sidecar() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path, TEST_DIM);
+        store.init().await.unwrap();
+
+        let sidecar: SchemaSidecar = serde_json::from_slice(
+            &std::fs::read(temp.path().join(SCHEMA_SIDECAR_FILENAME)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(sidecar.chunks_schema_version, CHUNKS_SCHEMA_VERSION);
     }
 }

@@ -11,7 +11,8 @@ pub struct ParsedQuery {
     pub filters: Vec<SearchFilter>,
     /// Result limit
     pub limit: usize,
-    /// Optional directory scope from `scope:`
+    /// Optional directory scope from `scope:` (same as `ragfs query --scope`).
+    /// Pre-upgrade indexes are migrated on open; see USER_GUIDE.
     pub scope_prefix: Option<String>,
 }
 

@@ -2000,17 +2000,14 @@ mod tests {
 
         store.ensure_vector_index().await.unwrap();
 
-        match LanceStore::vector_index_name(&table).await {
-            Some(after_name) => {
-                let after = table.index_stats(&after_name).await.unwrap().unwrap();
-                assert!(
-                    LanceStore::ann_index_is_cosine(after.distance_type),
-                    "mismatched L2 index must be replaced with cosine"
-                );
-            }
-            None => {
-                // Below MIN_ANN_ROWS: drop L2 and stay on exact scan.
-            }
+        if let Some(after_name) = LanceStore::vector_index_name(&table).await {
+            let after = table.index_stats(&after_name).await.unwrap().unwrap();
+            assert!(
+                LanceStore::ann_index_is_cosine(after.distance_type),
+                "mismatched L2 index must be replaced with cosine"
+            );
+        } else {
+            // Below MIN_ANN_ROWS: drop L2 and stay on exact scan.
         }
 
         let results = store

@@ -23,6 +23,8 @@ const ODT_MIME: &str = "application/vnd.oasis.opendocument.text";
 const MAX_ENTRY_UNCOMPRESSED: u64 = 8 * 1024 * 1024;
 /// Aggregate uncompressed cap across extracted XML parts.
 const MAX_TOTAL_UNCOMPRESSED: u64 = 32 * 1024 * 1024;
+/// Max spaces expanded from one ODT `text:s`/`text:c` (DoS guard).
+const MAX_ODT_SPACES: usize = 255;
 
 /// Office/OpenDocument text extractor.
 pub struct OfficeExtractor;
@@ -557,7 +559,7 @@ fn odt_space_count(tag: &str) -> usize {
                 if let Some(end) = rest.find(quote)
                     && let Ok(n) = rest[..end].parse::<usize>()
                 {
-                    return n.max(1);
+                    return n.max(1).min(MAX_ODT_SPACES);
                 }
             }
         }
@@ -666,6 +668,20 @@ mod tests {
         assert_eq!(xml_to_text(r#"A<text:s text:c="3"/>B"#), "A B");
         assert_eq!(xml_to_text("A<text:tab/>B"), "A B");
         assert_eq!(xml_to_text("A<text:line-break/>B"), "A\nB");
+    }
+
+    #[test]
+    fn odt_space_count_honors_text_c_but_clamps() {
+        assert_eq!(odt_space_count(r#"text:s text:c="3""#), 3);
+        assert_eq!(odt_space_count(r#"text:s text:c="0""#), 1);
+        assert_eq!(
+            odt_space_count(r#"text:s text:c="18446744073709551615""#),
+            255
+        );
+        assert_eq!(
+            xml_to_text(r#"A<text:s text:c="18446744073709551615"/>B"#),
+            "A B"
+        );
     }
 
     #[test]

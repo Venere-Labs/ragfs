@@ -177,6 +177,9 @@ class FileManager:
     def _is_allowed_file(self, filename: str, mime_type: str) -> bool:
         """Check if a file is allowed to be uploaded."""
         ext = Path(filename).suffix.lower()
+        # Legacy binary Word is unsupported even when libmagic reports octet-stream.
+        if ext == ".doc":
+            return False
         if ext in ALLOWED_EXTENSIONS:
             return True
         if mime_type in ALLOWED_MIME_TYPES:

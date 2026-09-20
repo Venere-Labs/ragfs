@@ -16,39 +16,21 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 unmaintained = "workspace"  # Only fail for direct workspace dependencies
 yanked = "warn"
 
-# Ignore specific advisories (with justification)
-# These are transitive dependencies that cannot be easily upgraded without major refactoring
+# Ignore only advisories with no in-range upgrade. Each ID is attributed to its
+# dependency path, with a reason and a review date, in docs/AUDIT.md §1.2.
+# Keep this list in sync with security.yml and pre-release.yml.
 ignore = [
-    # aws-lc-sys vulnerabilities - transitive via lancedb/arrow dependencies
-    "RUSTSEC-2026-0044",  # X.509 Name Constraints Bypass via Wildcard/Unicode CN
-    "RUSTSEC-2026-0045",  # Timing Side-Channel in AES-CCM Tag Verification
-    "RUSTSEC-2026-0046",  # PKCS7_verify Certificate Chain Validation Bypass
-    "RUSTSEC-2026-0047",  # PKCS7_verify Signature Validation Bypass
-    "RUSTSEC-2026-0048",  # CRL Distribution Point Scope Check Logic Error
-    "RUSTSEC-2026-0258",  # Name constraints for URI names incorrectly accepted
-    "RUSTSEC-2026-0285",  # CRLs not considered authoritative by Distribution Point
-    
-    # pyo3 vulnerabilities - transitive via Python bindings
-    "RUSTSEC-2026-0098",  # Out-of-bounds read in nth/nth_back for PyList/PyTuple iterators
-    "RUSTSEC-2026-0099",  # Missing Sync bound on PyCFunction::new_closure closures
-    
-    # quick-xml vulnerabilities - transitive via datafusion/arrow
-    "RUSTSEC-2026-0187",  # Quadratic run time checking start tag for duplicate attributes
-    "RUSTSEC-2026-0194",  # Unbounded namespace-declaration allocation in NsReader
-    "RUSTSEC-2026-0195",  # Quadratic run time checking start tag for duplicate attributes (duplicate)
-    "RUSTSEC-2026-0204",  # Unbounded namespace-declaration allocation (duplicate)
-    
-    # Other transitive vulnerabilities
-    "RUSTSEC-2026-0041",  # lz4_flex: Decompressing invalid data can leak uninitialized memory
-    "RUSTSEC-2026-0009",  # crossbeam-epoch: Invalid pointer dereference in fmt::Pointer impl
-    "RUSTSEC-2026-0176",  # lopdf: Stack overflow via deeply nested PDF objects
-    "RUSTSEC-2026-0177",  # rustls/webpki: TLS 1.3 handshake messages accepted across encryption levels
-    "RUSTSEC-2025-0069",  # webpki: Name constraints accepted for wildcard certificates
-    "RUSTSEC-2026-0049",  # webpki: Reachable panic in certificate revocation list parsing
-    "RUSTSEC-2023-0071",  # rsa: Marvin Attack - timing sidechannel key recovery (unmaintained)
-    
-    # Unmaintained crates used by FUSE
-    "RUSTSEC-2026-0104",  # daemonize is unmaintained
+    # h2 0.3 via lancedb → lance → aws-sdk-dynamodb → aws-smithy-http-client
+    "RUSTSEC-2026-0258",
+    # quick-xml via lancedb → lance-io → opendal → reqsign and object_store 0.12
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+    # rsa via lancedb → lance-io → opendal → reqsign (no upstream patch)
+    "RUSTSEC-2023-0071",
+    # rustls-webpki 0.101 via lancedb → lance → aws-sdk-dynamodb → rustls 0.21
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
 ]
 
 [licenses]
@@ -89,8 +71,9 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 # Lint multiple versions of the same crate
 multiple-versions = "warn"
 
-# Don't allow wildcard dependencies (except workspace)
-wildcards = "allow"  # Workspace dependencies use .workspace = true which is treated as wildcard
+# Workspace members use `version.workspace = true`; cargo-deny treats that as a
+# wildcard. Allow it here so the policy can stay strict everywhere else.
+wildcards = "allow"
 
 # Allow workspace dependencies
 workspace-default-features = "allow"

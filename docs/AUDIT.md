@@ -50,6 +50,7 @@ others also touched code.
 | RUSTSEC-2026-0204 | crossbeam-epoch | 0.9.18 → 0.9.21 | lock |
 | RUSTSEC-2026-0221 | event-listener | 5.4.1 → 5.4.2 | lock |
 | RUSTSEC-2026-0258 | h2 (0.4 line) | 0.4.13 → 0.4.19 | lock |
+| RUSTSEC-2026-0285 | rustls (0.23 line) | 0.23.36 → 0.23.45 | lock |
 | RUSTSEC-2026-0187 | lopdf | 0.38.0 → 0.42.0 | code + manifest |
 | RUSTSEC-2026-0176, -0177 | pyo3 | 0.27.2 → 0.29.2 | code + manifest |
 | RUSTSEC-2025-0069 | daemonize | 0.5.0 → removed | code + manifest |
@@ -146,10 +147,10 @@ recommended. Merge order: **#42 → #40 → #41 → #38 → #39**.
 - [x] Fix the three direct-dependency advisories (lopdf, pyo3, daemonize) — done,
       see §1.1 and issue #44.
 - [x] Make `main` compile on current rustc (`ethnum 1.5.3`).
-- [ ] Fix the `deny.toml` ignore list in #42: it suppresses 22 IDs including the
-      now-fixed ones, mislabels `RUSTSEC-2026-0098`/`-0099` as `pyo3` (they are
-      `rustls-webpki`), and relaxes `wildcards` from `deny` to `allow`. It should
-      be reduced to §1.2. Issue #45.
+- [x] Reduce the `deny.toml` ignore list to §1.2 (7 residual IDs) and keep it in
+      sync with `security.yml` / `pre-release.yml`. `wildcards = "allow"` stays:
+      workspace members use `version.workspace = true`, which cargo-deny treats
+      as a wildcard. Issue #45.
 - [ ] Unblock and land the merge order in §2, then re-run release PR #13. Issue #46.
 - [ ] Triage the 18 Dependabot PRs as one grouped change; treat
       `arrow`/`lancedb` as the security work in §1.2. Issue #47.

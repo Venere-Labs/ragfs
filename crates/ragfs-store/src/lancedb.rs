@@ -10,7 +10,9 @@ use chrono::Utc;
 use futures::TryStreamExt;
 use lancedb::index::Index;
 use lancedb::index::scalar::{FtsIndexBuilder, FullTextSearchQuery};
+use lancedb::index::vector::IvfPqIndexBuilder;
 use lancedb::query::{ExecutableQuery, QueryBase, QueryExecutionOptions};
+use lancedb::table::{OptimizeAction, OptimizeOptions};
 use lancedb::{Connection, DistanceType, Table, connect};
 use ragfs_core::{
     Chunk, ChunkMetadata, ContentType, DistanceMetric, FileRecord, FileStatus, SearchFilter,
@@ -25,6 +27,10 @@ use uuid::Uuid;
 
 const CHUNKS_TABLE: &str = "chunks";
 const FILES_TABLE: &str = "files";
+/// Lance IVF training uses a default sample rate of 256. Below this, stay on exact scan.
+const MIN_ANN_ROWS: usize = 256;
+/// Product default search metric (`gte-small`). Train IVF-PQ with this so ANN is valid.
+const ANN_INDEX_METRIC: DistanceMetric = DistanceMetric::Cosine;
 
 /// LanceDB-based vector store.
 pub struct LanceStore {
@@ -61,6 +67,120 @@ impl LanceStore {
     /// Get the embedding dimension.
     pub fn embedding_dim(&self) -> usize {
         self.embedding_dim
+    }
+
+    /// Whether the table is large enough for Lance IVF-PQ training.
+    pub(crate) fn should_build_ann_index(row_count: usize) -> bool {
+        row_count >= MIN_ANN_ROWS
+    }
+
+    /// Refresh IVF-PQ once the unindexed tail is large enough to train another sample.
+    pub(crate) fn should_refresh_ann_index(unindexed_rows: usize) -> bool {
+        unindexed_rows >= MIN_ANN_ROWS
+    }
+
+    /// ANN is trained as cosine; other metrics must not use the index.
+    pub(crate) fn ann_index_covers_metric(metric: DistanceMetric) -> bool {
+        metric == ANN_INDEX_METRIC
+    }
+
+    /// Reuse/refresh only a cosine-trained vector index.
+    pub(crate) fn ann_index_is_cosine(distance_type: Option<DistanceType>) -> bool {
+        distance_type == Some(DistanceType::Cosine)
+    }
+
+    async fn vector_index_name(table: &Table) -> Option<String> {
+        match table.list_indices().await {
+            Ok(indices) => indices
+                .into_iter()
+                .find(|idx| idx.columns.iter().any(|col| col == "vector"))
+                .map(|idx| idx.name),
+            Err(_) => None,
+        }
+    }
+
+    async fn refresh_vector_index(table: &Table, index_name: &str) {
+        let unindexed = match table.index_stats(index_name).await {
+            Ok(Some(stats)) => stats.num_unindexed_rows,
+            Ok(None) => return,
+            Err(e) => {
+                debug!("Skipping ANN refresh; could not read index stats: {e}");
+                return;
+            }
+        };
+
+        if !Self::should_refresh_ann_index(unindexed) {
+            debug!("Skipping ANN refresh: {unindexed} unindexed rows < {MIN_ANN_ROWS}");
+            return;
+        }
+
+        info!("Refreshing IVF-PQ ANN index ({unindexed} unindexed rows)");
+        match table
+            .optimize(OptimizeAction::Index(
+                OptimizeOptions::append().index_names(vec![index_name.to_string()]),
+            ))
+            .await
+        {
+            Ok(_) => info!("IVF-PQ ANN index refreshed"),
+            Err(e) => warn!("IVF-PQ ANN index refresh failed (unindexed tail stays exact): {e}"),
+        }
+    }
+
+    /// Best-effort IVF-PQ on `vector`. Small tables keep exact scan.
+    /// Existing cosine indexes are incrementally refreshed after large appends.
+    /// A non-cosine vector index is dropped and replaced when the table is large enough.
+    async fn ensure_vector_index(&self) -> Result<(), StoreError> {
+        let table = self.get_chunks_table().await?;
+        if let Some(name) = Self::vector_index_name(&table).await {
+            match table.index_stats(&name).await {
+                Ok(Some(stats)) if Self::ann_index_is_cosine(stats.distance_type) => {
+                    Self::refresh_vector_index(&table, &name).await;
+                    return Ok(());
+                }
+                Ok(Some(stats)) => {
+                    info!(
+                        "Replacing vector index trained as {:?} with cosine IVF-PQ",
+                        stats.distance_type
+                    );
+                    if let Err(e) = table.drop_index(&name).await {
+                        warn!("Could not drop mismatched vector index (search may bypass): {e}");
+                        return Ok(());
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    debug!("Skipping ANN reuse; could not read index stats: {e}");
+                    return Ok(());
+                }
+            }
+        }
+
+        let count = match table.count_rows(None).await {
+            Ok(n) => n,
+            Err(e) => {
+                debug!("Skipping ANN index; could not count rows: {e}");
+                return Ok(());
+            }
+        };
+
+        if !Self::should_build_ann_index(count) {
+            debug!("Skipping IVF-PQ ANN index: {count} rows < {MIN_ANN_ROWS} (exact scan)");
+            return Ok(());
+        }
+
+        info!("Creating IVF-PQ ANN index on vector ({count} rows, cosine)");
+        match table
+            .create_index(
+                &["vector"],
+                Index::IvfPq(IvfPqIndexBuilder::default().distance_type(DistanceType::Cosine)),
+            )
+            .execute()
+            .await
+        {
+            Ok(()) => info!("IVF-PQ ANN index ready"),
+            Err(e) => warn!("IVF-PQ ANN index not created (search stays exact scan): {e}"),
+        }
+        Ok(())
     }
 
     /// Get or create connection.
@@ -429,6 +549,11 @@ impl VectorStore for LanceStore {
                 .map_err(|e| StoreError::Init(format!("Failed to create files table: {e}")))?;
         }
 
+        // Existing tables may already have enough rows for ANN.
+        if let Err(e) = self.ensure_vector_index().await {
+            warn!("ANN index check on init failed: {e}");
+        }
+
         info!("LanceDB initialized successfully");
         Ok(())
     }
@@ -453,6 +578,9 @@ impl VectorStore for LanceStore {
             .map_err(|e| StoreError::Insert(format!("Failed to insert chunks: {e}")))?;
 
         debug!("Successfully upserted {} chunks", chunks.len());
+        if let Err(e) = self.ensure_vector_index().await {
+            warn!("ANN index check after upsert failed: {e}");
+        }
         Ok(())
     }
 
@@ -472,6 +600,10 @@ impl VectorStore for LanceStore {
             .map_err(|e| StoreError::Query(format!("Failed to create search query: {e}")))?
             .distance_type(distance_type_from_metric(query.metric))
             .limit(query.limit);
+
+        if !Self::ann_index_covers_metric(query.metric) {
+            search_q = search_q.bypass_vector_index();
+        }
 
         if let Some(ref filter) = filter_sql {
             debug!("Applying search filter: {filter}");
@@ -525,6 +657,10 @@ impl VectorStore for LanceStore {
             .map_err(|e| StoreError::Query(format!("Failed to create hybrid query: {e}")))?
             .distance_type(distance_type_from_metric(query.metric))
             .limit(query.limit);
+
+        if !Self::ann_index_covers_metric(query.metric) {
+            search_q = search_q.bypass_vector_index();
+        }
 
         if let Some(ref filter) = filter_sql {
             debug!("Applying hybrid search filter: {filter}");
@@ -1745,6 +1881,146 @@ mod tests {
         // Deleting a nonexistent file should not error
         let result = store.delete_by_file_path(&path).await;
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_ann_threshold() {
+        assert!(!LanceStore::should_build_ann_index(0));
+        assert!(!LanceStore::should_build_ann_index(255));
+        assert!(LanceStore::should_build_ann_index(256));
+        assert!(LanceStore::should_build_ann_index(10_000));
+    }
+
+    #[test]
+    fn test_should_refresh_ann_index_after_post_threshold_appends() {
+        // Repeated-batch ingest: first batch crosses 256, later batches are unindexed.
+        assert!(LanceStore::should_build_ann_index(300));
+        assert!(!LanceStore::should_refresh_ann_index(0));
+        assert!(!LanceStore::should_refresh_ann_index(255));
+        assert!(LanceStore::should_refresh_ann_index(256));
+        assert!(LanceStore::should_refresh_ann_index(700));
+        assert!(LanceStore::should_refresh_ann_index(9_700));
+    }
+
+    #[test]
+    fn test_ann_index_covers_cosine_only() {
+        assert!(LanceStore::ann_index_covers_metric(DistanceMetric::Cosine));
+        assert!(!LanceStore::ann_index_covers_metric(DistanceMetric::L2));
+        assert!(!LanceStore::ann_index_covers_metric(DistanceMetric::Dot));
+        assert!(LanceStore::ann_index_is_cosine(Some(DistanceType::Cosine)));
+        assert!(!LanceStore::ann_index_is_cosine(Some(DistanceType::L2)));
+        assert!(!LanceStore::ann_index_is_cosine(Some(DistanceType::Dot)));
+        assert!(!LanceStore::ann_index_is_cosine(None));
+    }
+
+    #[tokio::test]
+    async fn test_small_table_skips_ann_and_still_searches() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path, TEST_DIM);
+        store.init().await.unwrap();
+
+        let file_path = PathBuf::from("/test/small.txt");
+        let chunk = create_test_chunk(
+            &file_path,
+            "hello ann",
+            create_random_embedding(TEST_DIM),
+            0,
+        );
+        store.upsert_chunks(&[chunk]).await.unwrap();
+        store.ensure_vector_index().await.unwrap();
+
+        let results = store
+            .search(SearchQuery {
+                text: None,
+                embedding: create_random_embedding(TEST_DIM),
+                limit: 5,
+                filters: vec![],
+                metric: DistanceMetric::Cosine,
+            })
+            .await
+            .unwrap();
+        assert!(!results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_replaces_preexisting_l2_vector_index() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path, TEST_DIM);
+        store.init().await.unwrap();
+
+        let file_path = PathBuf::from("/test/l2.txt");
+        let chunks: Vec<Chunk> = (0..16)
+            .map(|i| {
+                create_test_chunk(
+                    &file_path,
+                    &format!("legacy l2 chunk {i}"),
+                    create_random_embedding(TEST_DIM),
+                    i,
+                )
+            })
+            .collect();
+        store.upsert_chunks(&chunks).await.unwrap();
+
+        let table = store.get_chunks_table().await.unwrap();
+        let created = table
+            .create_index(
+                &["vector"],
+                Index::IvfPq(
+                    IvfPqIndexBuilder::default()
+                        .distance_type(DistanceType::L2)
+                        .num_partitions(1)
+                        .sample_rate(4),
+                ),
+            )
+            .execute()
+            .await;
+        if created.is_err() {
+            // Fixture only: Lance may refuse a tiny L2 index. Cosine search must still work.
+            let results = store
+                .search(SearchQuery {
+                    text: None,
+                    embedding: create_random_embedding(TEST_DIM),
+                    limit: 5,
+                    filters: vec![],
+                    metric: DistanceMetric::Cosine,
+                })
+                .await
+                .unwrap();
+            assert!(!results.is_empty());
+            return;
+        }
+
+        let name = LanceStore::vector_index_name(&table)
+            .await
+            .expect("L2 fixture index");
+        let before = table.index_stats(&name).await.unwrap().unwrap();
+        assert_eq!(before.distance_type, Some(DistanceType::L2));
+
+        store.ensure_vector_index().await.unwrap();
+
+        if let Some(after_name) = LanceStore::vector_index_name(&table).await {
+            let after = table.index_stats(&after_name).await.unwrap().unwrap();
+            assert!(
+                LanceStore::ann_index_is_cosine(after.distance_type),
+                "mismatched L2 index must be replaced with cosine"
+            );
+        } else {
+            // Below MIN_ANN_ROWS: drop L2 and stay on exact scan.
+        }
+
+        let results = store
+            .search(SearchQuery {
+                text: None,
+                embedding: create_random_embedding(TEST_DIM),
+                limit: 5,
+                filters: vec![],
+                metric: DistanceMetric::Cosine,
+            })
+            .await
+            .unwrap();
+        assert!(!results.is_empty());
     }
 
     #[tokio::test]

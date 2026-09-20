@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - FUSE `.config` includes `api_version` and states it is mount wiring, not user TOML
 
 ### Added
+- Best-effort IVF-PQ ANN index on `vector` when a Lance table has at least 256 rows (cosine-trained; incrementally refreshed after large appends; L2/Dot and failed builds stay exact)
 - Office text extraction for `.docx`, `.xlsx`, `.pptx`, and `.odt` (ZIP+XML; not binary `.doc`)
 - **Python bindings**: New `ragfs-python` crate with PyO3 bindings
   - `RAGFSIndex` class for indexing and querying

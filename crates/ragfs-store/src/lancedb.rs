@@ -2,7 +2,7 @@
 
 use arrow_array::{
     Array, ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator,
-    StringArray, UInt8Array, UInt32Array, UInt64Array,
+    StringArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
 use async_trait::async_trait;
@@ -15,8 +15,8 @@ use lancedb::query::{ExecutableQuery, QueryBase, QueryExecutionOptions};
 use lancedb::table::{OptimizeAction, OptimizeOptions};
 use lancedb::{Connection, DistanceType, Table, connect};
 use ragfs_core::{
-    Chunk, ChunkMetadata, ContentType, DistanceMetric, FileRecord, FileStatus, SearchFilter,
-    SearchQuery, SearchResult, StoreError, StoreStats, VectorStore,
+    Chunk, ChunkMetadata, ContentType, DirectoryScope, DistanceMetric, FileRecord, FileStatus,
+    SearchFilter, SearchQuery, SearchResult, StoreError, StoreStats, VectorStore,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -233,6 +233,9 @@ impl LanceStore {
             Field::new("language", DataType::Utf8, true),
             Field::new("symbol_type", DataType::Utf8, true),
             Field::new("symbol_name", DataType::Utf8, true),
+            Field::new("dir_path", DataType::Utf8, false),
+            Field::new("dir_depth", DataType::UInt16, false),
+            Field::new("path_components", DataType::Utf8, false),
         ])
     }
 
@@ -380,6 +383,10 @@ impl LanceStore {
 
         let mime_types: Vec<Option<String>> = chunks.iter().map(|c| c.mime_type.clone()).collect();
 
+        let dir_paths: Vec<_> = chunks.iter().map(|c| c.dir_path.clone()).collect();
+        let dir_depths: Vec<_> = chunks.iter().map(|c| c.dir_depth).collect();
+        let path_components: Vec<_> = chunks.iter().map(|c| c.path_components.clone()).collect();
+
         // Build arrays
         let schema = Arc::new(self.chunks_schema());
 
@@ -407,6 +414,9 @@ impl LanceStore {
                 Arc::new(StringArray::from(languages)),
                 Arc::new(StringArray::from(symbol_types)),
                 Arc::new(StringArray::from(symbol_names)),
+                Arc::new(StringArray::from(dir_paths)),
+                Arc::new(UInt16Array::from(dir_depths)),
+                Arc::new(StringArray::from(path_components)),
             ],
         )
         .map_err(|e| StoreError::Insert(format!("Failed to create RecordBatch: {e}")))?;
@@ -593,7 +603,10 @@ impl VectorStore for LanceStore {
         );
 
         let table = self.get_chunks_table().await?;
-        let filter_sql = self.chunk_filter_sql(&query.filters).await?;
+        let filter_sql = combine_predicates(
+            self.chunk_filter_sql(&query.filters).await?,
+            query.scope_prefix.as_deref().and_then(scope_prefix_sql),
+        );
 
         let mut search_q = table
             .vector_search(query.embedding.clone())
@@ -645,7 +658,10 @@ impl VectorStore for LanceStore {
         );
 
         let table = self.get_chunks_table().await?;
-        let filter_sql = self.chunk_filter_sql(&query.filters).await?;
+        let filter_sql = combine_predicates(
+            self.chunk_filter_sql(&query.filters).await?,
+            query.scope_prefix.as_deref().and_then(scope_prefix_sql),
+        );
 
         // Build hybrid query combining FTS and vector search
         let fts_query = FullTextSearchQuery::new(query_text);
@@ -720,9 +736,14 @@ impl VectorStore for LanceStore {
 
         let chunk_count = chunks.len() as u64;
 
-        // 2. Update the file_path in each chunk
+        // 2. Update the file_path and directory-scope fields in each chunk
         for chunk in &mut chunks {
+            let root = DirectoryScope::infer_root(&chunk.file_path, &chunk.dir_path);
+            let scope = DirectoryScope::from_paths(to, root.as_deref());
             chunk.file_path = to.to_path_buf();
+            chunk.dir_path = scope.dir_path;
+            chunk.dir_depth = scope.dir_depth;
+            chunk.path_components = scope.path_components;
         }
 
         // 3. Delete old chunks
@@ -1099,6 +1120,21 @@ fn type_or_mime_sql(value: &str) -> String {
     }
 }
 
+/// Pre-filter for directory-scoped search (exact dir or subdirectory).
+///
+/// Used with IVF-PQ ANN via `only_if`; this is not a replacement for ANN.
+fn scope_prefix_sql(scope: &str) -> Option<String> {
+    let scope = DirectoryScope::normalize_prefix(scope);
+    if scope.is_empty() || scope == "." {
+        return None;
+    }
+    let exact = escape_sql_literal(&scope);
+    let like = escape_sql_literal(&format!("{}/%", escape_like_literal(&scope)));
+    Some(format!(
+        "dir_path = '{exact}' OR dir_path LIKE '{like}' ESCAPE '\\'"
+    ))
+}
+
 /// Combine [`SearchQuery`] filters into a single SQL predicate, if any.
 fn filters_to_sql(filters: &[SearchFilter]) -> Option<String> {
     if filters.is_empty() {
@@ -1302,6 +1338,15 @@ fn batch_to_chunks(batch: &RecordBatch) -> Result<Vec<Chunk>, StoreError> {
     let embeddings = batch
         .column_by_name("embedding")
         .and_then(|c| c.as_any().downcast_ref::<FixedSizeListArray>());
+    let dir_paths = batch
+        .column_by_name("dir_path")
+        .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+    let dir_depths = batch
+        .column_by_name("dir_depth")
+        .and_then(|c| c.as_any().downcast_ref::<UInt16Array>());
+    let path_components_arr = batch
+        .column_by_name("path_components")
+        .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
     let (
         Some(chunk_ids),
@@ -1373,6 +1418,24 @@ fn batch_to_chunks(batch: &RecordBatch) -> Result<Vec<Chunk>, StoreError> {
             parent_chunk_id: None,
             depth: depths.value(i),
             embedding,
+            dir_path: dir_paths.map_or_else(
+                || DirectoryScope::from_file_path(&PathBuf::from(file_paths.value(i))).dir_path,
+                |arr| {
+                    if arr.is_null(i) {
+                        String::new()
+                    } else {
+                        arr.value(i).to_string()
+                    }
+                },
+            ),
+            dir_depth: dir_depths.map_or(0, |arr| if arr.is_null(i) { 0 } else { arr.value(i) }),
+            path_components: path_components_arr.map_or_else(String::new, |arr| {
+                if arr.is_null(i) {
+                    String::new()
+                } else {
+                    arr.value(i).to_string()
+                }
+            }),
             metadata: ChunkMetadata::default(),
         });
     }
@@ -1496,6 +1559,9 @@ mod tests {
             parent_chunk_id: None,
             depth: 0,
             embedding: Some(embedding),
+            dir_path: DirectoryScope::from_file_path(file_path).dir_path,
+            dir_depth: DirectoryScope::from_file_path(file_path).dir_depth,
+            path_components: DirectoryScope::from_file_path(file_path).path_components,
             metadata: ChunkMetadata {
                 indexed_at: Some(Utc::now()),
                 embedding_model: Some("test-model".to_string()),
@@ -1630,6 +1696,7 @@ mod tests {
             limit: 10,
             filters: vec![],
             metric: DistanceMetric::Cosine,
+            scope_prefix: None,
         };
 
         let results = store.search(query).await.unwrap();
@@ -1665,6 +1732,7 @@ mod tests {
             limit: 3,
             filters: vec![],
             metric: DistanceMetric::Cosine,
+            scope_prefix: None,
         };
 
         let results = store.search(query).await.unwrap();
@@ -1846,6 +1914,9 @@ mod tests {
             parent_chunk_id: None,
             depth: 0,
             embedding: Some(create_random_embedding(TEST_DIM)),
+            dir_path: DirectoryScope::from_file_path(&file_path).dir_path,
+            dir_depth: DirectoryScope::from_file_path(&file_path).dir_depth,
+            path_components: DirectoryScope::from_file_path(&file_path).path_components,
             metadata: ChunkMetadata::default(),
         };
 
@@ -1937,6 +2008,7 @@ mod tests {
                 limit: 5,
                 filters: vec![],
                 metric: DistanceMetric::Cosine,
+                scope_prefix: None,
             })
             .await
             .unwrap();
@@ -1985,6 +2057,7 @@ mod tests {
                     limit: 5,
                     filters: vec![],
                     metric: DistanceMetric::Cosine,
+                    scope_prefix: None,
                 })
                 .await
                 .unwrap();
@@ -2017,6 +2090,7 @@ mod tests {
                 limit: 5,
                 filters: vec![],
                 metric: DistanceMetric::Cosine,
+                scope_prefix: None,
             })
             .await
             .unwrap();
@@ -2056,6 +2130,9 @@ mod tests {
             parent_chunk_id: None,
             depth,
             embedding: Some(embedding),
+            dir_path: DirectoryScope::from_file_path(file_path).dir_path,
+            dir_depth: DirectoryScope::from_file_path(file_path).dir_depth,
+            path_components: DirectoryScope::from_file_path(file_path).path_components,
             metadata: ChunkMetadata {
                 indexed_at: Some(Utc::now()),
                 embedding_model: Some("test-model".to_string()),
@@ -2127,6 +2204,7 @@ mod tests {
             limit: 10,
             filters,
             metric,
+            scope_prefix: None,
         }
     }
 
@@ -2487,5 +2565,141 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].file_path, new_path);
+    }
+
+    fn create_chunk_with_scope(
+        file_path: &Path,
+        root: Option<&Path>,
+        content: &str,
+        embedding: Vec<f32>,
+    ) -> Chunk {
+        let scope = DirectoryScope::from_paths(file_path, root);
+        let mut chunk = create_test_chunk(file_path, content, embedding, 0);
+        chunk.dir_path = scope.dir_path;
+        chunk.dir_depth = scope.dir_depth;
+        chunk.path_components = scope.path_components;
+        chunk
+    }
+
+    async fn seeded_scope_store() -> (tempfile::TempDir, LanceStore, Vec<f32>) {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path, TEST_DIM);
+        store.init().await.unwrap();
+
+        let root = Path::new("/project");
+        let embedding = create_random_embedding(TEST_DIM);
+        let chunks = vec![
+            create_chunk_with_scope(
+                Path::new("/project/src/auth/login.rs"),
+                Some(root),
+                "login handler",
+                embedding.clone(),
+            ),
+            create_chunk_with_scope(
+                Path::new("/project/src/auth/oauth/token.rs"),
+                Some(root),
+                "oauth token",
+                embedding.clone(),
+            ),
+            create_chunk_with_scope(
+                Path::new("/project/src/db.rs"),
+                Some(root),
+                "database pool",
+                embedding.clone(),
+            ),
+            create_chunk_with_scope(
+                Path::new("/project/docs/readme.md"),
+                Some(root),
+                "project readme",
+                embedding.clone(),
+            ),
+        ];
+        store.upsert_chunks(&chunks).await.unwrap();
+        (temp, store, embedding)
+    }
+
+    fn scoped_query(embedding: Vec<f32>, scope: &str) -> SearchQuery {
+        SearchQuery {
+            text: None,
+            embedding,
+            limit: 10,
+            filters: vec![],
+            metric: DistanceMetric::Cosine,
+            scope_prefix: Some(scope.to_string()),
+        }
+    }
+
+    #[test]
+    fn test_scope_prefix_sql_exact_or_subdirectory() {
+        let sql = scope_prefix_sql("src/auth/").unwrap();
+        assert!(sql.contains("dir_path = 'src/auth'"));
+        assert!(sql.contains("dir_path LIKE 'src/auth/%'"));
+        assert!(scope_prefix_sql("").is_none());
+        assert!(scope_prefix_sql(".").is_none());
+    }
+
+    #[test]
+    fn test_scope_prefix_sql_escapes_quotes() {
+        let sql = scope_prefix_sql("o'brien").unwrap();
+        assert!(sql.contains("o''brien"));
+    }
+
+    #[tokio::test]
+    async fn test_scoped_search_stores_relative_dir_path() {
+        let (_temp, store, _) = seeded_scope_store().await;
+        let chunks = store
+            .get_chunks_for_file(Path::new("/project/src/auth/login.rs"))
+            .await
+            .unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].dir_path, "src/auth");
+        assert_eq!(chunks[0].dir_depth, 2);
+        assert_eq!(chunks[0].path_components, "src,auth,login.rs");
+        assert!(!chunks[0].dir_path.starts_with('/'));
+    }
+
+    #[tokio::test]
+    async fn test_scoped_search_exact_directory() {
+        let (_temp, store, embedding) = seeded_scope_store().await;
+        let results = store
+            .search(scoped_query(embedding, "src/auth"))
+            .await
+            .unwrap();
+        let paths: Vec<_> = results
+            .iter()
+            .map(|r| r.file_path.to_string_lossy().to_string())
+            .collect();
+        assert!(paths.iter().any(|p| p.ends_with("src/auth/login.rs")));
+        assert!(paths.iter().any(|p| p.ends_with("src/auth/oauth/token.rs")));
+        assert!(!paths.iter().any(|p| p.ends_with("src/db.rs")));
+        assert!(!paths.iter().any(|p| p.ends_with("docs/readme.md")));
+    }
+
+    #[tokio::test]
+    async fn test_scoped_search_includes_subdirectory() {
+        let (_temp, store, embedding) = seeded_scope_store().await;
+        let results = store.search(scoped_query(embedding, "src")).await.unwrap();
+        let paths: Vec<_> = results
+            .iter()
+            .map(|r| r.file_path.to_string_lossy().to_string())
+            .collect();
+        assert!(paths.iter().any(|p| p.ends_with("src/auth/login.rs")));
+        assert!(paths.iter().any(|p| p.ends_with("src/auth/oauth/token.rs")));
+        assert!(paths.iter().any(|p| p.ends_with("src/db.rs")));
+        assert!(!paths.iter().any(|p| p.ends_with("docs/readme.md")));
+    }
+
+    #[tokio::test]
+    async fn test_scoped_search_excludes_outside_directory() {
+        let (_temp, store, embedding) = seeded_scope_store().await;
+        let results = store.search(scoped_query(embedding, "docs")).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0]
+                .file_path
+                .to_string_lossy()
+                .ends_with("docs/readme.md")
+        );
     }
 }

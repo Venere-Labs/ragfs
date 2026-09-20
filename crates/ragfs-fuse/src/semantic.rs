@@ -519,6 +519,7 @@ impl SemanticManager {
             limit: self.config.similar_limit + 1, // +1 to exclude self
             filters: Vec::new(),
             metric: DistanceMetric::Cosine,
+            scope_prefix: None,
         };
         let results = store
             .search(query)

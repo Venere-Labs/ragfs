@@ -4,7 +4,9 @@ use chrono::Utc;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3_async_runtimes::tokio::future_into_py;
-use ragfs_core::{Chunk, ChunkMetadata, ContentType, DistanceMetric, SearchQuery, VectorStore};
+use ragfs_core::{
+    Chunk, ChunkMetadata, ContentType, DirectoryScope, DistanceMetric, SearchQuery, VectorStore,
+};
 use ragfs_store::LanceStore;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -189,10 +191,12 @@ impl PyChunk {
             _ => None,
         };
 
+        let file_path = PathBuf::from(&self.file_path);
+        let scope = DirectoryScope::from_file_path(&file_path);
         Ok(Chunk {
             id,
             file_id,
-            file_path: PathBuf::from(&self.file_path),
+            file_path,
             content: self.content.clone(),
             content_type,
             mime_type: self.mime_type.clone(),
@@ -202,6 +206,9 @@ impl PyChunk {
             parent_chunk_id: None,
             depth: 0,
             embedding: self.embedding.clone(),
+            dir_path: scope.dir_path,
+            dir_depth: scope.dir_depth,
+            path_components: scope.path_components,
             metadata: ChunkMetadata {
                 embedding_model: None,
                 indexed_at: Some(Utc::now()),
@@ -309,6 +316,7 @@ impl RagfsVectorStore {
                 limit: k,
                 filters: vec![],
                 metric: DistanceMetric::Cosine,
+                scope_prefix: None,
             };
 
             let results = store
@@ -374,6 +382,7 @@ impl RagfsVectorStore {
                 limit: k,
                 filters: vec![],
                 metric: DistanceMetric::Cosine,
+                scope_prefix: None,
             };
 
             let results = store

@@ -141,6 +141,7 @@ impl RagfsRetriever {
                 limit: k,
                 filters: vec![],
                 metric: ragfs_core::DistanceMetric::Cosine,
+                scope_prefix: None,
             };
 
             let results = if hybrid {
@@ -217,6 +218,7 @@ impl RagfsRetriever {
                 limit: k,
                 filters: vec![],
                 metric: ragfs_core::DistanceMetric::Cosine,
+                scope_prefix: None,
             };
 
             let results = if use_hybrid {

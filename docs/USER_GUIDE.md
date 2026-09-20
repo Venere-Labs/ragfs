@@ -161,6 +161,7 @@ ragfs query <PATH> <QUERY> [OPTIONS]
 |--------|-------|---------|-------------|
 | `--limit` | `-l` | `[query].default_limit` (10) | Maximum number of results (clamped by `[query].max_limit`) |
 | `--hybrid` | | config `[query].hybrid` (true) | Force hybrid search (vector + full-text) |
+| `--scope` | | (entire index) | Restrict results to this directory (relative to the index root) and its subdirectories |
 
 **Examples:**
 
@@ -173,6 +174,9 @@ ragfs query ./src "API endpoint" --limit 25
 
 # JSON output for scripting
 ragfs query ./src "configuration" -f json
+
+# Only search under src/auth/ (and nested dirs such as src/auth/oauth/)
+ragfs query . "login flow" --scope src/auth
 ```
 
 **Text Output Format:**

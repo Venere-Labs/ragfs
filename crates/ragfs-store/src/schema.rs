@@ -46,6 +46,9 @@ pub fn chunks_schema(embedding_dim: usize) -> Schema {
         Field::new("language", DataType::Utf8, true),
         Field::new("symbol_type", DataType::Utf8, true),
         Field::new("symbol_name", DataType::Utf8, true),
+        Field::new("dir_path", DataType::Utf8, false),
+        Field::new("dir_depth", DataType::UInt16, false),
+        Field::new("path_components", DataType::Utf8, false),
     ])
 }
 

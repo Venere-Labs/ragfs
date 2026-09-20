@@ -146,6 +146,9 @@ pub struct Chunk {
     pub parent_chunk_id: Option<Uuid>,
     pub depth: u8,
     pub embedding: Option<Vec<f32>>,
+    pub dir_path: String,
+    pub dir_depth: u16,
+    pub path_components: String,
     pub metadata: ChunkMetadata,
 }
 ```
@@ -161,6 +164,7 @@ pub struct SearchQuery {
     pub limit: usize,
     pub filters: Vec<SearchFilter>,
     pub metric: DistanceMetric,
+    pub scope_prefix: Option<String>,
 }
 ```
 

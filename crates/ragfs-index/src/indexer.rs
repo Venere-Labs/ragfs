@@ -3,8 +3,8 @@
 use chrono::Utc;
 use ragfs_chunker::ChunkerRegistry;
 use ragfs_core::{
-    Chunk, ChunkConfig, ChunkMetadata, ChunkOutput, ContentType, EmbeddingConfig, Error, FileEvent,
-    FileRecord, FileStatus, IndexStats, Indexer, Result, VectorStore,
+    Chunk, ChunkConfig, ChunkMetadata, ChunkOutput, ContentType, DirectoryScope, EmbeddingConfig,
+    Error, FileEvent, FileRecord, FileStatus, IndexStats, Indexer, Result, VectorStore,
 };
 use ragfs_embed::EmbedderPool;
 use ragfs_extract::ExtractorRegistry;
@@ -305,6 +305,7 @@ impl IndexerService {
         let stats = Arc::clone(&self.stats);
         let pending = Arc::clone(&self.pending);
         let idle_notify = Arc::clone(&self.idle_notify);
+        let root = self.root.clone();
 
         // Spawn event processing task
         tokio::spawn(async move {
@@ -320,6 +321,7 @@ impl IndexerService {
 
                                 match process_file(
                                     path,
+                                    &root,
                                     &store,
                                     &extractors,
                                     &chunkers,
@@ -372,6 +374,7 @@ impl IndexerService {
 
                                 match process_file(
                                     to,
+                                    &root,
                                     &store,
                                     &extractors,
                                     &chunkers,
@@ -438,6 +441,7 @@ impl IndexerService {
     pub async fn process_single(&self, path: &Path) -> Result<u32> {
         process_file(
             path,
+            &self.root,
             &self.store,
             &self.extractors,
             &self.chunkers,
@@ -469,6 +473,7 @@ impl IndexerService {
 
             match process_file(
                 path,
+                &self.root,
                 &self.store,
                 &self.extractors,
                 &self.chunkers,
@@ -539,6 +544,7 @@ impl IndexerService {
 
                 match process_file(
                     &path,
+                    &self.root,
                     &self.store,
                     &self.extractors,
                     &self.chunkers,
@@ -646,6 +652,7 @@ fn finish_pending(pending: &AtomicUsize, idle_notify: &Notify) {
 /// Process a file through the full pipeline: extract → chunk → embed → store.
 async fn process_file(
     path: &Path,
+    root: &Path,
     store: &Arc<dyn VectorStore>,
     extractors: &Arc<ExtractorRegistry>,
     chunkers: &Arc<ChunkerRegistry>,
@@ -741,6 +748,7 @@ async fn process_file(
             build_chunk(
                 file_id,
                 path,
+                root,
                 idx as u32,
                 output,
                 emb_output.embedding,
@@ -865,6 +873,7 @@ fn determine_content_type(
 fn build_chunk(
     file_id: Uuid,
     file_path: &Path,
+    root: &Path,
     chunk_index: u32,
     output: ChunkOutput,
     embedding: Vec<f32>,
@@ -873,6 +882,7 @@ fn build_chunk(
     model_name: &str,
     now: chrono::DateTime<Utc>,
 ) -> Chunk {
+    let scope = DirectoryScope::from_paths(file_path, Some(root));
     Chunk {
         id: Uuid::new_v4(),
         file_id,
@@ -886,6 +896,9 @@ fn build_chunk(
         parent_chunk_id: None,
         depth: output.depth,
         embedding: Some(embedding),
+        dir_path: scope.dir_path,
+        dir_depth: scope.dir_depth,
+        path_components: scope.path_components,
         metadata: ChunkMetadata {
             embedding_model: Some(model_name.to_string()),
             indexed_at: Some(now),
@@ -1247,7 +1260,8 @@ mod tests {
         use ragfs_core::ChunkOutputMetadata;
 
         let file_id = Uuid::new_v4();
-        let file_path = PathBuf::from("/test/file.txt");
+        let root = PathBuf::from("/project");
+        let file_path = PathBuf::from("/project/src/auth/login.rs");
         let chunk_output = ChunkOutput {
             content: "Test chunk content".to_string(),
             byte_range: 0..18,
@@ -1265,6 +1279,7 @@ mod tests {
         let chunk = build_chunk(
             file_id,
             &file_path,
+            &root,
             0,
             chunk_output,
             embedding.clone(),
@@ -1281,6 +1296,10 @@ mod tests {
         assert_eq!(chunk.embedding, Some(embedding));
         assert_eq!(chunk.mime_type, Some("text/plain".to_string()));
         assert!(matches!(chunk.content_type, ContentType::Text));
+        assert_eq!(chunk.dir_path, "src/auth");
+        assert_eq!(chunk.dir_depth, 2);
+        assert_eq!(chunk.path_components, "src,auth,login.rs");
+        assert!(!chunk.dir_path.starts_with('/'));
     }
 
     // ==================== IndexerService tests ====================

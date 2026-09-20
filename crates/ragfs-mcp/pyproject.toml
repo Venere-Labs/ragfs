@@ -28,6 +28,7 @@ keywords = ["rag", "semantic-search", "mcp", "ai", "claude"]
 dependencies = [
     "mcp>=1.2.0,<2",
     "ragfs>=0.2.0",
+    "blake3>=1.0",
 ]
 
 [project.optional-dependencies]

@@ -47,9 +47,11 @@ Usage:
     server = create_server()
 
 Configuration via environment variables:
-    RAGFS_DB_PATH: Path to the vector database (default: ~/.local/share/ragfs/indices/default)
+    RAGFS_SOURCE_PATH: Source directory to hash for the default index (same as `ragfs index`)
+    RAGFS_DATA_DIR: Data root (default: ~/.local/share/ragfs). Indices live at
+        {data}/indices/{blake3(canonical_source)[:16]}/index.lance
+    RAGFS_DB_PATH: Optional override of the resolved LanceDB path
     RAGFS_MODEL_PATH: Path to embedding model (default: ~/.local/share/ragfs/models)
-    RAGFS_SOURCE_PATH: Source directory for file operations (default: current directory)
 """
 
 from .server import create_server, main, mcp

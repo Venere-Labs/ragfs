@@ -21,7 +21,7 @@ except ImportError:
 class HaystackRagfsDocumentConverter:
     """Haystack-compatible document converter using RAGFS.
 
-    Converts files to Haystack Documents. Supports 40+ text formats, PDFs, and images.
+    Converts files to Haystack Documents. Supports UTF-8 text/code, PDFs, and images.
 
     Example:
         from ragfs.haystack import RagfsDocumentConverter

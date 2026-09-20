@@ -20,7 +20,7 @@ except ImportError:
 class LangChainRagfsLoader(BaseLoader):
     """LangChain-compatible document loader using RAGFS.
 
-    Supports 40+ text formats, PDFs, and images.
+    Supports UTF-8 text/code, PDFs, and images.
 
     Example:
         loader = LangChainRagfsLoader("/path/to/docs")

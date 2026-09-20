@@ -55,7 +55,7 @@ const EMBEDDING_DIM: usize = 384;
 
 #[derive(Parser)]
 #[command(name = "ragfs")]
-#[command(about = "A FUSE filesystem for RAG architectures")]
+#[command(about = "Agentic FUSE filesystem: semantic search, JSON file ops, undo, and organize")]
 #[command(version)]
 struct Cli {
     /// Path to config file (default: ~/.config/ragfs/config.toml)
@@ -327,6 +327,14 @@ fn maybe_daemonize_background_mount(cli: &mut Cli) -> Result<()> {
     );
     if !is_background {
         return Ok(());
+    }
+
+    if let Some(path) = cli.config.as_mut()
+        && path.is_relative()
+    {
+        *path = std::env::current_dir()
+            .context("Failed to get current directory")?
+            .join(&*path);
     }
 
     // Fail in the parent if config.toml is invalid.

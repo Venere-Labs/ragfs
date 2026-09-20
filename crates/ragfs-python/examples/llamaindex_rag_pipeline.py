@@ -6,8 +6,8 @@ This example demonstrates building a complete RAG (Retrieval Augmented Generatio
 pipeline using ragfs components with LlamaIndex.
 
 Features demonstrated:
-- Multi-format document loading (40+ formats including PDF, images)
-- Code-aware text chunking with tree-sitter
+- Multi-format document loading (UTF-8 text/code, PDF, images)
+- Code-aware text chunking (pattern-based function/class splits)
 - Local embeddings (GTE-small, 384 dimensions, no API calls)
 - Hybrid search (vector + full-text)
 - Configurable LLM providers (OpenAI, Anthropic, Ollama)
@@ -172,7 +172,7 @@ async def index_documents(
     """
     print(f"Loading documents from: {source_path}")
 
-    # Load documents using RagfsReader (supports 40+ formats)
+    # Load documents using RagfsReader (UTF-8 text/code, PDF, images)
     reader = RagfsReader()
     documents = await reader.aload_data(source_path)
     print(f"Loaded {len(documents)} documents")

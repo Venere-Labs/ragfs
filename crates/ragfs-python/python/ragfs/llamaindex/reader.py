@@ -20,7 +20,7 @@ except ImportError:
 class LlamaIndexRagfsReader(BaseReader):
     """LlamaIndex-compatible document reader using RAGFS.
 
-    Supports 40+ text formats, PDFs, and images.
+    Supports UTF-8 text/code, PDFs, and images.
 
     Example:
         from ragfs.llamaindex import RagfsReader

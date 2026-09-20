@@ -19,10 +19,10 @@ An agentic FUSE filesystem that makes file management safe and structured for LL
 - **FUSE Integration** - Mount indexed directories as a virtual filesystem
 - **Real-time Indexing** - Watch directories for changes and update the index automatically
 - **Multimodal Support** - Extract content from text, code, markdown, PDF, and images
-- **Code-aware Chunking** - Syntax-aware splitting using tree-sitter for source code
-- **Hybrid Search** - Combine vector similarity with full-text search
+- **Code-aware Chunking** - Splits source at function/class signatures (pattern matching, not tree-sitter)
+- **Hybrid Search** - Combine vector similarity with full-text search (when enabled)
 - **MCP Server** - Claude Desktop integration for AI assistants
-- **Comprehensive Testing** - 270+ tests across all crates ensuring reliability
+- **Tests** - Unit and integration tests across crates (CI on every PR)
 
 ## Feature Status
 
@@ -32,8 +32,8 @@ An agentic FUSE filesystem that makes file management safe and structured for LL
 | FUSE mount | Stable | Linux only |
 | Semantic search | Stable | Vector similarity with LanceDB |
 | Hybrid search | Stable | Vector + full-text |
-| Text extraction | Stable | 40+ formats |
-| Code chunking | Stable | Tree-sitter based |
+| Text extraction | Stable | UTF-8 text/code/markup, PDF, images. No binary `.doc` |
+| Code chunking | Stable | Pattern-based function/class splits |
 | PDF extraction | Stable | Text + embedded images |
 | Agent operations (.ops/) | Stable | JSON feedback, batch support |
 | Safety layer (.safety/) | Stable | Trash, history, undo |
@@ -54,15 +54,19 @@ An agentic FUSE filesystem that makes file management safe and structured for LL
 - Local-first semantic search
 
 **Limitations:**
-- Linux only (FUSE requirement)
-- Embedding model requires ~500MB disk
-- Large repositories (100K+ files) may need tuning
+- Linux only (FUSE requirement). macOS CI artifacts are not a supported FUSE product.
+- Embedding model is `thenlper/gte-small` (~67–100MB download, hundreds of MB RAM).
+- Code chunking is regex/signature based, not a tree-sitter AST.
+- Default extractors do not parse binary `.doc` / RTF / EPUB.
+- Vector search is an exact scan until an IVF-PQ index is built (needs enough rows).
+- Semantic organize/cleanup is Beta.
+- Large repositories (100K+ files) may need tuning.
 
 ## Requirements
 
 - Rust 1.88 or later
 - Linux with FUSE support (`libfuse-dev` on Debian/Ubuntu, `fuse` on Arch)
-- ~500MB disk space for the embedding model (downloaded on first run)
+- Disk space for the `gte-small` embedding model (downloaded on first run, ~67–100MB)
 
 ## Installation
 

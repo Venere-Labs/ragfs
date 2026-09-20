@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Bump `lopdf` to `0.42` (RUSTSEC-2026-0187 nesting-depth DoS). Already on the 0.42 API in `ragfs-extract`.
+- Bump `pyo3` and `pyo3-async-runtimes` to `0.29` (RUSTSEC-2026-0176 / RUSTSEC-2026-0177).
+- Replace unmaintained `daemonize` with `nix` (`fork` + `setsid`, stdio redirect, pid file) for `ragfs mount` without `--foreground`. rustix 1.x does not expose `fork` outside its unstable `runtime` feature.
+
 ### Changed
+- Background `ragfs mount` still writes a PID file to `$XDG_RUNTIME_DIR/ragfs/<hash>.pid` (fallback `~/.cache/ragfs/run/`) and logs to `~/.cache/ragfs/logs/<hash>.log`. Unmount remains `fusermount -u <mountpoint>`.
 - Documented actual code chunking (pattern matching) and removed unused `tree-sitter` dependency
 - FUSE `.help` now covers `.ops/`, `.safety/`, `.semantic/` and product limits
 - FUSE `.config` includes `api_version` and states it is mount wiring, not user TOML

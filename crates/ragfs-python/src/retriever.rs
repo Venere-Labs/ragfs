@@ -25,7 +25,7 @@ use crate::vectorstore::{Document, SearchResultPy};
 /// await retriever.init()
 /// results = await retriever.get_relevant_documents("my query")
 /// ```
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct RagfsRetriever {
     embedder: Arc<RwLock<Option<CandleEmbedder>>>,

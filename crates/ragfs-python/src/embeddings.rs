@@ -21,7 +21,7 @@ use tokio::sync::RwLock;
 /// await embeddings.init()
 /// vectors = await embeddings.embed_documents(["Hello", "World"])
 /// ```
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct RagfsEmbeddings {
     embedder: Arc<RwLock<Option<CandleEmbedder>>>,

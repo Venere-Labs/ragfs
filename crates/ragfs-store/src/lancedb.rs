@@ -84,6 +84,11 @@ impl LanceStore {
         metric == ANN_INDEX_METRIC
     }
 
+    /// Reuse/refresh only a cosine-trained vector index.
+    pub(crate) fn ann_index_is_cosine(distance_type: Option<DistanceType>) -> bool {
+        distance_type == Some(DistanceType::Cosine)
+    }
+
     async fn vector_index_name(table: &Table) -> Option<String> {
         match table.list_indices().await {
             Ok(indices) => indices
@@ -122,12 +127,32 @@ impl LanceStore {
     }
 
     /// Best-effort IVF-PQ on `vector`. Small tables keep exact scan.
-    /// Existing indexes are incrementally refreshed after large post-threshold appends.
+    /// Existing cosine indexes are incrementally refreshed after large appends.
+    /// A non-cosine vector index is dropped and replaced when the table is large enough.
     async fn ensure_vector_index(&self) -> Result<(), StoreError> {
         let table = self.get_chunks_table().await?;
         if let Some(name) = Self::vector_index_name(&table).await {
-            Self::refresh_vector_index(&table, &name).await;
-            return Ok(());
+            match table.index_stats(&name).await {
+                Ok(Some(stats)) if Self::ann_index_is_cosine(stats.distance_type) => {
+                    Self::refresh_vector_index(&table, &name).await;
+                    return Ok(());
+                }
+                Ok(Some(stats)) => {
+                    info!(
+                        "Replacing vector index trained as {:?} with cosine IVF-PQ",
+                        stats.distance_type
+                    );
+                    if let Err(e) = table.drop_index(&name).await {
+                        warn!("Could not drop mismatched vector index (search may bypass): {e}");
+                        return Ok(());
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    debug!("Skipping ANN reuse; could not read index stats: {e}");
+                    return Ok(());
+                }
+            }
         }
 
         let count = match table.count_rows(None).await {
@@ -1882,6 +1907,10 @@ mod tests {
         assert!(LanceStore::ann_index_covers_metric(DistanceMetric::Cosine));
         assert!(!LanceStore::ann_index_covers_metric(DistanceMetric::L2));
         assert!(!LanceStore::ann_index_covers_metric(DistanceMetric::Dot));
+        assert!(LanceStore::ann_index_is_cosine(Some(DistanceType::Cosine)));
+        assert!(!LanceStore::ann_index_is_cosine(Some(DistanceType::L2)));
+        assert!(!LanceStore::ann_index_is_cosine(Some(DistanceType::Dot)));
+        assert!(!LanceStore::ann_index_is_cosine(None));
     }
 
     #[tokio::test]
@@ -1900,6 +1929,89 @@ mod tests {
         );
         store.upsert_chunks(&[chunk]).await.unwrap();
         store.ensure_vector_index().await.unwrap();
+
+        let results = store
+            .search(SearchQuery {
+                text: None,
+                embedding: create_random_embedding(TEST_DIM),
+                limit: 5,
+                filters: vec![],
+                metric: DistanceMetric::Cosine,
+            })
+            .await
+            .unwrap();
+        assert!(!results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_replaces_preexisting_l2_vector_index() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path, TEST_DIM);
+        store.init().await.unwrap();
+
+        let file_path = PathBuf::from("/test/l2.txt");
+        let chunks: Vec<Chunk> = (0..16)
+            .map(|i| {
+                create_test_chunk(
+                    &file_path,
+                    &format!("legacy l2 chunk {i}"),
+                    create_random_embedding(TEST_DIM),
+                    i,
+                )
+            })
+            .collect();
+        store.upsert_chunks(&chunks).await.unwrap();
+
+        let table = store.get_chunks_table().await.unwrap();
+        let created = table
+            .create_index(
+                &["vector"],
+                Index::IvfPq(
+                    IvfPqIndexBuilder::default()
+                        .distance_type(DistanceType::L2)
+                        .num_partitions(1)
+                        .sample_rate(4),
+                ),
+            )
+            .execute()
+            .await;
+        if created.is_err() {
+            // Fixture only: Lance may refuse a tiny L2 index. Cosine search must still work.
+            let results = store
+                .search(SearchQuery {
+                    text: None,
+                    embedding: create_random_embedding(TEST_DIM),
+                    limit: 5,
+                    filters: vec![],
+                    metric: DistanceMetric::Cosine,
+                })
+                .await
+                .unwrap();
+            assert!(!results.is_empty());
+            return;
+        }
+
+        let name = LanceStore::vector_index_name(&table)
+            .await
+            .expect("L2 fixture index");
+        let before = table.index_stats(&name).await.unwrap().unwrap();
+        assert_eq!(before.distance_type, Some(DistanceType::L2));
+
+        store.ensure_vector_index().await.unwrap();
+
+        match LanceStore::vector_index_name(&table).await {
+            Some(after_name) => {
+                let after = table.index_stats(&after_name).await.unwrap().unwrap();
+                assert!(
+                    LanceStore::ann_index_is_cosine(after.distance_type),
+                    "mismatched L2 index must be replaced with cosine"
+                );
+            }
+            None => {
+                // Below MIN_ANN_ROWS: drop L2 and stay on exact scan.
+            }
+        }
 
         let results = store
             .search(SearchQuery {

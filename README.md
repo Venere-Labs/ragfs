@@ -58,7 +58,7 @@ An agentic FUSE filesystem that makes file management safe and structured for LL
 - Embedding model is `thenlper/gte-small` (~67–100MB download, hundreds of MB RAM).
 - Code chunking is regex/signature based, not a tree-sitter AST.
 - Default extractors do not parse binary `.doc` / RTF / EPUB.
-- Vector search is an exact scan until IVF-PQ is built (≥256 chunks).
+- Vector search is an exact scan until cosine IVF-PQ is built (≥256 chunks). L2/Dot stay exact.
 - Semantic organize/cleanup is Beta.
 - Large repositories (100K+ files) may need tuning.
 

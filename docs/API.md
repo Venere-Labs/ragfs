@@ -198,7 +198,7 @@ impl LanceStore {
 ```
 
 Implements `VectorStore` trait. Features:
-- Vector search (exact scan; IVF-PQ ANN when the table has at least 256 rows)
+- Vector search (exact scan; cosine IVF-PQ ANN at ≥256 rows; L2/Dot stay exact)
 - Full-text search (FTS) index for hybrid search
 - FTS created on init; ANN created best-effort after ingest
 

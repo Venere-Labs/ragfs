@@ -19,7 +19,7 @@
 //!
 //! When the `lancedb` feature is enabled:
 //!
-//! - **Vector Search**: Exact kNN scan on small tables; IVF-PQ ANN after enough rows
+//! - **Vector Search**: Exact kNN scan on small tables and L2/Dot; cosine IVF-PQ ANN after enough rows
 //! - **Hybrid Search**: Combined FTS and vector search for better relevance
 //! - **Full CRUD**: Create, read, update, delete operations for chunks and files
 //! - **Automatic Indexing**: FTS on `content` at table create; IVF-PQ on `vector` when feasible

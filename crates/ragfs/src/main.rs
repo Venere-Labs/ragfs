@@ -143,7 +143,7 @@ enum Commands {
 
         /// Restrict results to this directory (relative to the index root) and its subdirectories.
         /// Pre-upgrade indexes are migrated on open; run `ragfs index --force` afterward to store
-        /// index-root-relative dir_path values (see USER_GUIDE).
+        /// index-root-relative dir_path values (see `USER_GUIDE`).
         #[arg(long)]
         scope: Option<String>,
     },

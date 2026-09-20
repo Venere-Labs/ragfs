@@ -329,6 +329,14 @@ fn maybe_daemonize_background_mount(cli: &mut Cli) -> Result<()> {
         return Ok(());
     }
 
+    if let Some(path) = cli.config.as_mut()
+        && path.is_relative()
+    {
+        *path = std::env::current_dir()
+            .context("Failed to get current directory")?
+            .join(&*path);
+    }
+
     // Fail in the parent if config.toml is invalid.
     load_config(cli)?;
 

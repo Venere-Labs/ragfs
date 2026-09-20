@@ -78,6 +78,11 @@ impl PyOrganizeStrategy {
         }
     }
 
+    #[getter]
+    fn strategy_type(&self) -> String {
+        self.name()
+    }
+
     fn __repr__(&self) -> String {
         format!("OrganizeStrategy('{}')", self.name())
     }

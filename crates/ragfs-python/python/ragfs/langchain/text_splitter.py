@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any
 
 from ragfs import RagfsTextSplitter as CoreSplitter
 
@@ -12,8 +12,8 @@ try:
 except ImportError:
     # Fallback for older langchain versions
     try:
-        from langchain_core.documents import Document
         from langchain.text_splitter import TextSplitter
+        from langchain_core.documents import Document
     except ImportError:
         raise ImportError(
             "langchain-core or langchain-text-splitters is required. "
@@ -56,7 +56,7 @@ class LangChainRagfsTextSplitter(TextSplitter):
             chunker_type=chunker_type,
         )
 
-    def split_text(self, text: str) -> List[str]:
+    def split_text(self, text: str) -> list[str]:
         """Split text synchronously.
 
         Note: This blocks the event loop. Use asplit_text for async.
@@ -65,11 +65,11 @@ class LangChainRagfsTextSplitter(TextSplitter):
 
         return asyncio.get_event_loop().run_until_complete(self.asplit_text(text))
 
-    async def asplit_text(self, text: str) -> List[str]:
+    async def asplit_text(self, text: str) -> list[str]:
         """Split text asynchronously."""
         return await self._splitter.split_text(text)
 
-    def split_documents(self, documents: List[Document]) -> List[Document]:
+    def split_documents(self, documents: list[Document]) -> list[Document]:
         """Split documents synchronously."""
         import asyncio
 
@@ -77,7 +77,7 @@ class LangChainRagfsTextSplitter(TextSplitter):
             self.asplit_documents(documents)
         )
 
-    async def asplit_documents(self, documents: List[Document]) -> List[Document]:
+    async def asplit_documents(self, documents: list[Document]) -> list[Document]:
         """Split documents asynchronously."""
         from ragfs import Document as CoreDocument
 

@@ -438,9 +438,10 @@ ragfs query ./src "auth" -f json | jq '.results[0].score'
 
 ```
 ~/.local/share/ragfs/indices/{hash}/index.lance
+~/.local/share/ragfs/indices/{hash}/ragfs-schema.json
 ```
 
-Each indexed directory gets a unique index based on its path hash (blake3).
+Each indexed directory gets a unique index based on its path hash (blake3). `ragfs-schema.json` records `chunks_schema_version` (currently `2`, with directory-scope columns). Existing indexes are migrated on open; see [Scoped search and existing indexes](#scoped-search-and-existing-indexes).
 
 ### Embedding Model Cache
 

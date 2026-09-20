@@ -87,9 +87,9 @@ sequenceDiagram
     E->>E: Detect MIME type
     E->>C: ExtractedContent
     C->>C: Split into chunks (~512 tokens)
-    C->>M: ChunkOutput[]
+    C->>M: ChunkOutput list
     M->>M: Generate embeddings (gte-small)
-    M->>S: EmbeddingOutput[]
+    M->>S: EmbeddingOutput list
     S->>S: Store vectors + metadata
 ```
 
@@ -104,10 +104,10 @@ sequenceDiagram
 
     U->>Q: "machine learning implementation"
     Q->>M: Embed query text
-    M->>Q: Query vector [f32; 384]
+    M->>Q: Query vector (f32 x 384)
     Q->>S: Vector similarity search
     S->>S: ANN search (cosine)
-    S->>Q: SearchResult[]
+    S->>Q: SearchResult list
     Q->>U: Ranked results with content
 ```
 

@@ -74,6 +74,9 @@ flate2 = "1.1"
 # Image processing
 image = "0.25"
 
+# Office (OOXML / ODT) zip+xml
+zip = "2.4"
+
 # Tokenization
 tiktoken-rs = "0.6"
 

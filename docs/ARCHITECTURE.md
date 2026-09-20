@@ -145,6 +145,7 @@ Content extraction from various file formats.
 **Components:**
 - `ExtractorRegistry` - Routes files to appropriate extractors by MIME type
 - `TextExtractor` - UTF-8 text and source/markup extensions (not Office binary)
+- `OfficeExtractor` - OOXML/ODT visible text (`.docx`, `.xlsx`, `.pptx`, `.odt`)
 
 **Supported Formats:**
 - Text: `.txt`, `.md`, `.rst`
@@ -152,6 +153,7 @@ Content extraction from various file formats.
 - Config: `.json`, `.yaml`, `.toml`, `.xml`
 - Markup: `.html`, `.css`
 - PDF: Text extraction + embedded images (JPEG, PNG, JPEG2000)
+- Office: `.docx`, `.xlsx`, `.pptx`, `.odt` (not binary `.doc`)
 - Images: Metadata extraction, optional vision captioning
 
 **PDF Image Extraction:**

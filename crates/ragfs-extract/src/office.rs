@@ -23,7 +23,7 @@ const ODT_MIME: &str = "application/vnd.oasis.opendocument.text";
 const MAX_ENTRY_UNCOMPRESSED: u64 = 8 * 1024 * 1024;
 /// Aggregate uncompressed cap across extracted XML parts.
 const MAX_TOTAL_UNCOMPRESSED: u64 = 32 * 1024 * 1024;
-/// Max spaces expanded from one ODT `text:s`/`text:c` (DoS guard).
+/// Upper bound on spaces expanded from one ODT `text:c` count.
 const MAX_ODT_SPACES: usize = 255;
 
 /// Office/OpenDocument text extractor.
@@ -559,7 +559,7 @@ fn odt_space_count(tag: &str) -> usize {
                 if let Some(end) = rest.find(quote)
                     && let Ok(n) = rest[..end].parse::<usize>()
                 {
-                    return n.max(1).min(MAX_ODT_SPACES);
+                    return n.clamp(1, MAX_ODT_SPACES);
                 }
             }
         }

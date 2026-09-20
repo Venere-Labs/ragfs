@@ -404,7 +404,7 @@ Error: Failed to connect to MCP server
 | `Insert` | `insert failed: {details}` | Data couldn't be stored | May be disk full or corruption |
 | `Query` | `query failed: {details}` | Search failed | Check vector dimensions match |
 | `Delete` | `delete failed: {details}` | Deletion failed | File may not be indexed |
-| `Schema` | `schema error: {details}` | Database schema issue | May need to recreate index |
+| `Schema` | `schema error: {details}` | Database schema issue (including a failed v2 directory-scope migration) | Automatic migration runs on open. If it fails, delete `~/.local/share/ragfs/indices/<hash>/` and run `ragfs index <dir> --force`. `--force` alone does not add Lance columns. |
 
 ### I/O Errors
 

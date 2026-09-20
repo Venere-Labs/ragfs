@@ -25,6 +25,7 @@
 //! - [`SearchQuery`]: Parameters for a vector search
 //! - [`SearchResult`]: A matching chunk with similarity score
 //! - [`SearchFilter`]: Filters to narrow search results
+//! - [`DirectoryScope`]: Relative directory metadata for scoped search
 //! - [`DistanceMetric`]: Vector distance calculation method
 
 use chrono::{DateTime, Utc};
@@ -110,8 +111,109 @@ pub struct Chunk {
     pub depth: u8,
     /// Embedding vector (if computed)
     pub embedding: Option<Vec<f32>>,
+    /// Relative directory of the source file (e.g. `src/auth`). Empty at the index root.
+    pub dir_path: String,
+    /// Number of directory components in `dir_path`.
+    pub dir_depth: u16,
+    /// Comma-separated relative path components, including the filename.
+    pub path_components: String,
     /// Additional metadata
     pub metadata: ChunkMetadata,
+}
+
+/// Directory-scope metadata stored on each indexed chunk.
+///
+/// This is a path prefix, not a trie. Search uses exact `dir_path` or a
+/// subdirectory (`src/auth` matches `src/auth` and `src/auth/oauth`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct DirectoryScope {
+    /// Relative directory containing the file (e.g. `src/auth`).
+    pub dir_path: String,
+    /// Number of directory components in `dir_path`.
+    pub dir_depth: u16,
+    /// Comma-separated relative path components including the filename.
+    pub path_components: String,
+}
+
+impl DirectoryScope {
+    /// Derive scope fields from `file_path`, optionally relative to an index `root`.
+    #[must_use]
+    pub fn from_paths(file_path: &std::path::Path, root: Option<&std::path::Path>) -> Self {
+        let rel = root
+            .and_then(|r| file_path.strip_prefix(r).ok())
+            .unwrap_or(file_path);
+        let parts: Vec<String> = rel
+            .components()
+            .filter_map(|c| match c {
+                std::path::Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+                _ => None,
+            })
+            .collect();
+
+        let dir_parts = parts.get(..parts.len().saturating_sub(1)).unwrap_or(&[]);
+        let dir_path = dir_parts.join("/");
+        let dir_depth = dir_parts.len() as u16;
+        let path_components = parts.join(",");
+
+        Self {
+            dir_path,
+            dir_depth,
+            path_components,
+        }
+    }
+
+    /// Derive scope from an already-relative or absolute file path (no index root).
+    #[must_use]
+    pub fn from_file_path(file_path: &std::path::Path) -> Self {
+        Self::from_paths(file_path, None)
+    }
+
+    /// Normalize a CLI/query scope (`src/auth/`, `src\\auth` → `src/auth`).
+    #[must_use]
+    pub fn normalize_prefix(scope: &str) -> String {
+        scope.replace('\\', "/").trim_matches('/').to_string()
+    }
+
+    /// Whether this directory is `scope` or a subdirectory of it.
+    #[must_use]
+    pub fn matches_prefix(&self, scope: &str) -> bool {
+        dir_path_matches_scope(&self.dir_path, scope)
+    }
+
+    /// Infer the index root from an absolute file path and its stored relative `dir_path`.
+    #[must_use]
+    pub fn infer_root(file_path: &std::path::Path, dir_path: &str) -> Option<std::path::PathBuf> {
+        let parent = file_path.parent()?;
+        let dir = Self::normalize_prefix(dir_path);
+        if dir.is_empty() {
+            return Some(parent.to_path_buf());
+        }
+        let parent_norm = parent.to_string_lossy().replace('\\', "/");
+        parent_norm
+            .strip_suffix(&dir)
+            .map(|root| std::path::PathBuf::from(root.trim_end_matches('/')))
+    }
+}
+
+/// Match a stored `dir_path` against a scope prefix.
+///
+/// Empty / `.` scope matches everything (no restriction).
+///
+/// Besides an exact directory or a subdirectory (`src/auth` matches
+/// `src/auth/oauth`), a path-component-aligned suffix also matches. That
+/// covers schema-v1 indexes whose `dir_path` was backfilled from an
+/// absolute `file_path` (`project/src/auth` still matches `--scope src/auth`).
+#[must_use]
+pub fn dir_path_matches_scope(dir_path: &str, scope: &str) -> bool {
+    let scope = DirectoryScope::normalize_prefix(scope);
+    if scope.is_empty() || scope == "." {
+        return true;
+    }
+    let dir = DirectoryScope::normalize_prefix(dir_path);
+    dir == scope
+        || dir.starts_with(&format!("{scope}/"))
+        || dir.ends_with(&format!("/{scope}"))
+        || dir.contains(&format!("/{scope}/"))
 }
 
 /// Type of chunk content.
@@ -370,6 +472,11 @@ pub struct SearchQuery {
     pub filters: Vec<SearchFilter>,
     /// Distance metric
     pub metric: DistanceMetric,
+    /// Optional directory scope, relative to the index root.
+    ///
+    /// When set, only chunks whose `dir_path` is this directory or a
+    /// subdirectory are considered. Applied as a filter alongside ANN.
+    pub scope_prefix: Option<String>,
 }
 
 /// Search filters.
@@ -544,6 +651,9 @@ mod tests {
             parent_chunk_id: None,
             depth: 0,
             embedding: None,
+            dir_path: "test".to_string(),
+            dir_depth: 1,
+            path_components: "test,file.rs".to_string(),
             metadata: ChunkMetadata::default(),
         };
 
@@ -797,6 +907,61 @@ mod tests {
         assert!(meta.language.is_none());
         assert!(meta.page_count.is_none());
         assert!(meta.created_at.is_none());
+    }
+
+    // ==================== DirectoryScope Tests ====================
+
+    #[test]
+    fn test_directory_scope_is_relative_to_root() {
+        let root = PathBuf::from("/project");
+        let file = PathBuf::from("/project/src/auth/login.rs");
+        let scope = DirectoryScope::from_paths(&file, Some(&root));
+
+        assert_eq!(scope.dir_path, "src/auth");
+        assert_eq!(scope.dir_depth, 2);
+        assert_eq!(scope.path_components, "src,auth,login.rs");
+    }
+
+    #[test]
+    fn test_directory_scope_index_root_file() {
+        let root = PathBuf::from("/project");
+        let file = PathBuf::from("/project/README.md");
+        let scope = DirectoryScope::from_paths(&file, Some(&root));
+
+        assert_eq!(scope.dir_path, "");
+        assert_eq!(scope.dir_depth, 0);
+        assert_eq!(scope.path_components, "README.md");
+    }
+
+    #[test]
+    fn test_directory_scope_without_root_strips_only_prefix_components() {
+        let file = PathBuf::from("/test/file.rs");
+        let scope = DirectoryScope::from_file_path(&file);
+        assert_eq!(scope.dir_path, "test");
+        assert_eq!(scope.path_components, "test,file.rs");
+    }
+
+    #[test]
+    fn test_dir_path_matches_scope_exact_and_subdirectory() {
+        assert!(dir_path_matches_scope("src/auth", "src/auth"));
+        assert!(dir_path_matches_scope("src/auth/oauth", "src/auth"));
+        assert!(dir_path_matches_scope("src/auth", "src/auth/"));
+        assert!(!dir_path_matches_scope("src/other", "src/auth"));
+        assert!(!dir_path_matches_scope("src/auth-backup", "src/auth"));
+        assert!(dir_path_matches_scope("src", ""));
+        assert!(dir_path_matches_scope("src", "."));
+    }
+
+    #[test]
+    fn test_dir_path_matches_scope_migrated_absolute_suffix() {
+        // from_file_path("/project/src/auth/login.rs") → "project/src/auth"
+        assert!(dir_path_matches_scope("project/src/auth", "src/auth"));
+        assert!(dir_path_matches_scope("project/src/auth/oauth", "src/auth"));
+        assert!(dir_path_matches_scope("project/src", "src"));
+        assert!(dir_path_matches_scope("project/src/auth", "src"));
+        assert!(!dir_path_matches_scope("project/src-backup", "src"));
+        assert!(!dir_path_matches_scope("project/other", "src/auth"));
+        assert!(!dir_path_matches_scope("project/author/notes", "auth"));
     }
 
     // ==================== FileEvent Tests ====================

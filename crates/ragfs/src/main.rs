@@ -22,6 +22,13 @@
 //! # Search for content
 //! ragfs query ~/Documents "machine learning implementation"
 //!
+//! # Restrict to a subdirectory of the indexed tree
+//! ragfs query ~/Documents "auth" --scope src/auth
+//!
+//! # After upgrading RAGFS, existing indexes are migrated on open.
+//! # Optional: rewrite index-root-relative `dir_path` values
+//! # ragfs index ~/Documents --force
+//!
 //! # Get JSON output
 //! ragfs query ~/Documents "auth" --format json
 //! ```
@@ -109,7 +116,9 @@ enum Commands {
         /// Directory to index
         path: PathBuf,
 
-        /// Force reindexing of all files
+        /// Force reindexing of all files (skip content-hash reuse; rewrite directory-scope fields).
+        /// Schema upgrades for existing Lance indexes run automatically on open — if that
+        /// migration fails, delete the index directory and re-run with `--force`.
         #[arg(short, long)]
         force: bool,
 
@@ -133,6 +142,12 @@ enum Commands {
         /// Enable hybrid search (vector + full-text). Overrides `[query].hybrid`.
         #[arg(long)]
         hybrid: bool,
+
+        /// Restrict results to this directory (relative to the index root) and its subdirectories.
+        /// Pre-upgrade indexes are migrated on open; run `ragfs index --force` afterward to store
+        /// index-root-relative `dir_path` values (see `USER_GUIDE`).
+        #[arg(long)]
+        scope: Option<String>,
     },
 
     /// Show index status
@@ -512,7 +527,24 @@ async fn run(cli: Cli) -> Result<()> {
                     mountpoint
                 );
             }
-            fuser::mount2(fs, &mountpoint, &options)?;
+
+            // FUSE callbacks call `Handle::block_on`. That panics if `mount2`
+            // itself is running on a Tokio worker, so use a dedicated OS thread
+            // and wait off the worker so the reindex task stays alive.
+            let fuse_thread = std::thread::Builder::new()
+                .name("ragfs-fuse".into())
+                .spawn(move || fuser::mount2(fs, &mountpoint, &options))
+                .context("Failed to spawn FUSE mount thread")?;
+
+            let join_result = tokio::task::spawn_blocking(move || fuse_thread.join())
+                .await
+                .context("Failed to wait for FUSE mount thread")?;
+
+            match join_result {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return Err(e.into()),
+                Err(_) => anyhow::bail!("FUSE mount thread panicked"),
+            }
 
             // Cleanup reindex handler on unmount
             reindex_handler.abort();
@@ -594,6 +626,7 @@ async fn run(cli: Cli) -> Result<()> {
             query,
             limit,
             hybrid,
+            scope,
         } => {
             if !path.exists() {
                 anyhow::bail!("Directory does not exist: {}", path.display());
@@ -627,7 +660,8 @@ async fn run(cli: Cli) -> Result<()> {
                 limit,
                 use_hybrid,
             )
-            .with_max_limit(config.query.max_limit);
+            .with_max_limit(config.query.max_limit)
+            .with_scope(scope);
 
             // Execute query
             let results = executor

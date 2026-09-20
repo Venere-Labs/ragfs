@@ -5,8 +5,8 @@
 use async_trait::async_trait;
 use ragfs_chunker::{ChunkerRegistry, FixedSizeChunker};
 use ragfs_core::{
-    Chunk, ChunkConfig, ChunkMetadata, ContentType, DistanceMetric, EmbedError, Embedder,
-    EmbeddingConfig, EmbeddingOutput, Modality, SearchQuery, SearchResult, VectorStore,
+    Chunk, ChunkConfig, ChunkMetadata, ContentType, DirectoryScope, DistanceMetric, EmbedError,
+    Embedder, EmbeddingConfig, EmbeddingOutput, Modality, SearchQuery, SearchResult, VectorStore,
 };
 use ragfs_extract::{ExtractorRegistry, TextExtractor};
 use ragfs_store::LanceStore;
@@ -89,6 +89,7 @@ fn create_chunk(
     chunk_index: u32,
     token_count: usize,
 ) -> Chunk {
+    let scope = DirectoryScope::from_file_path(file_path);
     Chunk {
         id: Uuid::new_v4(),
         file_id: Uuid::new_v4(),
@@ -102,6 +103,9 @@ fn create_chunk(
         parent_chunk_id: None,
         depth: chunk_output.depth,
         embedding: Some(embedding),
+        dir_path: scope.dir_path,
+        dir_depth: scope.dir_depth,
+        path_components: scope.path_components,
         metadata: ChunkMetadata {
             embedding_model: Some("mock-embedder".to_string()),
             indexed_at: Some(chrono::Utc::now()),
@@ -224,6 +228,7 @@ async fn test_full_pipeline_extract_chunk_embed_store_search() {
             limit: 5,
             metric: DistanceMetric::Cosine,
             filters: vec![],
+            scope_prefix: None,
         })
         .await
         .unwrap();
@@ -244,6 +249,7 @@ async fn test_full_pipeline_extract_chunk_embed_store_search() {
             limit: 5,
             metric: DistanceMetric::Cosine,
             filters: vec![],
+            scope_prefix: None,
         })
         .await
         .unwrap();
@@ -264,6 +270,7 @@ async fn test_full_pipeline_extract_chunk_embed_store_search() {
             limit: 5,
             metric: DistanceMetric::Cosine,
             filters: vec![],
+            scope_prefix: None,
         })
         .await
         .unwrap();
@@ -383,6 +390,7 @@ async fn test_pipeline_delete_and_reindex() {
             limit: 5,
             metric: DistanceMetric::Cosine,
             filters: vec![],
+            scope_prefix: None,
         })
         .await
         .unwrap();
@@ -460,6 +468,7 @@ async fn test_pipeline_hybrid_search() {
             limit: 5,
             metric: DistanceMetric::Cosine,
             filters: vec![],
+            scope_prefix: None,
         })
         .await
         .unwrap();

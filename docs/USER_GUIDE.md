@@ -118,7 +118,7 @@ ragfs index <PATH> [OPTIONS]
 **Options:**
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--force` | `-f` | Reindex every eligible file (skip content-hash reuse) |
+| `--force` | `-f` | Reindex every eligible file (skip content-hash reuse; rewrite directory-scope fields). Does **not** add Lance columns by itself — schema upgrades run automatically on open. |
 | `--watch` | `-w` | Watch for changes after initial indexing |
 
 **Examples:**
@@ -161,6 +161,7 @@ ragfs query <PATH> <QUERY> [OPTIONS]
 |--------|-------|---------|-------------|
 | `--limit` | `-l` | `[query].default_limit` (10) | Maximum number of results (clamped by `[query].max_limit`) |
 | `--hybrid` | | config `[query].hybrid` (true) | Force hybrid search (vector + full-text) |
+| `--scope` | | (entire index) | Restrict results to this directory (relative to the index root) and its subdirectories. See [Scoped search and existing indexes](#scoped-search-and-existing-indexes). |
 
 **Examples:**
 
@@ -173,6 +174,37 @@ ragfs query ./src "API endpoint" --limit 25
 
 # JSON output for scripting
 ragfs query ./src "configuration" -f json
+
+# Only search under src/auth/ (and nested dirs such as src/auth/oauth/)
+ragfs query . "login flow" --scope src/auth
+```
+
+#### Scoped search and existing indexes
+
+`--scope` filters on the `dir_path` column stored with each chunk (exact directory or a subdirectory). IVF-PQ ANN search is unchanged: the scope predicate is a pre/post filter (`only_if`), not a replacement for the vector index.
+
+**New indexes** (created by this version) store `dir_path` relative to the index root (`src/auth` for `/project/src/auth/login.rs` when you indexed `/project`). `--scope src/auth` matches that path exactly.
+
+**Existing indexes** created before directory-scope columns existed are migrated automatically the next time RAGFS opens them (`index`, `query`, `status`, or `mount`):
+
+1. Missing `dir_path` / `dir_depth` / `path_components` columns are added in place.
+2. Values are backfilled from each chunk's `file_path` (path components with the leading `/` stripped, e.g. `/project/src/auth/login.rs` → `project/src/auth`).
+3. A sidecar `ragfs-schema.json` next to the Lance database records `chunks_schema_version = 2`.
+
+Scoped search works on those migrated rows because the filter also accepts a path-component-aligned suffix (`project/src/auth` still matches `--scope src/auth`). Embeddings and the IVF-PQ index are kept.
+
+`--force` alone cannot add Lance columns. After a successful automatic migration, run a force reindex if you want `dir_path` stored relative to the index root (same form as `--scope`):
+
+```bash
+ragfs index /path/to/directory --force
+```
+
+If automatic migration fails, RAGFS does **not** delete the index. Remove the index directory and rebuild:
+
+```bash
+# Indexes live under ~/.local/share/ragfs/indices/<hash>/
+rm -rf ~/.local/share/ragfs/indices/<hash>
+ragfs index /path/to/directory --force
 ```
 
 **Text Output Format:**
@@ -406,9 +438,10 @@ ragfs query ./src "auth" -f json | jq '.results[0].score'
 
 ```
 ~/.local/share/ragfs/indices/{hash}/index.lance
+~/.local/share/ragfs/indices/{hash}/ragfs-schema.json
 ```
 
-Each indexed directory gets a unique index based on its path hash (blake3).
+Each indexed directory gets a unique index based on its path hash (blake3). `ragfs-schema.json` records `chunks_schema_version` (currently `2`, with directory-scope columns). Existing indexes are migrated on open; see [Scoped search and existing indexes](#scoped-search-and-existing-indexes).
 
 ### Embedding Model Cache
 

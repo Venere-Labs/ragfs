@@ -186,19 +186,26 @@ jobs:
           python-version: '3.12'
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
+      - name: Create virtual environment
+        run: |
+          python -m venv .venv
       - name: Install Python dependencies
         run: |
+          source .venv/bin/activate
           pip install maturin pytest pytest-asyncio pytest-cov
           pip install llama-index-core haystack-ai
       - name: Build ragfs Python package
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
           maturin develop --features "candle,lancedb"
       - name: Run LlamaIndex tests
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
           pytest tests/test_llamaindex/ -v -m "not slow and not requires_model"
       - name: Run Haystack tests
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
           pytest tests/test_haystack/ -v -m "not slow and not requires_model"

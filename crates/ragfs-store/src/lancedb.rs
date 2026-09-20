@@ -386,10 +386,9 @@ impl LanceStore {
                  (adding directory-scope columns)"
             );
             table
-                .add_columns(
-                    NewColumnTransform::AllNulls(Arc::new(Schema::new(missing))),
-                    None,
-                )
+                .add_columns()
+                .transform(NewColumnTransform::AllNulls(Arc::new(Schema::new(missing))))
+                .execute()
                 .await
                 .map_err(|e| {
                     StoreError::Schema(Self::schema_migration_failed_message(&self.db_path, &e))
@@ -2955,7 +2954,11 @@ mod tests {
         let table = conn.open_table(CHUNKS_TABLE).execute().await.unwrap();
         let schema = batch.schema();
         let batches = RecordBatchIterator::new(vec![Ok(batch)], schema);
-        table.add(Box::new(batches)).execute().await.unwrap();
+        table
+            .add(Box::new(batches) as Box<dyn RecordBatchReader + Send>)
+            .execute()
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

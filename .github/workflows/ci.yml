@@ -138,13 +138,13 @@ jobs:
           RUSTDOCFLAGS: -D warnings
 
   msrv:
-    name: MSRV (1.88)
+    name: MSRV (1.91)
     runs-on: ubuntu-latest
     # Full validation runs on main and on ready-for-review PRs only.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.88
+      - uses: dtolnay/rust-toolchain@1.91
       - uses: Swatinem/rust-cache@v2
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler

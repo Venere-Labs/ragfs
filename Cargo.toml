@@ -19,7 +19,7 @@ authors = ["Venere Labs"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Venere-Labs/ragfs"
-rust-version = "1.88"
+rust-version = "1.91"
 
 [workspace.dependencies]
 # Internal crates (default-features = false for proper feature propagation)
@@ -50,10 +50,15 @@ fuser = "0.16"
 notify = "8.2"
 notify-debouncer-full = "0.6"
 
-# Vector store
-lancedb = "0.23"
-arrow-array = "56"
-arrow-schema = "56"
+# Vector store.
+#
+# Pinned to the 0.37 line on purpose: lancedb 0.38.0 does not build with its
+# default (empty) feature set, because `src/job.rs` uses `Error::Http` while
+# that variant is `#[cfg(feature = "remote")]`. 0.37.1 has the same modern
+# dependency generation (arrow 58, lance 10, object_store 0.13) without the bug.
+lancedb = "0.37.1"
+arrow-array = "58"
+arrow-schema = "58"
 
 # Embeddings
 # embed_anything = "0.5"

@@ -27,12 +27,6 @@ jobs:
             os: ubuntu-latest
             artifact_name: ragfs-linux-aarch64
             cross: true
-          - target: x86_64-apple-darwin
-            os: macos-13
-            artifact_name: ragfs-macos-x86_64
-          - target: aarch64-apple-darwin
-            os: macos-14
-            artifact_name: ragfs-macos-aarch64
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -44,18 +38,15 @@ jobs:
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux' && !matrix.cross
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
-      - name: Install dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: brew install macfuse protobuf
       - name: Install cross
         if: ${{ matrix.cross }}
         run: cargo install cross --locked
       - name: Build (native)
         if: ${{ !matrix.cross }}
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release -p ragfs --target ${{ matrix.target }}
       - name: Build (cross)
         if: ${{ matrix.cross }}
-        run: cross build --release --target ${{ matrix.target }}
+        run: cross build --release -p ragfs --target ${{ matrix.target }}
       - name: Package binary
         run: |
           mkdir -p dist

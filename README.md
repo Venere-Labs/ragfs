@@ -78,7 +78,7 @@ Linux archives, each with a `.sha256` file:
 - `ragfs-linux-x86_64.tar.gz`
 - `ragfs-linux-aarch64.tar.gz`
 
-`ragfs-macos-x86_64.tar.gz` and `ragfs-macos-aarch64.tar.gz` are CI binaries. They are not a supported FUSE product.
+macOS is not part of the release. `fuser` needs libfuse, and the macOS runners do not provide it.
 
 ```bash
 # From a Linux release archive

@@ -2,5 +2,5 @@
 pre-build = [
     "dpkg --add-architecture arm64",
     "apt-get update",
-    "apt-get install -y libfuse-dev:arm64"
+    "apt-get install -y libfuse-dev:arm64 protobuf-compiler"
 ]

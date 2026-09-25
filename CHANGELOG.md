@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-25
+
 ### Security
 - Bump `lopdf` to `0.42` (RUSTSEC-2026-0187 nesting-depth DoS). Already on the 0.42 API in `ragfs-extract`.
 - Bump `pyo3` and `pyo3-async-runtimes` to `0.29` (RUSTSEC-2026-0176 / RUSTSEC-2026-0177).
@@ -102,38 +104,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `vision` feature: Enables `BlipCaptioner` for image captioning
   - `full` feature: Enables all optional features
   - Build profiles: `cargo build` (default), `--features full`, `--no-default-features` (minimal)
-
-### Fixed
-- N/A
-
-## [0.2.0] - 2026-01-11
-
-### Added
-- **Multimodal support**: PDF extraction, image handling
-- **Advanced chunking**: CodeChunker with tree-sitter for syntax-aware code splitting
-- **Semantic chunking**: SemanticChunker for document structure-aware chunking
-- **Comprehensive test suite**: 291 tests across all crates
-  - ragfs-core: 59 tests (types, errors)
-  - ragfs-extract: 56 tests (text, PDF, image extractors)
-  - ragfs-chunker: 54 tests (fixed-size, code, semantic chunkers)
-  - ragfs-fuse: 65 tests (inode management, filesystem helpers)
-  - ragfs-index: 18 tests (indexing pipeline)
-  - ragfs-store: 14 tests (LanceDB operations)
-  - ragfs-embed: 13 tests (embeddings)
-  - ragfs-query: 9 tests (query execution)
-- **Reindex trigger**: `.ragfs/.reindex` file write support for on-demand reindexing
-- **Data integrity**: Full round-trip for line ranges, embeddings, timestamps in LanceDB
-- **Benchmarks**: Criterion-based benchmarks for embedding, search, and indexing
-
-### Changed
-- Improved error handling with proper error chain propagation
-- Enhanced InodeTable with proper FUSE reference counting
-- Better MIME type preservation through the indexing pipeline
-
-### Fixed
-- Line range parsing from LanceDB results
-- Embedding vector round-trip in search results
-- Timestamp parsing for file records
 
 ## [0.1.0] - 2025-01-11
 

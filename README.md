@@ -5,7 +5,7 @@
 [![codecov](https://codecov.io/gh/Venere-Labs/ragfs/branch/main/graph/badge.svg)](https://codecov.io/gh/Venere-Labs/ragfs)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://Venere-Labs.github.io/ragfs/ragfs/)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.91%2B-orange.svg)](https://www.rust-lang.org)
 
 An agentic FUSE filesystem that makes file management safe and structured for LLM agents. Includes JSON-based operations with undo support, complete audit logging, and AI-powered features like semantic search, auto-organization, and deduplication.
 
@@ -55,6 +55,7 @@ An agentic FUSE filesystem that makes file management safe and structured for LL
 
 **Limitations:**
 - Linux only (FUSE requirement). macOS CI artifacts are not a supported FUSE product.
+- `ragfs index` without `--watch` does not remove files that disappeared while the process was not running. `--watch` receives those deletions.
 - Embedding model is `thenlper/gte-small` (~67–100MB download, hundreds of MB RAM).
 - Code chunking is regex/signature based, not a tree-sitter AST.
 - Default extractors do not parse binary `.doc` / RTF / EPUB.
@@ -64,21 +65,30 @@ An agentic FUSE filesystem that makes file management safe and structured for LL
 
 ## Requirements
 
-- Rust 1.88 or later
+- Rust 1.91 or later
 - Linux with FUSE support (`libfuse-dev` on Debian/Ubuntu, `fuse` on Arch)
-- Disk space for the `gte-small` embedding model (downloaded on first run, ~67–100MB)
+- Disk space for the `gte-small` embedding model (downloaded on first run, ~67–100MB). `HF_HUB_OFFLINE=1` uses only a cache that is already present.
 
 ## Installation
 
+GitHub Release `v0.2.0` publishes the CLI only. The crates are not on crates.io, and the Python bindings are not on PyPI.
+
+Linux archives, each with a `.sha256` file:
+
+- `ragfs-linux-x86_64.tar.gz`
+- `ragfs-linux-aarch64.tar.gz`
+
+`ragfs-macos-x86_64.tar.gz` and `ragfs-macos-aarch64.tar.gz` are CI binaries. They are not a supported FUSE product.
+
 ```bash
-# Clone the repository
+# From a Linux release archive
+tar -xzf ragfs-linux-x86_64.tar.gz
+sudo install ragfs /usr/local/bin/ragfs
+
+# Or build from source
 git clone https://github.com/Venere-Labs/ragfs.git
 cd ragfs
-
-# Build in release mode
 cargo build --release
-
-# Install to ~/.cargo/bin
 cargo install --path crates/ragfs
 ```
 
@@ -186,7 +196,10 @@ Arguments:
 Options:
   -f, --force  Force reindexing of all files (rewrites directory-scope fields;
                schema upgrades for old Lance indexes run automatically on open)
-  -w, --watch  Watch for changes after initial indexing
+  -w, --watch  Watch for changes after initial indexing. Deletions are
+               applied only while this process is running. A later
+               `ragfs index` without `--watch` keeps chunks for files
+               that disappeared in between.
 ```
 
 ### query
@@ -269,6 +282,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 
 - **Indices**: `~/.local/share/ragfs/indices/{hash}/index.lance`
 - **Models**: `~/.local/share/ragfs/models/`
+
+`RAGFS_DATA_DIR` moves both. The default remains `~/.local/share/ragfs`.
 
 ## License
 

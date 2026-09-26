@@ -45,7 +45,7 @@ all = ["ragfs[langchain,llamaindex,haystack,openai,anthropic,ollama]"]
 # Development dependencies
 dev = [
     "pytest>=8.0",
-    "pytest-asyncio>=0.24",
+    "pytest-asyncio>=1.2.0",
     "pytest-cov>=4.0",
 ]
 

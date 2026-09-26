@@ -11,6 +11,9 @@ pub struct ParsedQuery {
     pub filters: Vec<SearchFilter>,
     /// Result limit
     pub limit: usize,
+    /// Optional directory scope from `scope:` (same as `ragfs query --scope`).
+    /// Pre-upgrade indexes are migrated on open; see `USER_GUIDE`.
+    pub scope_prefix: Option<String>,
 }
 
 /// Query parser for the DSL.
@@ -38,6 +41,7 @@ impl QueryParser {
         let mut text_parts = Vec::new();
         let mut filters = Vec::new();
         let mut limit = self.default_limit;
+        let mut scope_prefix = None;
 
         for part in query.split_whitespace() {
             if let Some((key, value)) = part.split_once(':') {
@@ -65,6 +69,9 @@ impl QueryParser {
                             filters.push(SearchFilter::MaxDepth(n));
                         }
                     }
+                    "scope" => {
+                        scope_prefix = Some(value.to_string());
+                    }
                     _ => {
                         // Unknown filter, treat as text
                         text_parts.push(part);
@@ -79,6 +86,7 @@ impl QueryParser {
             text: text_parts.join(" "),
             filters,
             limit,
+            scope_prefix,
         }
     }
 }
@@ -167,6 +175,16 @@ mod tests {
         let result = parser.parse("unknown:value search");
 
         assert_eq!(result.text, "unknown:value search");
+        assert!(result.filters.is_empty());
+    }
+
+    #[test]
+    fn test_parse_scope_prefix() {
+        let parser = QueryParser::default();
+        let result = parser.parse("authentication scope:src/auth");
+
+        assert_eq!(result.text, "authentication");
+        assert_eq!(result.scope_prefix.as_deref(), Some("src/auth"));
         assert!(result.filters.is_empty());
     }
 }

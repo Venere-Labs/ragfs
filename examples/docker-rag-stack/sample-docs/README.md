@@ -10,7 +10,9 @@ Add your own documents to this directory to index them with RAGFS. Supported for
 - **Text** (`.txt`)
 - **Code** (`.py`, `.rs`, `.js`, `.ts`, `.go`, `.java`, etc.)
 - **PDF** (`.pdf`)
-- **And 40+ more formats**
+- **Office OOXML/ODT** (`.docx`, `.xlsx`, `.pptx`, `.odt` — not binary `.doc`)
+- Other UTF-8 source/markup extensions the text extractor accepts
+- **Not supported here:** binary `.doc`, RTF, EPUB
 
 ## Example: Project Documentation
 

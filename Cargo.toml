@@ -19,7 +19,7 @@ authors = ["Venere Labs"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Venere-Labs/ragfs"
-rust-version = "1.88"
+rust-version = "1.91"
 
 [workspace.dependencies]
 # Internal crates (default-features = false for proper feature propagation)
@@ -33,9 +33,9 @@ ragfs-store = { path = "crates/ragfs-store", default-features = false }
 ragfs-query = { path = "crates/ragfs-query", default-features = false }
 ragfs-python = { path = "crates/ragfs-python", default-features = false }
 
-# Python bindings
-pyo3 = { version = "0.27", features = ["extension-module"] }
-pyo3-async-runtimes = { version = "0.27", features = ["tokio-runtime"] }
+# Python bindings (>=0.29 patches RUSTSEC-2026-0176 / RUSTSEC-2026-0177)
+pyo3 = { version = "0.29", features = ["extension-module"] }
+pyo3-async-runtimes = { version = "0.29", features = ["tokio-runtime"] }
 
 # Async runtime
 tokio = { version = "1.49", features = ["full"] }
@@ -50,10 +50,15 @@ fuser = "0.16"
 notify = "8.2"
 notify-debouncer-full = "0.6"
 
-# Vector store
-lancedb = "0.23"
-arrow-array = "56"
-arrow-schema = "57"
+# Vector store.
+#
+# Pinned to the 0.37 line on purpose: lancedb 0.38.0 does not build with its
+# default (empty) feature set, because `src/job.rs` uses `Error::Http` while
+# that variant is `#[cfg(feature = "remote")]`. 0.37.1 has the same modern
+# dependency generation (arrow 58, lance 10, object_store 0.13) without the bug.
+lancedb = "0.37.1"
+arrow-array = "58"
+arrow-schema = "58"
 
 # Embeddings
 # embed_anything = "0.5"
@@ -63,9 +68,9 @@ candle-transformers = "0.9"
 hf-hub = { version = "0.4.3", features = ["tokio"] }
 tokenizers = "0.22"
 
-# PDF parsing
-pdf-extract = "0.10"
-lopdf = "0.38"
+# PDF parsing (>=0.42 patches RUSTSEC-2026-0187 nesting-depth DoS)
+pdf-extract = "0.12"
+lopdf = "0.42"
 pdf_oxide = "0.2"
 
 # Compression
@@ -74,8 +79,8 @@ flate2 = "1.1"
 # Image processing
 image = "0.25"
 
-# Code parsing
-tree-sitter = "0.26.3"
+# Office (OOXML / ODT) zip+xml
+zip = "2.4"
 
 # Tokenization
 tiktoken-rs = "0.6"
@@ -92,8 +97,11 @@ clap = { version = "4.5", features = ["derive"] }
 thiserror = "2.0"
 anyhow = "1.0"
 
-# Daemonization
-daemonize = "0.5"
+# Unix process control — used by `ragfs mount` to fork to the background.
+# Replaces unmaintained `daemonize` (RUSTSEC-2025-0069 / RUSTSEC-2026-0104).
+# rustix 1.x exposes setsid/chdir/umask but not fork (that lives behind the
+# unstable `runtime` feature), so nix is the maintained alternative.
+nix = { version = "0.31", features = ["process", "fs", "user"] }
 
 # Utilities
 uuid = { version = "1.19", features = ["v4", "serde"] }
@@ -116,6 +124,11 @@ opt-level = 3
 
 [workspace.lints.rust]
 unsafe_code = "warn"
+
+[workspace.lints.rustdoc]
+# Angle-bracket placeholders in virtual-path docs (`<uuid>`, `<text>`) are
+# not HTML. Newer rustdoc treats them as invalid tags under -D warnings.
+invalid_html_tags = "allow"
 
 [workspace.lints.clippy]
 # Enable warning groups with priority -1 (lower than individual lints)
@@ -157,3 +170,7 @@ match_wildcard_for_single_variants = "allow"
 return_self_not_must_use = "allow"
 must_use_candidate = "allow"
 unnecessary_literal_bound = "allow"
+# New pedantic lints on Clippy 1.98; existing tests use assert!(x == y)
+# and assert!(v.is_empty()). Allowing keeps CI green without rewriting tests.
+manual_assert_eq = "allow"
+assert_is_empty = "allow"

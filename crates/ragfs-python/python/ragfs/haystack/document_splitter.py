@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
 
 from ragfs import RagfsTextSplitter as CoreSplitter
 
 try:
-    from haystack import component, Document
+    from haystack import Document, component
 except ImportError:
     raise ImportError(
         "haystack-ai is required for Haystack integration. "
@@ -61,11 +60,11 @@ class HaystackRagfsDocumentSplitter:
         """Warm up the splitter (no-op for this component)."""
         pass
 
-    @component.output_types(documents=List[Document])
+    @component.output_types(documents=list[Document])
     def run(
         self,
-        documents: List[Document],
-    ) -> Dict[str, List[Document]]:
+        documents: list[Document],
+    ) -> dict[str, list[Document]]:
         """Split documents into smaller chunks.
 
         Args:
@@ -81,8 +80,8 @@ class HaystackRagfsDocumentSplitter:
 
     async def _async_split(
         self,
-        documents: List[Document],
-    ) -> List[Document]:
+        documents: list[Document],
+    ) -> list[Document]:
         """Split documents asynchronously."""
         result_docs = []
 

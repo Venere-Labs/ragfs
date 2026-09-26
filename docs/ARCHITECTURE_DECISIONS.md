@@ -101,7 +101,7 @@ Use **LanceDB** as the vector storage backend.
 
 **Performance:**
 - Fast ANN (Approximate Nearest Neighbor) search
-- Built-in HNSW indexing
+- Built-in cosine IVF-PQ ANN indexing when the table is large enough (L2/Dot stay exact)
 - Efficient for medium-scale datasets (1M+ vectors)
 
 **Features:**

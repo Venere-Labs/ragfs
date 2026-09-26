@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any
 
 from ragfs import RagfsEmbeddings as CoreEmbeddings
 
 try:
-    from llama_index.core.embeddings import BaseEmbedding
     from llama_index.core.bridge.pydantic import PrivateAttr
+    from llama_index.core.embeddings import BaseEmbedding
 except ImportError:
     raise ImportError(
         "llama-index-core is required for LlamaIndex integration. "
@@ -40,7 +40,7 @@ class LlamaIndexRagfsEmbeddings(BaseEmbedding):
 
     def __init__(
         self,
-        model_path: Optional[str] = None,
+        model_path: str | None = None,
         batch_size: int = 32,
         normalize: bool = True,
         **kwargs: Any,
@@ -66,7 +66,7 @@ class LlamaIndexRagfsEmbeddings(BaseEmbedding):
             await self._embedder.init()
             self._initialized = True
 
-    def _get_text_embedding(self, text: str) -> List[float]:
+    def _get_text_embedding(self, text: str) -> list[float]:
         """Get embedding for a single text (sync)."""
         import asyncio
 
@@ -74,12 +74,12 @@ class LlamaIndexRagfsEmbeddings(BaseEmbedding):
             self._aget_text_embedding(text)
         )
 
-    async def _aget_text_embedding(self, text: str) -> List[float]:
+    async def _aget_text_embedding(self, text: str) -> list[float]:
         """Get embedding for a single text (async)."""
         await self._ainit()
         return await self._embedder.embed_query(text)
 
-    def _get_text_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def _get_text_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Get embeddings for multiple texts (sync)."""
         import asyncio
 
@@ -87,15 +87,15 @@ class LlamaIndexRagfsEmbeddings(BaseEmbedding):
             self._aget_text_embeddings(texts)
         )
 
-    async def _aget_text_embeddings(self, texts: List[str]) -> List[List[float]]:
+    async def _aget_text_embeddings(self, texts: list[str]) -> list[list[float]]:
         """Get embeddings for multiple texts (async)."""
         await self._ainit()
         return await self._embedder.embed_documents(texts)
 
-    def _get_query_embedding(self, query: str) -> List[float]:
+    def _get_query_embedding(self, query: str) -> list[float]:
         """Get embedding for a query (sync)."""
         return self._get_text_embedding(query)
 
-    async def _aget_query_embedding(self, query: str) -> List[float]:
+    async def _aget_query_embedding(self, query: str) -> list[float]:
         """Get embedding for a query (async)."""
         return await self._aget_text_embedding(query)

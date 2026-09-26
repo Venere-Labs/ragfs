@@ -305,7 +305,7 @@ mod tests {
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].content, text);
         // Verify byte range is correct for UTF-8
-        assert!(chunks[0].byte_range.end as usize == text.len());
+        assert_eq!(chunks[0].byte_range.end as usize, text.len());
     }
 
     #[test]

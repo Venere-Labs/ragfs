@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Content extraction for RAGFS (text, PDF, images, code)"
-keywords = ["extraction", "pdf", "text-processing", "rag"]
+description = "Content extraction for RAGFS (text, PDF, images, Office OOXML)"
+keywords = ["extraction", "pdf", "office", "text-processing", "rag"]
 categories = ["text-processing", "parser-implementations"]
 
 [dependencies]
@@ -21,6 +21,7 @@ mime_guess.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+zip.workspace = true
 
 # Vision captioning (optional)
 candle-core = { workspace = true, optional = true }

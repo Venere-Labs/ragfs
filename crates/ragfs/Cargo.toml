@@ -8,6 +8,11 @@ description = "A FUSE filesystem for semantic search and RAG architectures"
 keywords = ["rag", "semantic-search", "fuse", "filesystem", "embeddings"]
 categories = ["command-line-utilities", "filesystem"]
 
+[lib]
+name = "ragfs"
+path = "src/lib.rs"
+doc = false
+
 [[bin]]
 name = "ragfs"
 path = "src/main.rs"
@@ -55,7 +60,7 @@ thiserror.workspace = true
 fuser.workspace = true
 blake3.workspace = true
 chrono.workspace = true
-daemonize.workspace = true
+nix.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

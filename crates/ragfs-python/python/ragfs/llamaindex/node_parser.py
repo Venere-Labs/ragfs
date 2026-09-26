@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional, Sequence
+from typing import Any, Sequence
 
 from ragfs import RagfsTextSplitter as CoreSplitter
 
 try:
+    from llama_index.core.bridge.pydantic import Field, PrivateAttr
     from llama_index.core.node_parser import NodeParser
     from llama_index.core.schema import BaseNode, Document, TextNode
-    from llama_index.core.bridge.pydantic import Field, PrivateAttr
     from llama_index.core.utils import get_tqdm_iterable
 except ImportError:
     raise ImportError(
@@ -86,7 +86,7 @@ class LlamaIndexRagfsNodeParser(NodeParser):
         nodes: Sequence[BaseNode],
         show_progress: bool = False,
         **kwargs: Any,
-    ) -> List[BaseNode]:
+    ) -> list[BaseNode]:
         """Parse nodes into smaller chunks synchronously.
 
         Args:
@@ -106,7 +106,7 @@ class LlamaIndexRagfsNodeParser(NodeParser):
         nodes: Sequence[BaseNode],
         show_progress: bool = False,
         **kwargs: Any,
-    ) -> List[BaseNode]:
+    ) -> list[BaseNode]:
         """Parse nodes into smaller chunks asynchronously.
 
         Args:
@@ -116,7 +116,7 @@ class LlamaIndexRagfsNodeParser(NodeParser):
         Returns:
             List of parsed nodes.
         """
-        all_nodes: List[BaseNode] = []
+        all_nodes: list[BaseNode] = []
         nodes_with_progress = get_tqdm_iterable(
             nodes, show_progress, "Parsing nodes"
         )
@@ -127,7 +127,7 @@ class LlamaIndexRagfsNodeParser(NodeParser):
 
         return all_nodes
 
-    async def _split_node(self, node: BaseNode) -> List[BaseNode]:
+    async def _split_node(self, node: BaseNode) -> list[BaseNode]:
         """Split a single node into chunks.
 
         Args:
@@ -205,7 +205,7 @@ class LlamaIndexRagfsNodeParser(NodeParser):
         documents: Sequence[Document],
         show_progress: bool = False,
         **kwargs: Any,
-    ) -> List[BaseNode]:
+    ) -> list[BaseNode]:
         """Get nodes from documents synchronously.
 
         Args:
@@ -224,7 +224,7 @@ class LlamaIndexRagfsNodeParser(NodeParser):
         documents: Sequence[Document],
         show_progress: bool = False,
         **kwargs: Any,
-    ) -> List[BaseNode]:
+    ) -> list[BaseNode]:
         """Get nodes from documents asynchronously.
 
         Args:

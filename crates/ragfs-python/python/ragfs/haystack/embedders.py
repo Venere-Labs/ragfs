@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ragfs import RagfsEmbeddings as CoreEmbeddings
 
 try:
-    from haystack import component, Document
+    from haystack import Document, component
 except ImportError:
     raise ImportError(
         "haystack-ai is required for Haystack integration. "
@@ -32,7 +32,7 @@ class HaystackRagfsTextEmbedder:
 
     def __init__(
         self,
-        model_path: Optional[str] = None,
+        model_path: str | None = None,
         batch_size: int = 32,
         normalize: bool = True,
     ):
@@ -55,8 +55,8 @@ class HaystackRagfsTextEmbedder:
         asyncio.get_event_loop().run_until_complete(self._embedder.init())
         self._initialized = True
 
-    @component.output_types(embedding=List[float], meta=Dict[str, Any])
-    def run(self, text: str) -> Dict[str, Any]:
+    @component.output_types(embedding=list[float], meta=dict[str, Any])
+    def run(self, text: str) -> dict[str, Any]:
         """Embed a text string.
 
         Args:
@@ -99,10 +99,10 @@ class HaystackRagfsDocumentEmbedder:
 
     def __init__(
         self,
-        model_path: Optional[str] = None,
+        model_path: str | None = None,
         batch_size: int = 32,
         normalize: bool = True,
-        meta_fields_to_embed: Optional[List[str]] = None,
+        meta_fields_to_embed: list[str] | None = None,
     ):
         """Initialize the document embedder.
 
@@ -125,8 +125,8 @@ class HaystackRagfsDocumentEmbedder:
         asyncio.get_event_loop().run_until_complete(self._embedder.init())
         self._initialized = True
 
-    @component.output_types(documents=List[Document], meta=Dict[str, Any])
-    def run(self, documents: List[Document]) -> Dict[str, Any]:
+    @component.output_types(documents=list[Document], meta=dict[str, Any])
+    def run(self, documents: list[Document]) -> dict[str, Any]:
         """Embed documents.
 
         Args:

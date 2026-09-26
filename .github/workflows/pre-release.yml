@@ -96,6 +96,13 @@ jobs:
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    # Same defect as .github/workflows/security.yml: audit-check opens a
+    # tracking issue, so without `issues: write` it fails *after* scanning and
+    # the release gate turns red with no report. No `ignore:` list is needed;
+    # see docs/AUDIT.md.
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
       - uses: rustsec/audit-check@v2

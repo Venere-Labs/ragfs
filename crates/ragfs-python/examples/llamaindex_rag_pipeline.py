@@ -6,8 +6,8 @@ This example demonstrates building a complete RAG (Retrieval Augmented Generatio
 pipeline using ragfs components with LlamaIndex.
 
 Features demonstrated:
-- Multi-format document loading (40+ formats including PDF, images)
-- Code-aware text chunking with tree-sitter
+- Multi-format document loading (UTF-8 text/code, PDF, images)
+- Code-aware text chunking (pattern-based function/class splits)
 - Local embeddings (GTE-small, 384 dimensions, no API calls)
 - Hybrid search (vector + full-text)
 - Configurable LLM providers (OpenAI, Anthropic, Ollama)
@@ -59,7 +59,6 @@ import asyncio
 import os
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 # Load .env file if present (for API keys and defaults)
 try:
@@ -71,18 +70,16 @@ except ImportError:
 
 # ragfs imports
 from ragfs.llamaindex import (
-    RagfsEmbeddings,
+    RagfsOrganizer,
     RagfsReader,
-    RagfsNodeParser,
     RagfsRetriever,
     RagfsSafeVectorStore,
-    RagfsOrganizer,
     create_ragfs_index,
 )
 
 # LlamaIndex imports
 try:
-    from llama_index.core import VectorStoreIndex, StorageContext
+    from llama_index.core import StorageContext, VectorStoreIndex
     from llama_index.core.query_engine import RetrieverQueryEngine
     from llama_index.core.response_synthesizers import get_response_synthesizer
 except ImportError:
@@ -99,7 +96,7 @@ class LLMProvider(Enum):
     OLLAMA = "ollama"
 
 
-def get_llm(provider: LLMProvider, model: Optional[str] = None):
+def get_llm(provider: LLMProvider, model: str | None = None):
     """Create an LLM instance based on provider.
 
     Args:
@@ -175,7 +172,7 @@ async def index_documents(
     """
     print(f"Loading documents from: {source_path}")
 
-    # Load documents using RagfsReader (supports 40+ formats)
+    # Load documents using RagfsReader (UTF-8 text/code, PDF, images)
     reader = RagfsReader()
     documents = await reader.aload_data(source_path)
     print(f"Loaded {len(documents)} documents")
@@ -203,7 +200,7 @@ async def query_rag(
     question: str,
     db_path: str,
     provider: LLMProvider,
-    model: Optional[str] = None,
+    model: str | None = None,
     k: int = 4,
     hybrid: bool = True,
     stream: bool = False,
@@ -294,7 +291,7 @@ async def search_only(
 async def delete_document(
     file_path: str,
     db_path: str,
-    source_path: Optional[str] = None,
+    source_path: str | None = None,
 ) -> None:
     """Soft delete a document (can be undone).
 
@@ -320,7 +317,7 @@ async def delete_document(
         print(f"Hard deleted: {file_path} (no undo available)")
 
 
-async def show_trash(db_path: str, source_path: Optional[str] = None) -> None:
+async def show_trash(db_path: str, source_path: str | None = None) -> None:
     """List all items in trash.
 
     Args:
@@ -350,7 +347,7 @@ async def show_trash(db_path: str, source_path: Optional[str] = None) -> None:
 
 async def show_history(
     db_path: str,
-    source_path: Optional[str] = None,
+    source_path: str | None = None,
     limit: int = 10,
 ) -> None:
     """Show operation history.
@@ -386,7 +383,7 @@ async def show_history(
 async def undo_operation(
     undo_id: str,
     db_path: str,
-    source_path: Optional[str] = None,
+    source_path: str | None = None,
 ) -> None:
     """Undo an operation.
 
@@ -423,7 +420,7 @@ async def undo_operation(
 async def propose_organization(
     scope: str,
     db_path: str,
-    source_path: Optional[str] = None,
+    source_path: str | None = None,
     strategy: str = "by_topic",
     max_groups: int = 10,
 ) -> None:
@@ -449,7 +446,7 @@ async def propose_organization(
         max_groups=max_groups,
     )
 
-    print(f"\n=== Plan Created ===")
+    print("\n=== Plan Created ===")
     print(f"Plan ID: {plan.id}")
     print(f"Status: {plan.status}")
     print(f"Actions: {len(plan.actions)}")
@@ -465,7 +462,7 @@ async def propose_organization(
 
 async def list_pending_plans(
     db_path: str,
-    source_path: Optional[str] = None,
+    source_path: str | None = None,
 ) -> None:
     """List all pending plans.
 
@@ -494,7 +491,7 @@ async def list_pending_plans(
 async def approve_plan(
     plan_id: str,
     db_path: str,
-    source_path: Optional[str] = None,
+    source_path: str | None = None,
 ) -> None:
     """Approve and execute a plan.
 
@@ -520,7 +517,7 @@ async def approve_plan(
 async def reject_plan(
     plan_id: str,
     db_path: str,
-    source_path: Optional[str] = None,
+    source_path: str | None = None,
 ) -> None:
     """Reject and discard a plan.
 

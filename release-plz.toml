@@ -3,48 +3,49 @@
 changelog_update = true
 # Git tag format
 git_tag_name = "v{{ version }}"
-# Create GitHub releases
-git_release_enable = true
+# GitHub Releases are created by .github/workflows/release.yml when a v* tag
+# is pushed, so the release contains the built binaries. crates.io stays off
+# until the registry account has a verified email.
+git_release_enable = false
 # Don't release packages that haven't changed
 release_always = false
 # Changelog configuration
 changelog_config = "cliff.toml"
 
-# CLI binary - don't publish to crates.io, but create GitHub release
+# No crates.io publish until the registry account verifies its email.
 [[package]]
 name = "ragfs"
 publish = false
-git_release_enable = true
+git_release_enable = false
 
-# Library crates - publish to crates.io
 [[package]]
 name = "ragfs-core"
-publish = true
+publish = false
 
 [[package]]
 name = "ragfs-store"
-publish = true
+publish = false
 
 [[package]]
 name = "ragfs-embed"
-publish = true
+publish = false
 
 [[package]]
 name = "ragfs-extract"
-publish = true
+publish = false
 
 [[package]]
 name = "ragfs-chunker"
-publish = true
+publish = false
 
 [[package]]
 name = "ragfs-index"
-publish = true
+publish = false
 
 [[package]]
 name = "ragfs-query"
-publish = true
+publish = false
 
 [[package]]
 name = "ragfs-fuse"
-publish = true
+publish = false

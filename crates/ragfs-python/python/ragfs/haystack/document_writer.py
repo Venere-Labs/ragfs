@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-
 try:
-    from haystack import component, Document
+    from haystack import Document, component
     from haystack.document_stores.types import DuplicatePolicy
 except ImportError:
     raise ImportError(
@@ -56,9 +54,9 @@ class HaystackRagfsDocumentWriter:
     @component.output_types(documents_written=int)
     def run(
         self,
-        documents: List[Document],
-        policy: Optional[DuplicatePolicy] = None,
-    ) -> Dict[str, int]:
+        documents: list[Document],
+        policy: DuplicatePolicy | None = None,
+    ) -> dict[str, int]:
         """Write documents to the store.
 
         Args:

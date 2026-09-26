@@ -3,12 +3,28 @@ name: CI
 on:
   push:
     branches: [main]
+    # Docs-only pushes do not need the Rust/Python matrix. Deliberately NOT set
+    # on pull_request: skipping a required check there leaves docs-only PRs
+    # stuck in "pending" forever.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+# A new push to the same ref makes the in-flight run obsolete. Without this,
+# draft PRs pile up runs and every job sits in "queued" for tens of minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -Dwarnings
+  # NOTE: `-Dwarnings` is intentionally no longer global. It used to live here,
+  # which made `check`, `test`, `msrv` and `doc` fail in lockstep on every new
+  # rustc warning. Warnings stay gated by the `clippy` job (and `doc` for
+  # rustdoc), which is where they belong.
 
 jobs:
   check:
@@ -57,6 +73,9 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    # Warnings are a hard error here (and only here) for Rust code quality.
+    env:
+      RUSTFLAGS: -Dwarnings
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -105,6 +124,8 @@ jobs:
   doc:
     name: Documentation
     runs-on: ubuntu-latest
+    # Full validation runs on main and on ready-for-review PRs only.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -117,11 +138,13 @@ jobs:
           RUSTDOCFLAGS: -D warnings
 
   msrv:
-    name: MSRV (1.88)
+    name: MSRV (1.91)
     runs-on: ubuntu-latest
+    # Full validation runs on main and on ready-for-review PRs only.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.88
+      - uses: dtolnay/rust-toolchain@1.91
       - uses: Swatinem/rust-cache@v2
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
@@ -132,8 +155,10 @@ jobs:
     name: Python Tests
     runs-on: ubuntu-latest
     strategy:
+      # Draft PRs get a single interpreter for fast feedback; the full
+      # 3.10-3.13 matrix runs on ready-for-review PRs and on main.
       matrix:
-        python-version: ['3.10', '3.11', '3.12', '3.13']
+        python-version: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft && fromJSON('["3.12"]') || fromJSON('["3.10","3.11","3.12","3.13"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -143,24 +168,32 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
+      - name: Create virtual environment
+        run: |
+          python -m venv .venv
       - name: Install Python dependencies
         run: |
+          source .venv/bin/activate
           pip install maturin pytest pytest-asyncio pytest-cov
       - name: Build ragfs Python package
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
           maturin develop --features "candle,lancedb"
       - name: Run ragfs Python tests
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
           pytest tests/ -v --ignore=tests/test_llamaindex --ignore=tests/test_haystack -m "not slow and not requires_model"
       - name: Install MCP dependencies
         run: |
+          source .venv/bin/activate
           pip install mcp
           cd crates/ragfs-mcp
           pip install -e .
       - name: Run MCP tests
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-mcp
           pytest tests/ -v -m "not slow"
 
@@ -168,6 +201,8 @@ jobs:
     name: Python Integration Tests
     runs-on: ubuntu-latest
     needs: [python-test]
+    # Full validation runs on main and on ready-for-review PRs only.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -177,19 +212,26 @@ jobs:
           python-version: '3.12'
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
+      - name: Create virtual environment
+        run: |
+          python -m venv .venv
       - name: Install Python dependencies
         run: |
+          source .venv/bin/activate
           pip install maturin pytest pytest-asyncio pytest-cov
           pip install llama-index-core haystack-ai
       - name: Build ragfs Python package
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
           maturin develop --features "candle,lancedb"
       - name: Run LlamaIndex tests
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
-          pytest tests/test_llamaindex/ -v -m "not slow and not requires_model"
+          pytest tests/test_llamaindex/ -v -m "not slow"
       - name: Run Haystack tests
         run: |
+          source .venv/bin/activate
           cd crates/ragfs-python
-          pytest tests/test_haystack/ -v -m "not slow and not requires_model"
+          pytest tests/test_haystack/ -v -m "not slow"

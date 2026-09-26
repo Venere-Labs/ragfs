@@ -89,8 +89,10 @@ ALLOWED_MIME_TYPES = {
     "application/toml",
     # Documents
     "application/pdf",
-    "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.oasis.opendocument.text",
     # Fallback for unknown text
     "application/octet-stream",
 }
@@ -101,7 +103,7 @@ ALLOWED_EXTENSIONS = {
     ".py", ".rs", ".go", ".java", ".js", ".ts", ".jsx", ".tsx",
     ".c", ".cpp", ".h", ".hpp", ".cs", ".rb", ".php", ".swift",
     ".json", ".yaml", ".yml", ".toml", ".xml", ".csv",
-    ".pdf", ".doc", ".docx",
+    ".pdf", ".docx", ".xlsx", ".pptx", ".odt",
     ".sh", ".bash", ".zsh", ".fish",
     ".sql", ".graphql",
     ".dockerfile", ".makefile",
@@ -175,6 +177,9 @@ class FileManager:
     def _is_allowed_file(self, filename: str, mime_type: str) -> bool:
         """Check if a file is allowed to be uploaded."""
         ext = Path(filename).suffix.lower()
+        # Legacy binary Word is unsupported even when libmagic reports octet-stream.
+        if ext == ".doc":
+            return False
         if ext in ALLOWED_EXTENSIONS:
             return True
         if mime_type in ALLOWED_MIME_TYPES:

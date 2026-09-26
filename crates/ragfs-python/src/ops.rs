@@ -18,7 +18,7 @@ use std::sync::Arc;
 // ============================================================================
 
 /// Python wrapper for Operation.
-#[pyclass(name = "Operation")]
+#[pyclass(name = "Operation", from_py_object)]
 #[derive(Clone)]
 pub struct PyOperation {
     inner: Operation,
@@ -117,6 +117,34 @@ impl PyOperation {
         }
     }
 
+    #[getter]
+    fn action_type(&self) -> String {
+        self.operation_type()
+    }
+
+    #[getter]
+    fn target(&self) -> Option<String> {
+        match &self.inner {
+            Operation::Create { path, .. } => Some(path.display().to_string()),
+            Operation::Delete { path } => Some(path.display().to_string()),
+            Operation::Move { dst, .. } => Some(dst.display().to_string()),
+            Operation::Copy { dst, .. } => Some(dst.display().to_string()),
+            Operation::Write { path, .. } => Some(path.display().to_string()),
+            Operation::Mkdir { path } => Some(path.display().to_string()),
+            Operation::Symlink { link, .. } => Some(link.display().to_string()),
+        }
+    }
+
+    #[getter]
+    fn source(&self) -> Option<String> {
+        match &self.inner {
+            Operation::Move { src, .. } => Some(src.display().to_string()),
+            Operation::Copy { src, .. } => Some(src.display().to_string()),
+            Operation::Symlink { target, .. } => Some(target.display().to_string()),
+            _ => None,
+        }
+    }
+
     fn __repr__(&self) -> String {
         match &self.inner {
             Operation::Create { path, .. } => {
@@ -161,7 +189,7 @@ impl PyOperation {
 }
 
 /// Python wrapper for OperationResult.
-#[pyclass(name = "OperationResult")]
+#[pyclass(name = "OperationResult", from_py_object)]
 #[derive(Clone)]
 pub struct PyOperationResult {
     /// Unique identifier for this operation
@@ -242,7 +270,7 @@ impl From<&OperationResult> for PyOperationResult {
 }
 
 /// Python wrapper for BatchResult.
-#[pyclass(name = "BatchResult")]
+#[pyclass(name = "BatchResult", from_py_object)]
 #[derive(Clone)]
 pub struct PyBatchResult {
     /// Unique identifier for this batch

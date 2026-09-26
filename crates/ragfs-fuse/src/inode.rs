@@ -89,7 +89,7 @@ pub enum InodeKind {
     SafetyDir,
     /// .safety/.trash directory for deleted files
     TrashDir,
-    /// .safety/.trash/<uuid> - individual trash entry
+    /// .safety/.trash/\<uuid\> - individual trash entry
     TrashEntry { id: String },
     /// .safety/.history - audit log file
     History,

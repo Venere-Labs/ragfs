@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use ragfs_core::VectorStore;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, info, warn};
@@ -71,9 +71,12 @@ pub struct OperationResult {
     pub timestamp: DateTime<Utc>,
     /// Whether the file was indexed/reindexed
     pub indexed: bool,
-    /// ID for undoing this operation (if reversible)
+    /// `SafetyManager` history id — write this to `.safety/.undo`
     #[serde(skip_serializing_if = "Option::is_none")]
     pub undo_id: Option<Uuid>,
+    /// Soft-delete trash entry used by atomic batch rollback (not in `.result` JSON)
+    #[serde(skip)]
+    trash_id: Option<Uuid>,
 }
 
 impl OperationResult {
@@ -87,7 +90,8 @@ impl OperationResult {
             error: None,
             timestamp: Utc::now(),
             indexed,
-            undo_id: Some(Uuid::new_v4()),
+            undo_id: None,
+            trash_id: None,
         }
     }
 
@@ -102,6 +106,7 @@ impl OperationResult {
             timestamp: Utc::now(),
             indexed: false,
             undo_id: None,
+            trash_id: None,
         }
     }
 }
@@ -244,10 +249,15 @@ impl OpsManager {
     }
 
     /// Log operation to history if safety manager is available.
-    fn log_to_history(&self, operation: HistoryOperation, undo_data: Option<UndoData>) {
-        if let Some(ref safety) = self.safety_manager {
-            safety.log_success(operation, undo_data);
-        }
+    /// Returns the history entry id used as `OperationResult.undo_id`.
+    fn log_to_history(
+        &self,
+        operation: HistoryOperation,
+        undo_data: Option<UndoData>,
+    ) -> Option<Uuid> {
+        self.safety_manager
+            .as_ref()
+            .map(|safety| safety.log_success(operation, undo_data))
     }
 
     /// Log failure to history if safety manager is available.
@@ -258,12 +268,37 @@ impl OpsManager {
     }
 
     /// Resolve a path relative to the source directory.
-    fn resolve_path(&self, path: &PathBuf) -> PathBuf {
-        if path.is_absolute() {
-            path.clone()
+    /// Rejects paths that escape the source root (absolute, `..`, symlink).
+    fn resolve_path(&self, path: &PathBuf) -> Result<PathBuf, String> {
+        crate::path_jail::resolve_under_root(&self.source, path)
+    }
+
+    /// Jail-check a symlink target the way Unix will resolve it: relative
+    /// targets are interpreted from the link's parent, not the source root.
+    fn jail_symlink_target(
+        &self,
+        target: &PathBuf,
+        resolved_link: &Path,
+    ) -> Result<PathBuf, String> {
+        let validation_target = if target.is_absolute() {
+            target.clone()
+        } else if let Some(parent) = resolved_link.parent() {
+            parent.join(target)
         } else {
-            self.source.join(path)
-        }
+            target.clone()
+        };
+        self.resolve_path(&validation_target)
+    }
+
+    async fn fail_and_store(
+        &self,
+        operation: &str,
+        path: PathBuf,
+        error: String,
+    ) -> OperationResult {
+        let result = OperationResult::failure(operation, path, error);
+        *self.last_result.write().await = Some(result.clone());
+        result
     }
 
     /// Trigger reindexing for a path.
@@ -310,19 +345,21 @@ impl OpsManager {
     ) -> (OperationResult, Option<RollbackData>) {
         match op {
             Operation::Create { path, content } => {
-                let resolved = self.resolve_path(path);
                 let result = self.create(path, content).await;
                 let rollback = if result.success {
-                    Some(RollbackData::Create {
-                        created_path: resolved,
-                    })
+                    self.resolve_path(path)
+                        .ok()
+                        .map(|created_path| RollbackData::Create { created_path })
                 } else {
                     None
                 };
                 (result, rollback)
             }
             Operation::Delete { path } => {
-                let resolved = self.resolve_path(path);
+                let resolved = match self.resolve_path(path) {
+                    Ok(p) => p,
+                    Err(_) => return (self.delete(path).await, None),
+                };
                 // Capture content before delete for rollback (in case of hard delete)
                 let content_backup = if resolved.exists() && resolved.is_file() {
                     fs::read(&resolved).ok()
@@ -334,8 +371,8 @@ impl OpsManager {
                 let rollback = if result.success {
                     Some(RollbackData::Delete {
                         original_path: resolved,
-                        trash_id: result.undo_id, // From soft delete
-                        content_backup: if result.undo_id.is_none() {
+                        trash_id: result.trash_id,
+                        content_backup: if result.trash_id.is_none() {
                             content_backup
                         } else {
                             None
@@ -347,26 +384,26 @@ impl OpsManager {
                 (result, rollback)
             }
             Operation::Move { src, dst } => {
-                let resolved_src = self.resolve_path(src);
-                let resolved_dst = self.resolve_path(dst);
                 let result = self.move_file(src, dst).await;
                 let rollback = if result.success {
-                    Some(RollbackData::Move {
-                        src: resolved_dst,
-                        dst: resolved_src,
-                    })
+                    match (self.resolve_path(src), self.resolve_path(dst)) {
+                        (Ok(resolved_src), Ok(resolved_dst)) => Some(RollbackData::Move {
+                            src: resolved_dst,
+                            dst: resolved_src,
+                        }),
+                        _ => None,
+                    }
                 } else {
                     None
                 };
                 (result, rollback)
             }
             Operation::Copy { src, dst } => {
-                let resolved_dst = self.resolve_path(dst);
                 let result = self.copy(src, dst).await;
                 let rollback = if result.success {
-                    Some(RollbackData::Copy {
-                        copied_path: resolved_dst,
-                    })
+                    self.resolve_path(dst)
+                        .ok()
+                        .map(|copied_path| RollbackData::Copy { copied_path })
                 } else {
                     None
                 };
@@ -377,18 +414,23 @@ impl OpsManager {
                 content,
                 append,
             } => {
-                let resolved = self.resolve_path(path);
-                let file_existed = resolved.exists();
-                let previous_content = if file_existed {
-                    fs::read(&resolved).ok()
-                } else {
-                    None
+                let (file_existed, previous_content, resolved) = match self.resolve_path(path) {
+                    Ok(resolved) => {
+                        let file_existed = resolved.exists();
+                        let previous_content = if file_existed {
+                            fs::read(&resolved).ok()
+                        } else {
+                            None
+                        };
+                        (file_existed, previous_content, Some(resolved))
+                    }
+                    Err(_) => (false, None, None),
                 };
 
                 let result = self.write(path, content, *append).await;
                 let rollback = if result.success {
-                    Some(RollbackData::Write {
-                        path: resolved,
+                    resolved.map(|path| RollbackData::Write {
+                        path,
                         previous_content,
                         file_existed,
                     })
@@ -398,24 +440,22 @@ impl OpsManager {
                 (result, rollback)
             }
             Operation::Mkdir { path } => {
-                let resolved = self.resolve_path(path);
                 let result = self.mkdir(path).await;
                 let rollback = if result.success {
-                    Some(RollbackData::Mkdir {
-                        created_path: resolved,
-                    })
+                    self.resolve_path(path)
+                        .ok()
+                        .map(|created_path| RollbackData::Mkdir { created_path })
                 } else {
                     None
                 };
                 (result, rollback)
             }
             Operation::Symlink { target, link } => {
-                let resolved_link = self.resolve_path(link);
                 let result = self.symlink(target, link).await;
                 let rollback = if result.success {
-                    Some(RollbackData::Symlink {
-                        link_path: resolved_link,
-                    })
+                    self.resolve_path(link)
+                        .ok()
+                        .map(|link_path| RollbackData::Symlink { link_path })
                 } else {
                     None
                 };
@@ -565,7 +605,10 @@ impl OpsManager {
 
     /// Create a new file with content.
     pub async fn create(&self, path: &PathBuf, content: &str) -> OperationResult {
-        let resolved = self.resolve_path(path);
+        let resolved = match self.resolve_path(path) {
+            Ok(p) => p,
+            Err(e) => return self.fail_and_store("create", path.clone(), e).await,
+        };
         debug!("ops::create {:?}", resolved);
 
         // Check if file already exists
@@ -590,15 +633,14 @@ impl OpsManager {
             Ok(()) => {
                 info!("Created file: {:?}", resolved);
                 let indexed = self.trigger_reindex(&resolved).await;
-                let result = OperationResult::success("create", path.clone(), indexed);
-
-                // Log to history
-                self.log_to_history(
+                let undo_id = self.log_to_history(
                     HistoryOperation::Create {
                         path: resolved.clone(),
                     },
                     Some(UndoData::Create { path: resolved }),
                 );
+                let mut result = OperationResult::success("create", path.clone(), indexed);
+                result.undo_id = undo_id;
 
                 *self.last_result.write().await = Some(result.clone());
                 result
@@ -620,7 +662,10 @@ impl OpsManager {
     /// Delete a file.
     /// Uses soft delete (move to trash) if safety manager is available.
     pub async fn delete(&self, path: &PathBuf) -> OperationResult {
-        let resolved = self.resolve_path(path);
+        let resolved = match self.resolve_path(path) {
+            Ok(p) => p,
+            Err(e) => return self.fail_and_store("delete", path.clone(), e).await,
+        };
         debug!("ops::delete {:?}", resolved);
 
         if !resolved.exists() {
@@ -644,8 +689,7 @@ impl OpsManager {
                 Ok(entry) => {
                     info!("Soft deleted file: {:?} -> trash/{}", resolved, entry.id);
 
-                    // Log to history with undo data
-                    self.log_to_history(
+                    let undo_id = self.log_to_history(
                         HistoryOperation::Delete {
                             path: resolved,
                             trash_id: Some(entry.id),
@@ -654,7 +698,8 @@ impl OpsManager {
                     );
 
                     let mut result = OperationResult::success("delete", path.clone(), false);
-                    result.undo_id = Some(entry.id);
+                    result.undo_id = undo_id;
+                    result.trash_id = Some(entry.id);
                     *self.last_result.write().await = Some(result.clone());
                     return result;
                 }
@@ -669,7 +714,7 @@ impl OpsManager {
             Ok(()) => {
                 info!("Hard deleted file: {:?}", resolved);
 
-                self.log_to_history(
+                let undo_id = self.log_to_history(
                     HistoryOperation::Delete {
                         path: resolved,
                         trash_id: None,
@@ -677,7 +722,8 @@ impl OpsManager {
                     None, // Hard delete is not reversible
                 );
 
-                let result = OperationResult::success("delete", path.clone(), false);
+                let mut result = OperationResult::success("delete", path.clone(), false);
+                result.undo_id = undo_id;
                 *self.last_result.write().await = Some(result.clone());
                 result
             }
@@ -700,8 +746,14 @@ impl OpsManager {
 
     /// Move/rename a file.
     pub async fn move_file(&self, src: &PathBuf, dst: &PathBuf) -> OperationResult {
-        let resolved_src = self.resolve_path(src);
-        let resolved_dst = self.resolve_path(dst);
+        let resolved_src = match self.resolve_path(src) {
+            Ok(p) => p,
+            Err(e) => return self.fail_and_store("move", src.clone(), e).await,
+        };
+        let resolved_dst = match self.resolve_path(dst) {
+            Ok(p) => p,
+            Err(e) => return self.fail_and_store("move", src.clone(), e).await,
+        };
         debug!("ops::move {:?} -> {:?}", resolved_src, resolved_dst);
 
         if !resolved_src.exists() {
@@ -734,19 +786,19 @@ impl OpsManager {
                 info!("Moved: {:?} -> {:?}", resolved_src, resolved_dst);
                 self.update_store_path(&resolved_src, &resolved_dst).await;
 
-                // Log to history
-                self.log_to_history(
+                let undo_id = self.log_to_history(
                     HistoryOperation::Move {
                         src: resolved_src.clone(),
                         dst: resolved_dst.clone(),
                     },
                     Some(UndoData::Move {
-                        src: resolved_dst,
-                        dst: resolved_src,
+                        src: resolved_src,
+                        dst: resolved_dst,
                     }),
                 );
 
-                let result = OperationResult::success("move", dst.clone(), true);
+                let mut result = OperationResult::success("move", dst.clone(), true);
+                result.undo_id = undo_id;
                 *self.last_result.write().await = Some(result.clone());
                 result
             }
@@ -769,8 +821,14 @@ impl OpsManager {
 
     /// Copy a file.
     pub async fn copy(&self, src: &PathBuf, dst: &PathBuf) -> OperationResult {
-        let resolved_src = self.resolve_path(src);
-        let resolved_dst = self.resolve_path(dst);
+        let resolved_src = match self.resolve_path(src) {
+            Ok(p) => p,
+            Err(e) => return self.fail_and_store("copy", src.clone(), e).await,
+        };
+        let resolved_dst = match self.resolve_path(dst) {
+            Ok(p) => p,
+            Err(e) => return self.fail_and_store("copy", src.clone(), e).await,
+        };
         debug!("ops::copy {:?} -> {:?}", resolved_src, resolved_dst);
 
         if !resolved_src.exists() {
@@ -803,8 +861,7 @@ impl OpsManager {
                 info!("Copied: {:?} -> {:?}", resolved_src, resolved_dst);
                 let indexed = self.trigger_reindex(&resolved_dst).await;
 
-                // Log to history
-                self.log_to_history(
+                let undo_id = self.log_to_history(
                     HistoryOperation::Copy {
                         src: resolved_src,
                         dst: resolved_dst.clone(),
@@ -812,7 +869,8 @@ impl OpsManager {
                     Some(UndoData::Copy { path: resolved_dst }),
                 );
 
-                let result = OperationResult::success("copy", dst.clone(), indexed);
+                let mut result = OperationResult::success("copy", dst.clone(), indexed);
+                result.undo_id = undo_id;
                 *self.last_result.write().await = Some(result.clone());
                 result
             }
@@ -835,7 +893,10 @@ impl OpsManager {
 
     /// Write content to a file.
     pub async fn write(&self, path: &PathBuf, content: &str, append: bool) -> OperationResult {
-        let resolved = self.resolve_path(path);
+        let resolved = match self.resolve_path(path) {
+            Ok(p) => p,
+            Err(e) => return self.fail_and_store("write", path.clone(), e).await,
+        };
         debug!("ops::write {:?} (append={})", resolved, append);
 
         let write_result = if append {
@@ -854,8 +915,7 @@ impl OpsManager {
                 info!("Wrote to file: {:?}", resolved);
                 let indexed = self.trigger_reindex(&resolved).await;
 
-                // Log to history (write is not reversible without storing previous content)
-                self.log_to_history(
+                let undo_id = self.log_to_history(
                     HistoryOperation::Write {
                         path: resolved,
                         append,
@@ -863,7 +923,8 @@ impl OpsManager {
                     None, // No undo data - would need to store previous content
                 );
 
-                let result = OperationResult::success("write", path.clone(), indexed);
+                let mut result = OperationResult::success("write", path.clone(), indexed);
+                result.undo_id = undo_id;
                 *self.last_result.write().await = Some(result.clone());
                 result
             }
@@ -886,7 +947,10 @@ impl OpsManager {
 
     /// Create a directory.
     pub async fn mkdir(&self, path: &PathBuf) -> OperationResult {
-        let resolved = self.resolve_path(path);
+        let resolved = match self.resolve_path(path) {
+            Ok(p) => p,
+            Err(e) => return self.fail_and_store("mkdir", path.clone(), e).await,
+        };
         debug!("ops::mkdir {:?}", resolved);
 
         if resolved.exists() {
@@ -897,10 +961,8 @@ impl OpsManager {
             Ok(()) => {
                 info!("Created directory: {:?}", resolved);
 
-                // Note: Directories are not indexed, so we pass false
-                let mut result = OperationResult::success("mkdir", path.clone(), false);
-                // mkdir undo_id refers to the operation, not trash
-                result.undo_id = Some(Uuid::new_v4());
+                // Note: Directories are not indexed; no HistoryOperation for mkdir.
+                let result = OperationResult::success("mkdir", path.clone(), false);
 
                 *self.last_result.write().await = Some(result.clone());
                 result
@@ -917,9 +979,14 @@ impl OpsManager {
     /// Create a symbolic link.
     #[cfg(unix)]
     pub async fn symlink(&self, target: &PathBuf, link: &PathBuf) -> OperationResult {
-        let resolved_target = self.resolve_path(target);
-        let resolved_link = self.resolve_path(link);
-        debug!("ops::symlink {:?} -> {:?}", resolved_link, resolved_target);
+        let resolved_link = match self.resolve_path(link) {
+            Ok(p) => p,
+            Err(e) => return self.fail_and_store("symlink", link.clone(), e).await,
+        };
+        if let Err(e) = self.jail_symlink_target(target, &resolved_link) {
+            return self.fail_and_store("symlink", link.clone(), e).await;
+        }
+        debug!("ops::symlink {:?} -> {:?}", resolved_link, target);
 
         if resolved_link.exists() {
             return OperationResult::failure(
@@ -941,15 +1008,12 @@ impl OpsManager {
             );
         }
 
-        match std::os::unix::fs::symlink(&resolved_target, &resolved_link) {
+        // Pass the original target so a relative link stays relative.
+        match std::os::unix::fs::symlink(target, &resolved_link) {
             Ok(()) => {
-                info!(
-                    "Created symlink: {:?} -> {:?}",
-                    resolved_link, resolved_target
-                );
+                info!("Created symlink: {:?} -> {:?}", resolved_link, target);
 
-                let mut result = OperationResult::success("symlink", link.clone(), false);
-                result.undo_id = Some(Uuid::new_v4());
+                let result = OperationResult::success("symlink", link.clone(), false);
 
                 *self.last_result.write().await = Some(result.clone());
                 result
@@ -1117,7 +1181,10 @@ impl OpsManager {
     fn validate_operation(&self, op: &Operation) -> OperationResult {
         match op {
             Operation::Create { path, .. } => {
-                let resolved = self.resolve_path(path);
+                let resolved = match self.resolve_path(path) {
+                    Ok(p) => p,
+                    Err(e) => return OperationResult::failure("create", path.clone(), e),
+                };
                 if resolved.exists() {
                     OperationResult::failure("create", path.clone(), "File already exists".into())
                 } else {
@@ -1125,7 +1192,10 @@ impl OpsManager {
                 }
             }
             Operation::Delete { path } => {
-                let resolved = self.resolve_path(path);
+                let resolved = match self.resolve_path(path) {
+                    Ok(p) => p,
+                    Err(e) => return OperationResult::failure("delete", path.clone(), e),
+                };
                 if !resolved.exists() {
                     OperationResult::failure("delete", path.clone(), "File not found".into())
                 } else if resolved.is_dir() {
@@ -1139,8 +1209,14 @@ impl OpsManager {
                 }
             }
             Operation::Move { src, dst } => {
-                let resolved_src = self.resolve_path(src);
-                let resolved_dst = self.resolve_path(dst);
+                let resolved_src = match self.resolve_path(src) {
+                    Ok(p) => p,
+                    Err(e) => return OperationResult::failure("move", src.clone(), e),
+                };
+                let resolved_dst = match self.resolve_path(dst) {
+                    Ok(p) => p,
+                    Err(e) => return OperationResult::failure("move", src.clone(), e),
+                };
                 if !resolved_src.exists() {
                     OperationResult::failure("move", src.clone(), "Source not found".into())
                 } else if resolved_dst.exists() {
@@ -1154,8 +1230,14 @@ impl OpsManager {
                 }
             }
             Operation::Copy { src, dst } => {
-                let resolved_src = self.resolve_path(src);
-                let resolved_dst = self.resolve_path(dst);
+                let resolved_src = match self.resolve_path(src) {
+                    Ok(p) => p,
+                    Err(e) => return OperationResult::failure("copy", src.clone(), e),
+                };
+                let resolved_dst = match self.resolve_path(dst) {
+                    Ok(p) => p,
+                    Err(e) => return OperationResult::failure("copy", src.clone(), e),
+                };
                 if !resolved_src.exists() {
                     OperationResult::failure("copy", src.clone(), "Source not found".into())
                 } else if resolved_dst.exists() {
@@ -1168,20 +1250,29 @@ impl OpsManager {
                     OperationResult::success("copy", dst.clone(), false)
                 }
             }
-            Operation::Write { path, .. } => {
-                // Write can always succeed (creates file if not exists)
-                OperationResult::success("write", path.clone(), false)
-            }
+            Operation::Write { path, .. } => match self.resolve_path(path) {
+                Ok(_) => OperationResult::success("write", path.clone(), false),
+                Err(e) => OperationResult::failure("write", path.clone(), e),
+            },
             Operation::Mkdir { path } => {
-                let resolved = self.resolve_path(path);
+                let resolved = match self.resolve_path(path) {
+                    Ok(p) => p,
+                    Err(e) => return OperationResult::failure("mkdir", path.clone(), e),
+                };
                 if resolved.exists() {
                     OperationResult::failure("mkdir", path.clone(), "Path already exists".into())
                 } else {
                     OperationResult::success("mkdir", path.clone(), false)
                 }
             }
-            Operation::Symlink { target: _, link } => {
-                let resolved_link = self.resolve_path(link);
+            Operation::Symlink { target, link } => {
+                let resolved_link = match self.resolve_path(link) {
+                    Ok(p) => p,
+                    Err(e) => return OperationResult::failure("symlink", link.clone(), e),
+                };
+                if let Err(e) = self.jail_symlink_target(target, &resolved_link) {
+                    return OperationResult::failure("symlink", link.clone(), e);
+                }
                 if resolved_link.exists() {
                     OperationResult::failure(
                         "symlink",
@@ -1319,7 +1410,7 @@ mod tests {
 
         assert!(result.success);
         assert_eq!(result.operation, "create");
-        assert!(manager.resolve_path(&path).exists());
+        assert!(manager.resolve_path(&path).unwrap().exists());
     }
 
     #[tokio::test]
@@ -1343,7 +1434,7 @@ mod tests {
         let result = manager.delete(&path).await;
 
         assert!(result.success);
-        assert!(!manager.resolve_path(&path).exists());
+        assert!(!manager.resolve_path(&path).unwrap().exists());
     }
 
     #[tokio::test]
@@ -1367,8 +1458,8 @@ mod tests {
         let result = manager.move_file(&src, &dst).await;
 
         assert!(result.success);
-        assert!(!manager.resolve_path(&src).exists());
-        assert!(manager.resolve_path(&dst).exists());
+        assert!(!manager.resolve_path(&src).unwrap().exists());
+        assert!(manager.resolve_path(&dst).unwrap().exists());
     }
 
     #[tokio::test]
@@ -1381,8 +1472,8 @@ mod tests {
         let result = manager.copy(&src, &dst).await;
 
         assert!(result.success);
-        assert!(manager.resolve_path(&src).exists());
-        assert!(manager.resolve_path(&dst).exists());
+        assert!(manager.resolve_path(&src).unwrap().exists());
+        assert!(manager.resolve_path(&dst).unwrap().exists());
     }
 
     #[tokio::test]
@@ -1393,7 +1484,7 @@ mod tests {
         let result = manager.write(&path, "content", false).await;
 
         assert!(result.success);
-        let content = fs::read_to_string(manager.resolve_path(&path)).unwrap();
+        let content = fs::read_to_string(manager.resolve_path(&path).unwrap()).unwrap();
         assert_eq!(content, "content");
     }
 
@@ -1406,7 +1497,7 @@ mod tests {
         let result = manager.write(&path, " second", true).await;
 
         assert!(result.success);
-        let content = fs::read_to_string(manager.resolve_path(&path)).unwrap();
+        let content = fs::read_to_string(manager.resolve_path(&path).unwrap()).unwrap();
         assert_eq!(content, "first second");
     }
 
@@ -1454,7 +1545,12 @@ mod tests {
 
         assert!(result.success);
         // File should NOT be created in dry run
-        assert!(!manager.resolve_path(&PathBuf::from("dry_run.txt")).exists());
+        assert!(
+            !manager
+                .resolve_path(&PathBuf::from("dry_run.txt"))
+                .unwrap()
+                .exists()
+        );
     }
 
     #[tokio::test]
@@ -1464,7 +1560,8 @@ mod tests {
         let result = manager.parse_and_create("test.txt\nHello!").await;
 
         assert!(result.success);
-        let content = fs::read_to_string(manager.resolve_path(&PathBuf::from("test.txt"))).unwrap();
+        let content =
+            fs::read_to_string(manager.resolve_path(&PathBuf::from("test.txt")).unwrap()).unwrap();
         assert_eq!(content, "Hello!");
     }
 
@@ -1510,7 +1607,10 @@ mod tests {
         let result = OperationResult::success("test", PathBuf::from("/test"), true);
         assert!(result.success);
         assert!(result.error.is_none());
-        assert!(result.undo_id.is_some());
+        assert!(
+            result.undo_id.is_none(),
+            "undo_id is assigned from SafetyManager history, not generated here"
+        );
     }
 
     #[test]
@@ -1761,6 +1861,49 @@ mod tests {
         assert_eq!(result.operation, "symlink");
         let link_path = temp.path().join("link_to_target");
         assert!(link_path.symlink_metadata().is_ok());
+        assert_eq!(
+            std::fs::read_link(&link_path).unwrap(),
+            PathBuf::from("target_file.txt")
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_symlink_relative_target_from_link_parent() {
+        let (manager, temp) = create_test_manager();
+        fs::create_dir(temp.path().join("sub")).unwrap();
+        fs::write(temp.path().join("ok.txt"), "ok").unwrap();
+
+        let target = PathBuf::from("../ok.txt");
+        let link = PathBuf::from("sub/link");
+        let result = manager.symlink(&target, &link).await;
+
+        assert!(result.success, "{:?}", result.error);
+        assert_eq!(
+            std::fs::read_link(temp.path().join("sub/link")).unwrap(),
+            PathBuf::from("../ok.txt")
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_symlink_rejects_parent_relative_escape_via_existing_link() {
+        let (manager, temp) = create_test_manager();
+        let outside = TempDir::new().unwrap();
+        fs::create_dir(temp.path().join("sub")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), temp.path().join("sub/out")).unwrap();
+
+        let target = PathBuf::from("out/secret.txt");
+        let link = PathBuf::from("sub/link");
+        let result = manager.symlink(&target, &link).await;
+
+        assert!(!result.success);
+        assert!(
+            result.error.as_ref().unwrap().contains("escapes"),
+            "{:?}",
+            result.error
+        );
+        assert!(!temp.path().join("sub/link").exists());
     }
 
     #[tokio::test]
@@ -1802,5 +1945,160 @@ mod tests {
         assert_eq!(result.rollback_performed, Some(true));
         // Directory should be rolled back (removed)
         assert!(!temp.path().join("new_dir").exists());
+    }
+
+    fn create_test_manager_with_safety() -> (OpsManager, Arc<SafetyManager>, TempDir, TempDir) {
+        let source_dir = TempDir::new().unwrap();
+        let data_dir = TempDir::new().unwrap();
+        let safety = Arc::new(SafetyManager::new(
+            &source_dir.path().to_path_buf(),
+            Some(crate::safety::SafetyConfig {
+                data_dir: data_dir.path().to_path_buf(),
+                trash_retention_days: 7,
+                soft_delete: true,
+            }),
+        ));
+        let manager = OpsManager::with_safety(
+            source_dir.path().to_path_buf(),
+            None,
+            None,
+            Arc::clone(&safety),
+        );
+        (manager, safety, source_dir, data_dir)
+    }
+
+    #[tokio::test]
+    async fn test_resolve_path_rejects_relative_escape() {
+        let (manager, _temp) = create_test_manager();
+        let err = manager
+            .resolve_path(&PathBuf::from("../escape.txt"))
+            .unwrap_err();
+        assert!(err.contains("escapes"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_resolve_path_rejects_absolute_outside_root() {
+        let (manager, _temp) = create_test_manager();
+        let outside = TempDir::new().unwrap();
+        let err = manager
+            .resolve_path(&outside.path().join("secret.txt"))
+            .unwrap_err();
+        assert!(err.contains("escapes"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_create_rejects_path_jail_escape() {
+        let (manager, temp) = create_test_manager();
+        let result = manager
+            .create(&PathBuf::from("../jailbreak.txt"), "nope")
+            .await;
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("escapes"));
+        assert!(!temp.path().parent().unwrap().join("jailbreak.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_create_allows_absolute_path_inside_root() {
+        let (manager, temp) = create_test_manager();
+        let inside = temp.path().join("inside.txt");
+        let result = manager.create(&inside, "ok").await;
+        assert!(result.success);
+        assert!(inside.exists());
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_create_rejects_symlink_escape() {
+        let (manager, temp) = create_test_manager();
+        let outside = TempDir::new().unwrap();
+        std::os::unix::fs::symlink(outside.path(), temp.path().join("out")).unwrap();
+
+        let result = manager
+            .create(&PathBuf::from("out/evil.txt"), "pwned")
+            .await;
+        assert!(!result.success);
+        assert!(result.error.unwrap().contains("escapes"));
+        assert!(!outside.path().join("evil.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_create_undo_id_is_history_id_and_undo_uses_trash() {
+        let (manager, safety, source_dir, _data) = create_test_manager_with_safety();
+        let path = PathBuf::from("created.txt");
+
+        let result = manager.create(&path, "hello undo").await;
+        assert!(result.success);
+        let undo_id = result.undo_id.expect("create must expose history undo_id");
+
+        let history = safety.find_operation(undo_id).expect("history entry");
+        assert_eq!(history.id, undo_id);
+        assert!(history.reversible);
+
+        let file = source_dir.path().join("created.txt");
+        assert!(file.exists());
+
+        let msg = safety.undo(undo_id).await.unwrap();
+        assert!(msg.contains("trash"), "{msg}");
+        assert!(!file.exists(), "undo create must not permanently delete");
+
+        let trash = safety.list_trash().await;
+        assert_eq!(trash.len(), 1);
+        let content = safety.get_trash_content(trash[0].id).unwrap();
+        assert_eq!(content, b"hello undo");
+    }
+
+    #[tokio::test]
+    async fn test_delete_undo_id_is_history_id_not_trash_id() {
+        let (manager, safety, source_dir, _data) = create_test_manager_with_safety();
+        let path = PathBuf::from("to_soft_delete.txt");
+        fs::write(source_dir.path().join("to_soft_delete.txt"), "keep me").unwrap();
+
+        let result = manager.delete(&path).await;
+        assert!(result.success);
+        let undo_id = result.undo_id.expect("delete must expose history undo_id");
+
+        let history = safety.find_operation(undo_id).expect("history entry");
+        assert_eq!(history.id, undo_id);
+        let trash_id = match history.undo_data {
+            Some(UndoData::Delete { trash_id }) => trash_id,
+            other => panic!("expected delete undo data, got {other:?}"),
+        };
+        assert_ne!(
+            undo_id, trash_id,
+            "undo_id must be the history id, not the trash id"
+        );
+        assert!(!source_dir.path().join("to_soft_delete.txt").exists());
+
+        safety.undo(undo_id).await.unwrap();
+        assert!(source_dir.path().join("to_soft_delete.txt").exists());
+        let content = fs::read_to_string(source_dir.path().join("to_soft_delete.txt")).unwrap();
+        assert_eq!(content, "keep me");
+    }
+
+    #[tokio::test]
+    async fn test_move_undo_id_is_history_id() {
+        let (manager, safety, source_dir, _data) = create_test_manager_with_safety();
+        fs::write(source_dir.path().join("src.txt"), "moved").unwrap();
+
+        let result = manager
+            .move_file(&PathBuf::from("src.txt"), &PathBuf::from("dst.txt"))
+            .await;
+        assert!(result.success);
+        let undo_id = result.undo_id.expect("move must expose history undo_id");
+        assert_eq!(safety.find_operation(undo_id).unwrap().id, undo_id);
+
+        safety.undo(undo_id).await.unwrap();
+        assert!(source_dir.path().join("src.txt").exists());
+        assert!(!source_dir.path().join("dst.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn test_result_json_omits_internal_trash_id() {
+        let (manager, _safety, source_dir, _data) = create_test_manager_with_safety();
+        fs::write(source_dir.path().join("gone.txt"), "x").unwrap();
+        manager.delete(&PathBuf::from("gone.txt")).await;
+        let json = String::from_utf8(manager.get_last_result().await).unwrap();
+        assert!(json.contains("undo_id"));
+        assert!(!json.contains("trash_id"));
     }
 }

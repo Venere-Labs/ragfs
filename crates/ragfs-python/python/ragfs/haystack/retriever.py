@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
 
 from ragfs import RagfsRetriever as CoreRetriever
 
 try:
-    from haystack import component, Document
+    from haystack import Document, component
 except ImportError:
     raise ImportError(
         "haystack-ai is required for Haystack integration. "
@@ -33,7 +32,7 @@ class HaystackRagfsRetriever:
     def __init__(
         self,
         db_path: str,
-        model_path: Optional[str] = None,
+        model_path: str | None = None,
         hybrid: bool = True,
         top_k: int = 4,
     ):
@@ -59,12 +58,12 @@ class HaystackRagfsRetriever:
         asyncio.get_event_loop().run_until_complete(self._retriever.init())
         self._initialized = True
 
-    @component.output_types(documents=List[Document])
+    @component.output_types(documents=list[Document])
     def run(
         self,
         query: str,
-        top_k: Optional[int] = None,
-    ) -> Dict[str, List[Document]]:
+        top_k: int | None = None,
+    ) -> dict[str, list[Document]]:
         """Retrieve relevant documents.
 
         Args:

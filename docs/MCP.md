@@ -44,13 +44,21 @@ Add to your Claude Desktop configuration file:
     "ragfs": {
       "command": "ragfs-mcp",
       "env": {
-        "RAGFS_DB_PATH": "~/.local/share/ragfs/indices/default",
+        "RAGFS_SOURCE_PATH": "/path/to/project",
         "RAGFS_MODEL_PATH": "~/.local/share/ragfs/models"
       }
     }
   }
 }
 ```
+
+`RAGFS_SOURCE_PATH` must be the same directory you passed to `ragfs index`. MCP hashes that canonical path with blake3 (first 16 hex chars) and opens:
+
+```
+~/.local/share/ragfs/indices/{16hex}/index.lance
+```
+
+This is the same layout the CLI uses. Do **not** point `RAGFS_DB_PATH` at `indices/default` — that folder is not created by `ragfs index`. Set `RAGFS_DB_PATH` only to override the resolved LanceDB path explicitly.
 
 Or using Python directly:
 
@@ -77,20 +85,20 @@ Perform semantic search in indexed files.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `query` | string | required | Natural language search query |
-| `index` | string | "default" | Name of the index to search |
+| `index` | string | source path | Source directory (`ragfs index <path>`) or 16-hex id. Default: `RAGFS_SOURCE_PATH` or cwd |
 | `limit` | integer | 10 | Maximum results to return |
 | `hybrid` | boolean | true | Enable hybrid search (vector + full-text) |
 
 **Example:**
 ```
-Search for "authentication implementation" in the default index
+Search for "authentication implementation" in /path/to/project
 ```
 
 **Response:**
 ```json
 {
   "query": "authentication implementation",
-  "index": "default",
+  "index": "/path/to/project",
   "count": 3,
   "results": [
     {
@@ -110,14 +118,14 @@ Get the status of an index.
 **Parameters:**
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `index` | string | "default" | Name of the index to check |
+| `index` | string | source path | Source directory or 16-hex id. Default: `RAGFS_SOURCE_PATH` or cwd |
 
 **Response:**
 ```json
 {
   "exists": true,
-  "index": "default",
-  "path": "/home/user/.local/share/ragfs/indices/default",
+  "index": "/path/to/project",
+  "path": "/home/user/.local/share/ragfs/indices/a1b2c3d4e5f67890/index.lance",
   "has_data": true,
   "size_bytes": 52428800,
   "size_mb": 50.0,
@@ -133,7 +141,7 @@ Find files similar to a given file.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `file_path` | string | required | Path to the source file |
-| `index` | string | "default" | Index to search in |
+| `index` | string | source path | Source directory or 16-hex id. Default: `RAGFS_SOURCE_PATH` or cwd |
 | `limit` | integer | 5 | Maximum similar files to return |
 
 **Response:**
@@ -162,20 +170,22 @@ List all available indices.
   "count": 2,
   "indices": [
     {
-      "name": "default",
-      "path": "/home/user/.local/share/ragfs/indices/default",
+      "name": "a1b2c3d4e5f67890",
+      "path": "/home/user/.local/share/ragfs/indices/a1b2c3d4e5f67890/index.lance",
       "size_mb": 50.0,
       "last_modified": "2024-01-15T10:30:00"
     },
     {
-      "name": "project-x",
-      "path": "/home/user/.local/share/ragfs/indices/project-x",
+      "name": "0f1e2d3c4b5a6978",
+      "path": "/home/user/.local/share/ragfs/indices/0f1e2d3c4b5a6978/index.lance",
       "size_mb": 25.5,
       "last_modified": "2024-01-14T15:00:00"
     }
   ]
 }
 ```
+
+`name` is the 16-hex blake3 of the canonical source path. Pass that hex id (or the original source directory) as `index` to other tools.
 
 ---
 
@@ -191,7 +201,7 @@ Safely delete a file to trash (can be undone).
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `path` | string | required | File path to delete |
-| `index` | string | "default" | Index name |
+| `index` | string | source path | Source directory or 16-hex id |
 
 **Response:**
 ```json
@@ -233,7 +243,7 @@ Restore a file from trash using its undo_id.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `undo_id` | string | required | The undo_id from delete |
-| `index` | string | "default" | Index name |
+| `index` | string | source path | Source directory or 16-hex id |
 
 **Response:**
 ```json
@@ -254,7 +264,7 @@ Get operation history for audit trail.
 |-----------|------|---------|-------------|
 | `limit` | integer | 50 | Maximum entries to return |
 | `path` | string | null | Filter by file path |
-| `index` | string | "default" | Index name |
+| `index` | string | source path | Source directory or 16-hex id |
 
 **Response:**
 ```json
@@ -281,7 +291,7 @@ Undo a previous operation by its ID.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `undo_id` | string | required | Operation ID from history |
-| `index` | string | "default" | Index name |
+| `index` | string | source path | Source directory or 16-hex id |
 
 **Response:**
 ```json
@@ -319,7 +329,7 @@ Find duplicate or near-duplicate files using semantic embeddings.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `threshold` | float | 0.95 | Similarity threshold (0.0-1.0) |
-| `index` | string | "default" | Index name |
+| `index` | string | source path | Source directory or 16-hex id |
 
 **Response:**
 ```json
@@ -377,7 +387,7 @@ Create an organization plan (NOT executed until approved).
 | `strategy` | string | "by_topic" | Strategy: "by_topic", "by_type", "by_project" |
 | `max_groups` | integer | 10 | Maximum groups to create |
 | `similarity_threshold` | float | 0.7 | Minimum similarity for grouping |
-| `index` | string | "default" | Index name |
+| `index` | string | source path | Source directory or 16-hex id |
 
 **Response:**
 ```json
@@ -411,7 +421,7 @@ Create a cleanup plan for redundant/stale files (NOT executed until approved).
 | `include_duplicates` | boolean | true | Include duplicate files |
 | `include_stale` | boolean | true | Include stale files |
 | `stale_days` | integer | 90 | Days to consider a file stale |
-| `index` | string | "default" | Index name |
+| `index` | string | source path | Source directory or 16-hex id |
 
 **Response:**
 ```json
@@ -470,7 +480,7 @@ Get full details of a plan including all proposed actions.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `plan_id` | string | required | The plan ID |
-| `index` | string | "default" | Index name |
+| `index` | string | source path | Source directory or 16-hex id |
 
 **Response:**
 ```json
@@ -529,7 +539,7 @@ Approve and execute a plan. All actions become reversible.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `plan_id` | string | required | The plan ID to approve |
-| `index` | string | "default" | Index name |
+| `index` | string | source path | Source directory or 16-hex id |
 
 **Response:**
 ```json
@@ -551,7 +561,7 @@ Reject and discard a plan (no changes made).
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `plan_id` | string | required | The plan ID to reject |
-| `index` | string | "default" | Index name |
+| `index` | string | source path | Source directory or 16-hex id |
 
 **Response:**
 ```json
@@ -579,7 +589,7 @@ Execute multiple file operations atomically.
 | `operations` | array | required | List of operations |
 | `atomic` | boolean | true | Rollback all on failure |
 | `dry_run` | boolean | false | Validate without executing |
-| `index` | string | "default" | Index name |
+| `index` | string | source path | Source directory or 16-hex id |
 
 **Operations format:**
 ```json
@@ -608,13 +618,39 @@ Execute multiple file operations atomically.
 
 ---
 
+## Index locations
+
+The CLI and MCP share one scheme:
+
+```
+{data_dir}/indices/{blake3(canonical_source_path)[:16]}/index.lance
+```
+
+- `data_dir` is `RAGFS_DATA_DIR`, else `$XDG_DATA_HOME/ragfs` on Linux-like OS when that value is absolute, else the CLI `ProjectDirs` path (`~/.local/share/ragfs` on Linux, `~/Library/Application Support/ragfs` on macOS, `%APPDATA%\\ragfs\\data` on Windows)
+- `canonical_source_path` is the symlink-resolved absolute path (same as Rust `Path::canonicalize`)
+- the folder name is the first 16 hex characters of blake3 over those path bytes
+
+Example (same as the CLI):
+
+```bash
+# After: ragfs index /home/user/project
+python - <<'PY'
+from ragfs_mcp.server import get_db_path
+print(get_db_path("/home/user/project"))
+# /home/user/.local/share/ragfs/indices/<16hex>/index.lance
+PY
+```
+
+Pass the **source directory** (or the 16-hex id from `ragfs_list_indices`) as `index`. A named folder such as `indices/default` is not created by `ragfs index`.
+
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RAGFS_DB_PATH` | `~/.local/share/ragfs/indices/default` | Default database path |
+| `RAGFS_SOURCE_PATH` | Current directory | Default source directory to hash (must match `ragfs index <path>`) |
+| `RAGFS_DATA_DIR` | CLI `ProjectDirs` path (Linux: `$XDG_DATA_HOME/ragfs` if absolute) | Data root; indices are stored under `indices/{16hex}/` |
+| `RAGFS_DB_PATH` | *(unset)* | Optional explicit LanceDB path; skips hashing when set |
 | `RAGFS_MODEL_PATH` | `~/.local/share/ragfs/models` | Path to embedding model |
-| `RAGFS_SOURCE_PATH` | Current directory | Source directory for file operations |
 
 ---
 
@@ -627,7 +663,7 @@ Once configured, you can ask Claude to:
 - "Search my codebase for authentication handling"
 - "Find files similar to src/main.rs"
 - "What indexes are available?"
-- "Show the status of the default index"
+- "Show the status of the index for /path/to/project"
 
 ### Programmatic Usage
 
@@ -648,13 +684,13 @@ await server.run_stdio_async()
 Before using the MCP server, you need to index your files using the RAGFS CLI:
 
 ```bash
-# Index a directory
+# Index a directory (creates indices/{blake3(canonical path)[:16]}/index.lance)
 ragfs index /path/to/project
 
-# Index with a specific name
-ragfs index /path/to/project --name my-project
+# Then point MCP at the same directory
+export RAGFS_SOURCE_PATH=/path/to/project
 
-# Mount and index simultaneously
+# Mount (uses the same hashed index path)
 ragfs mount /path/to/project /mnt/ragfs --foreground
 ```
 
@@ -664,11 +700,14 @@ ragfs mount /path/to/project /mnt/ragfs --foreground
 
 ### "Index not found" Error
 
-Make sure you've indexed the directory first:
+MCP looks up the index the same way as the CLI: blake3 of the **canonical** source path. Make sure you indexed that directory and pass the same path (or set `RAGFS_SOURCE_PATH` to it):
 
 ```bash
 ragfs index /path/to/project
+export RAGFS_SOURCE_PATH=/path/to/project
 ```
+
+A relative path and an absolute path to the same directory resolve to the same index. Symlinks are resolved before hashing. `RAGFS_DB_PATH=~/.local/share/ragfs/indices/default` will not find a CLI-built index.
 
 ### Model Download Issues
 

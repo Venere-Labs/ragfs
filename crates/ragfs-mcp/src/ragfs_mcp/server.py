@@ -41,11 +41,15 @@ Tools exposed:
 
 from __future__ import annotations
 
-import os
 import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any
 
+import blake3
 from mcp.server.fastmcp import FastMCP
 
 # Create the MCP server
@@ -54,18 +58,85 @@ mcp = FastMCP(
     instructions="Semantic search filesystem for AI assistants. Provides tools for searching, organizing, and managing files with AI-powered features.",
 )
 
-# Default paths
+# Default paths (Linux XDG; override with RAGFS_DATA_DIR, same as the CLI)
 DEFAULT_DATA_DIR = Path.home() / ".local" / "share" / "ragfs"
-DEFAULT_INDICES_DIR = DEFAULT_DATA_DIR / "indices"
 DEFAULT_MODEL_PATH = DEFAULT_DATA_DIR / "models"
 
+# 16 hex chars = CLI index id (blake3(canonical_source)[:16])
+_INDEX_HASH_RE = re.compile(r"^[0-9a-f]{16}$", re.IGNORECASE)
 
-def get_db_path(index_name: str = "default") -> str:
-    """Get the database path for an index."""
-    db_path = os.environ.get("RAGFS_DB_PATH")
-    if db_path:
-        return db_path
-    return str(DEFAULT_INDICES_DIR / index_name)
+
+def _project_data_dir() -> Path:
+    """CLI `ProjectDirs::from("", "", "ragfs").data_dir()` fallback."""
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "ragfs"
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        root = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+        return root / "ragfs" / "data"
+    return Path.home() / ".local" / "share" / "ragfs"
+
+
+def get_data_dir() -> Path:
+    """Return the RAGFS data root, matching the CLI `data_dir()` lookup."""
+    override = os.environ.get("RAGFS_DATA_DIR")
+    if override:
+        # CLI `data_dir()` uses PathBuf::from — no ~ expansion.
+        return Path(override)
+    # directories 5.0.1: XDG_DATA_HOME only on Linux-like OS, and only if absolute.
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg and sys.platform not in ("darwin", "win32") and os.path.isabs(xdg):
+        return Path(xdg) / "ragfs"
+    return _project_data_dir()
+
+
+def get_indices_dir() -> Path:
+    """Return the directory that holds per-source index folders."""
+    return get_data_dir() / "indices"
+
+
+def canonical_source(source: str) -> str:
+    """Absolute, symlink-resolved path string (CLI `Path::canonicalize`)."""
+    return str(Path(source).expanduser().resolve())
+
+
+def index_id_for_source(source: str) -> str:
+    """First 16 hex chars of blake3(canonical source path), same as the CLI.
+
+    CLI (`crates/ragfs/src/main.rs` `get_db_path`):
+        hash = blake3(source.to_string_lossy().as_bytes()); indices/{hash[:16]}/index.lance
+    """
+    digest = blake3.blake3(canonical_source(source).encode()).hexdigest()
+    return digest[:16]
+
+
+def get_db_path(index: str = "default") -> str:
+    """Return the LanceDB path for an index, matching the CLI scheme.
+
+    Layout: ``{data_dir}/indices/{blake3(canonical_source)[:16]}/index.lance``
+
+    ``index`` may be:
+    - a source directory (the same path passed to ``ragfs index``)
+    - a 16-character hex id from ``ragfs_list_indices``
+    - ``"default"`` / omitted: ``RAGFS_SOURCE_PATH`` or the current directory
+
+    ``RAGFS_DB_PATH`` overrides this resolution entirely.
+    """
+    override = os.environ.get("RAGFS_DB_PATH")
+    if override:
+        return override
+
+    if index and index != "default":
+        expanded = Path(index).expanduser()
+        if expanded.exists() or not _INDEX_HASH_RE.fullmatch(index):
+            index_id = index_id_for_source(str(expanded))
+        else:
+            index_id = index.lower()
+    else:
+        source = os.environ.get("RAGFS_SOURCE_PATH") or os.getcwd()
+        index_id = index_id_for_source(source)
+
+    return str(get_indices_dir() / index_id / "index.lance")
 
 
 def get_model_path() -> str:
@@ -87,7 +158,8 @@ async def ragfs_search(
 
     Args:
         query: The search query (natural language).
-        index: Name of the index to search (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
         limit: Maximum number of results to return (default: 10).
         hybrid: Enable hybrid search combining vector and full-text (default: True).
 
@@ -136,7 +208,7 @@ async def ragfs_search(
             "results": output,
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -147,17 +219,17 @@ async def ragfs_index_status(index: str = "default") -> str:
     Returns information about the indexed files, chunk count, and last update time.
 
     Args:
-        index: Name of the index to check (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON string with index statistics.
     """
     import json
 
-    db_path = get_db_path(index)
-    db_dir = Path(db_path)
+    db_path = Path(get_db_path(index))
 
-    if not db_dir.exists():
+    if not db_path.exists():
         return json.dumps({
             "exists": False,
             "index": index,
@@ -165,28 +237,30 @@ async def ragfs_index_status(index: str = "default") -> str:
             "hint": "Index a directory using: ragfs index /path/to/dir",
         })
 
-    # Check for LanceDB files
-    lance_files = list(db_dir.glob("*.lance")) + list(db_dir.glob("**/data/*.lance"))
-    manifest_file = db_dir / "_latest.manifest"
+    # db_path is the Lance dataset (.../indices/{16hex}/index.lance)
+    dataset = db_path if db_path.is_dir() else db_path.parent
+    lance_files = list(dataset.glob("*.lance")) + list(dataset.glob("**/data/*.lance"))
+    manifest_file = dataset / "_latest.manifest"
+    has_dataset_files = any(dataset.iterdir()) if dataset.is_dir() else False
 
     status = {
         "exists": True,
         "index": index,
         "path": str(db_path),
-        "has_data": len(lance_files) > 0 or manifest_file.exists(),
+        "has_data": db_path.exists() and (has_dataset_files or len(lance_files) > 0 or manifest_file.exists()),
     }
 
-    # Get directory stats
-    if db_dir.is_dir():
-        total_size = sum(f.stat().st_size for f in db_dir.rglob("*") if f.is_file())
+    if dataset.is_dir():
+        total_size = sum(f.stat().st_size for f in dataset.rglob("*") if f.is_file())
         status["size_bytes"] = total_size
         status["size_mb"] = round(total_size / (1024 * 1024), 2)
 
-        # Get modification time
-        if lance_files:
-            latest = max(f.stat().st_mtime for f in lance_files)
-            from datetime import datetime
-            status["last_modified"] = datetime.fromtimestamp(latest).isoformat()
+        files = [f for f in dataset.rglob("*") if f.is_file()]
+        if files:
+            latest = max(f.stat().st_mtime for f in files)
+            status["last_modified"] = datetime.fromtimestamp(
+                latest, tz=timezone.utc
+            ).isoformat()
 
     return json.dumps(status, indent=2)
 
@@ -203,7 +277,8 @@ async def ragfs_similar(
 
     Args:
         file_path: Path to the source file to find similar files for.
-        index: Name of the index to search (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
         limit: Maximum number of similar files to return (default: 5).
 
     Returns:
@@ -216,7 +291,7 @@ async def ragfs_similar(
         return json.dumps({"error": f"File not found: {file_path}"})
 
     try:
-        from ragfs import RagfsRetriever, RagfsDocumentLoader
+        from ragfs import RagfsDocumentLoader, RagfsRetriever
     except ImportError:
         return '{"error": "ragfs package not installed"}'
 
@@ -268,7 +343,7 @@ async def ragfs_similar(
             "count": len(similar),
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -281,10 +356,7 @@ async def ragfs_list_indices() -> str:
     Returns:
         JSON string with list of available indices.
     """
-    import json
-    from datetime import datetime
-
-    indices_dir = DEFAULT_INDICES_DIR
+    indices_dir = get_indices_dir()
 
     if not indices_dir.exists():
         return json.dumps({
@@ -295,18 +367,22 @@ async def ragfs_list_indices() -> str:
     indices = []
     for item in indices_dir.iterdir():
         if item.is_dir():
+            dataset = item / "index.lance"
+            scan_root = dataset if dataset.exists() else item
             lance_files = list(item.glob("*.lance")) + list(item.glob("**/data/*.lance"))
-            if lance_files or (item / "_latest.manifest").exists():
-                total_size = sum(f.stat().st_size for f in item.rglob("*") if f.is_file())
+            if dataset.exists() or lance_files or (item / "_latest.manifest").exists():
+                total_size = sum(f.stat().st_size for f in scan_root.rglob("*") if f.is_file())
                 latest_mtime = max(
-                    (f.stat().st_mtime for f in item.rglob("*") if f.is_file()),
+                    (f.stat().st_mtime for f in scan_root.rglob("*") if f.is_file()),
                     default=0,
                 )
                 indices.append({
                     "name": item.name,
-                    "path": str(item),
+                    "path": str(dataset if dataset.exists() else item),
                     "size_mb": round(total_size / (1024 * 1024), 2),
-                    "last_modified": datetime.fromtimestamp(latest_mtime).isoformat() if latest_mtime else None,
+                    "last_modified": datetime.fromtimestamp(
+                        latest_mtime, tz=timezone.utc
+                    ).isoformat() if latest_mtime else None,
                 })
 
     return json.dumps({
@@ -323,10 +399,13 @@ async def ragfs_list_indices() -> str:
 
 def get_source_path(index: str = "default") -> str:
     """Get the source directory path for safety/semantic operations."""
+    if index and index != "default":
+        expanded = Path(index).expanduser()
+        if expanded.exists() or not _INDEX_HASH_RE.fullmatch(index):
+            return canonical_source(str(expanded))
     source = os.environ.get("RAGFS_SOURCE_PATH")
     if source:
         return source
-    # Default to current directory if not specified
     return os.getcwd()
 
 
@@ -344,7 +423,8 @@ async def ragfs_delete_to_trash(
 
     Args:
         path: File path to delete (absolute or relative to source).
-        index: Name of the index (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON with undo_id for restoration, or error message.
@@ -370,7 +450,7 @@ async def ragfs_delete_to_trash(
             "hint": f"Use ragfs_restore_from_trash with undo_id='{trash_entry.id}' to restore",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -381,7 +461,8 @@ async def ragfs_list_trash(index: str = "default") -> str:
     Shows all soft-deleted files with their undo IDs.
 
     Args:
-        index: Name of the index (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON with list of trash entries.
@@ -413,7 +494,7 @@ async def ragfs_list_trash(index: str = "default") -> str:
             "hint": "Use ragfs_restore_from_trash to restore any file",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -428,7 +509,8 @@ async def ragfs_restore_from_trash(
 
     Args:
         undo_id: The undo_id returned by ragfs_delete_to_trash.
-        index: Name of the index (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON with restored file path, or error message.
@@ -451,14 +533,14 @@ async def ragfs_restore_from_trash(
             "restored_path": restored_path,
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
 async def ragfs_get_history(
     limit: int = 50,
-    path: Optional[str] = None,
+    path: str | None = None,
     index: str = "default",
 ) -> str:
     """Get operation history for audit trail.
@@ -468,7 +550,8 @@ async def ragfs_get_history(
     Args:
         limit: Maximum number of entries to return (default: 50).
         path: Optional filter by file path.
-        index: Name of the index (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON with operation history entries.
@@ -505,7 +588,7 @@ async def ragfs_get_history(
             "hint": "Use ragfs_undo with the entry id to undo reversible operations",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -520,7 +603,8 @@ async def ragfs_undo(
 
     Args:
         undo_id: The operation ID from history.
-        index: Name of the index (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON with undo result, or error message.
@@ -550,7 +634,7 @@ async def ragfs_undo(
             "message": result,
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -571,7 +655,8 @@ async def ragfs_find_duplicates(
 
     Args:
         threshold: Similarity threshold (0.0-1.0). Default 0.95 for near-exact duplicates.
-        index: Name of the index (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON with duplicate groups and potential savings.
@@ -611,7 +696,7 @@ async def ragfs_find_duplicates(
             "hint": "Use ragfs_propose_cleanup to create a plan for handling duplicates",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -627,7 +712,8 @@ async def ragfs_analyze_cleanup(index: str = "default") -> str:
     - Empty files
 
     Args:
-        index: Name of the index (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON with cleanup candidates and potential savings.
@@ -665,7 +751,7 @@ async def ragfs_analyze_cleanup(index: str = "default") -> str:
             "hint": "Use ragfs_propose_cleanup to create a cleanup plan for review",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -697,13 +783,14 @@ async def ragfs_propose_organization(
         strategy: Organization strategy (default: "by_topic").
         max_groups: Maximum number of groups to create (default: 10).
         similarity_threshold: Minimum similarity for grouping (0.0-1.0).
-        index: Name of the index (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON with plan_id and proposed actions for review.
     """
     try:
-        from ragfs import RagfsSemanticManager, OrganizeStrategy, OrganizeRequest
+        from ragfs import OrganizeRequest, OrganizeStrategy, RagfsSemanticManager
     except ImportError:
         return json.dumps({"error": "ragfs package not installed"})
 
@@ -757,7 +844,7 @@ async def ragfs_propose_organization(
             "hint": f"Review the actions above. Use ragfs_approve_plan(plan_id='{plan.id}') to execute, or ragfs_reject_plan to discard.",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -771,13 +858,14 @@ async def ragfs_propose_cleanup(index: str = "default") -> str:
     - Archiving stale files
 
     Args:
-        index: Name of the index (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON with plan_id and proposed cleanup actions.
     """
     try:
-        from ragfs import RagfsSemanticManager, OrganizeStrategy, OrganizeRequest
+        from ragfs import OrganizeRequest, OrganizeStrategy, RagfsSemanticManager
     except ImportError:
         return json.dumps({"error": "ragfs package not installed"})
 
@@ -821,7 +909,7 @@ async def ragfs_propose_cleanup(index: str = "default") -> str:
             "hint": f"Review the actions. Use ragfs_approve_plan(plan_id='{plan.id}') to execute.",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -832,7 +920,8 @@ async def ragfs_list_pending_plans(index: str = "default") -> str:
     Shows all proposed plans that haven't been approved or rejected yet.
 
     Args:
-        index: Name of the index (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON with list of pending plans.
@@ -871,7 +960,7 @@ async def ragfs_list_pending_plans(index: str = "default") -> str:
             "hint": "Use ragfs_get_plan to see full details, ragfs_approve_plan to execute, or ragfs_reject_plan to discard",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -884,7 +973,8 @@ async def ragfs_get_plan(
 
     Args:
         plan_id: The plan ID.
-        index: Name of the index (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON with complete plan details.
@@ -929,7 +1019,7 @@ async def ragfs_get_plan(
             "created_at": plan.created_at,
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -946,7 +1036,8 @@ async def ragfs_approve_plan(
 
     Args:
         plan_id: The plan ID to approve.
-        index: Name of the index (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON with execution result and undo information.
@@ -978,7 +1069,7 @@ async def ragfs_approve_plan(
             "hint": "All actions are reversible. Use ragfs_get_history to see undo IDs.",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -993,7 +1084,8 @@ async def ragfs_reject_plan(
 
     Args:
         plan_id: The plan ID to reject.
-        index: Name of the index (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON confirming rejection.
@@ -1023,7 +1115,7 @@ async def ragfs_reject_plan(
             "message": "Plan rejected and discarded",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 
@@ -1034,7 +1126,7 @@ async def ragfs_reject_plan(
 
 @mcp.tool()
 async def ragfs_batch_operations(
-    operations: List[Dict[str, Any]],
+    operations: list[dict[str, Any]],
     atomic: bool = True,
     dry_run: bool = False,
     index: str = "default",
@@ -1057,13 +1149,14 @@ async def ragfs_batch_operations(
         operations: List of operation objects with action, source, target, content.
         atomic: If True, rollback all on any failure (default: True).
         dry_run: If True, validate without executing (default: False).
-        index: Name of the index (default: "default").
+        index: Source directory (same path as `ragfs index`) or 16-hex index id.
+            Defaults to RAGFS_SOURCE_PATH or the current working directory.
 
     Returns:
         JSON with batch result and undo IDs.
     """
     try:
-        from ragfs import RagfsOpsManager, Operation
+        from ragfs import Operation, RagfsOpsManager
     except ImportError:
         return json.dumps({"error": "ragfs package not installed"})
 
@@ -1134,7 +1227,7 @@ async def ragfs_batch_operations(
             "hint": "Use ragfs_undo with rollback_id to undo the entire batch, or individual undo_ids for specific operations",
         }, indent=2)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return json.dumps({"error": str(e)})
 
 

@@ -15,7 +15,7 @@ use std::sync::Arc;
 /// Python wrapper for TrashEntry.
 ///
 /// Represents a file that has been soft-deleted and can be restored.
-#[pyclass(name = "TrashEntry")]
+#[pyclass(name = "TrashEntry", from_py_object)]
 #[derive(Clone)]
 pub struct PyTrashEntry {
     /// Unique identifier for this trash entry
@@ -82,7 +82,7 @@ impl From<TrashEntry> for PyTrashEntry {
 /// Python wrapper for HistoryOperation.
 ///
 /// Represents the type of operation recorded in history.
-#[pyclass(name = "HistoryOperation")]
+#[pyclass(name = "HistoryOperation", from_py_object)]
 #[derive(Clone)]
 pub struct PyHistoryOperation {
     /// Operation type: "create", "delete", "move", "copy", "write", "restore"
@@ -193,7 +193,7 @@ impl From<HistoryOperation> for PyHistoryOperation {
 /// Python wrapper for HistoryEntry.
 ///
 /// Represents a single operation in the audit history.
-#[pyclass(name = "HistoryEntry")]
+#[pyclass(name = "HistoryEntry", from_py_object)]
 #[derive(Clone)]
 pub struct PyHistoryEntry {
     /// Unique identifier for this operation (can be used for undo)

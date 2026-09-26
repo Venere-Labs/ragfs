@@ -1,0 +1,29 @@
+# Ruff configuration for ragfs Python packages  
+# https://docs.astral.sh/ruff/configuration/
+
+[lint]
+# Enable specific rule sets
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings  
+    "F",     # Pyflakes
+    "I",     # isort
+]
+
+# Ignore specific rules that are too strict for this codebase
+ignore = [
+    "E501",    # Line too long - many docstrings exceed reasonable limits
+    "F401",    # Unused imports - many are for optional dependencies/examples
+    "F841",    # Unused variable - some intentional in examples
+    "BLE001",  # Allow catching Exception - common pattern in MCP servers
+    "DTZ006",  # Allow datetime.fromtimestamp() without tz - timestamps are already UTC
+    "UP035",   # Allow typing.Dict, typing.List for Python 3.9 compatibility
+]
+
+# Allow autofix for all enabled rules
+fixable = ["ALL"]
+unfixable = []
+
+[lint.isort]
+# Configure import sorting
+known-first-party = ["ragfs", "ragfs_mcp"]

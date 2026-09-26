@@ -6,8 +6,8 @@ This example demonstrates building a complete RAG (Retrieval Augmented Generatio
 pipeline using ragfs components with LangChain Expression Language (LCEL).
 
 Features demonstrated:
-- Multi-format document loading (40+ formats including PDF, images)
-- Code-aware text chunking with tree-sitter
+- Multi-format document loading (UTF-8 text/code, PDF, images)
+- Code-aware text chunking (pattern-based function/class splits)
 - Local embeddings (GTE-small, 384 dimensions, no API calls)
 - Hybrid search (vector + full-text)
 - Configurable LLM providers (OpenAI, Anthropic, Ollama)
@@ -45,7 +45,6 @@ import asyncio
 import os
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
 
 # Load .env file if present (for API keys and defaults)
 try:
@@ -79,7 +78,7 @@ class LLMProvider(Enum):
     OLLAMA = "ollama"
 
 
-def get_llm(provider: LLMProvider, model: Optional[str] = None):
+def get_llm(provider: LLMProvider, model: str | None = None):
     """Create an LLM instance based on provider.
 
     Args:
@@ -137,7 +136,7 @@ def get_llm(provider: LLMProvider, model: Optional[str] = None):
     raise ValueError(f"Unknown provider: {provider}")
 
 
-def format_docs(docs: List[Document]) -> str:
+def format_docs(docs: list[Document]) -> str:
     """Format retrieved documents as context string.
 
     Args:
@@ -171,7 +170,7 @@ async def index_documents(
     """
     print(f"Loading documents from: {source_path}")
 
-    # Load documents (supports 40+ formats)
+    # Load documents (UTF-8 text/code, PDF, images)
     loader = RagfsLoader(source_path)
     documents = await loader.aload()
     print(f"Loaded {len(documents)} documents")
@@ -244,7 +243,7 @@ async def query_chain(
     question: str,
     db_path: str,
     provider: LLMProvider,
-    model: Optional[str] = None,
+    model: str | None = None,
     k: int = 4,
     hybrid: bool = True,
     stream: bool = False,
@@ -290,7 +289,7 @@ async def search_only(
     db_path: str,
     k: int = 4,
     hybrid: bool = True,
-) -> List[tuple]:
+) -> list[tuple]:
     """Search without LLM, showing retrieved documents.
 
     Args:

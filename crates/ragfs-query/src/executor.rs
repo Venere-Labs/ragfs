@@ -1,7 +1,8 @@
 //! Query execution.
 
 use ragfs_core::{
-    DistanceMetric, Embedder, EmbeddingConfig, SearchQuery, SearchResult, VectorStore,
+    DirectoryScope, DistanceMetric, Embedder, EmbeddingConfig, SearchQuery, SearchResult,
+    VectorStore,
 };
 use std::sync::Arc;
 use tracing::debug;
@@ -18,6 +19,10 @@ pub struct QueryExecutor {
     parser: QueryParser,
     /// Whether to use hybrid search
     hybrid: bool,
+    /// Upper bound applied to parsed / CLI limits
+    max_limit: usize,
+    /// Optional directory scope, relative to the index root
+    scope_prefix: Option<String>,
 }
 
 impl QueryExecutor {
@@ -33,7 +38,35 @@ impl QueryExecutor {
             embedder,
             parser: QueryParser::new(default_limit),
             hybrid,
+            max_limit: usize::MAX,
+            scope_prefix: None,
         }
+    }
+
+    /// Clamp result counts to `max_limit` from `[query].max_limit`.
+    #[must_use]
+    pub fn with_max_limit(mut self, max_limit: usize) -> Self {
+        self.max_limit = max_limit.max(1);
+        self
+    }
+
+    /// Restrict search to a directory (relative to the index root) and its subdirectories.
+    #[must_use]
+    pub fn with_scope(mut self, scope: Option<String>) -> Self {
+        self.scope_prefix = scope
+            .map(|s| DirectoryScope::normalize_prefix(&s))
+            .filter(|s| !s.is_empty() && s != ".");
+        self
+    }
+
+    /// Whether this executor uses hybrid (vector + FTS) search.
+    #[must_use]
+    pub fn is_hybrid(&self) -> bool {
+        self.hybrid
+    }
+
+    fn clamp_limit(&self, limit: usize) -> usize {
+        limit.min(self.max_limit).max(1)
     }
 
     /// Execute a query string.
@@ -41,7 +74,8 @@ impl QueryExecutor {
         debug!("Executing query: {}", query_str);
 
         // Parse query
-        let parsed = self.parser.parse(query_str);
+        let mut parsed = self.parser.parse(query_str);
+        parsed.limit = self.clamp_limit(parsed.limit);
 
         // Embed query text
         let config = EmbeddingConfig::default();
@@ -62,6 +96,7 @@ impl QueryExecutor {
             limit: parsed.limit,
             filters: parsed.filters,
             metric: DistanceMetric::Cosine,
+            scope_prefix: self.scope_prefix.clone().or(parsed.scope_prefix),
         };
 
         // Execute search
@@ -81,6 +116,9 @@ impl QueryExecutor {
         &self,
         parsed: ParsedQuery,
     ) -> Result<Vec<SearchResult>, ragfs_core::Error> {
+        let mut parsed = parsed;
+        parsed.limit = self.clamp_limit(parsed.limit);
+
         let config = EmbeddingConfig::default();
         let embedding = self
             .embedder
@@ -98,6 +136,7 @@ impl QueryExecutor {
             limit: parsed.limit,
             filters: parsed.filters,
             metric: DistanceMetric::Cosine,
+            scope_prefix: self.scope_prefix.clone().or(parsed.scope_prefix),
         };
 
         let results = if self.hybrid {
@@ -186,6 +225,7 @@ mod tests {
     struct MockStore {
         results: Arc<RwLock<Vec<SearchResult>>>,
         hybrid_results: Arc<RwLock<Vec<SearchResult>>>,
+        last_query: Arc<RwLock<Option<SearchQuery>>>,
     }
 
     impl MockStore {
@@ -193,6 +233,7 @@ mod tests {
             Self {
                 results: Arc::new(RwLock::new(Vec::new())),
                 hybrid_results: Arc::new(RwLock::new(Vec::new())),
+                last_query: Arc::new(RwLock::new(None)),
             }
         }
 
@@ -200,6 +241,7 @@ mod tests {
             Self {
                 results: Arc::new(RwLock::new(results)),
                 hybrid_results: Arc::new(RwLock::new(Vec::new())),
+                last_query: Arc::new(RwLock::new(None)),
             }
         }
 
@@ -207,6 +249,7 @@ mod tests {
             Self {
                 results: Arc::new(RwLock::new(results)),
                 hybrid_results: Arc::new(RwLock::new(hybrid)),
+                last_query: Arc::new(RwLock::new(None)),
             }
         }
     }
@@ -221,15 +264,14 @@ mod tests {
             Ok(())
         }
 
-        async fn search(&self, _query: SearchQuery) -> Result<Vec<SearchResult>, StoreError> {
+        async fn search(&self, query: SearchQuery) -> Result<Vec<SearchResult>, StoreError> {
+            *self.last_query.write().await = Some(query);
             let results = self.results.read().await;
             Ok(results.clone())
         }
 
-        async fn hybrid_search(
-            &self,
-            _query: SearchQuery,
-        ) -> Result<Vec<SearchResult>, StoreError> {
+        async fn hybrid_search(&self, query: SearchQuery) -> Result<Vec<SearchResult>, StoreError> {
+            *self.last_query.write().await = Some(query);
             let results = self.hybrid_results.read().await;
             Ok(results.clone())
         }
@@ -406,6 +448,7 @@ mod tests {
             text: "pre-parsed query".to_string(),
             limit: 5,
             filters: vec![],
+            scope_prefix: None,
         };
 
         let query_results = executor.execute_parsed(parsed).await.unwrap();
@@ -421,10 +464,37 @@ mod tests {
 
         // Test with hybrid=false
         let executor = QueryExecutor::new(Arc::clone(&store), Arc::clone(&embedder), 10, false);
-        assert!(!executor.hybrid);
+        assert!(!executor.is_hybrid());
 
         // Test with hybrid=true
         let executor2 = QueryExecutor::new(store, embedder, 20, true);
-        assert!(executor2.hybrid);
+        assert!(executor2.is_hybrid());
+    }
+
+    #[test]
+    fn test_max_limit_from_config_is_stored() {
+        let store: Arc<dyn VectorStore> = Arc::new(MockStore::new());
+        let embedder: Arc<dyn Embedder> = Arc::new(MockEmbedder::new(TEST_DIM));
+        let executor = QueryExecutor::new(store, embedder, 10, true).with_max_limit(7);
+        assert_eq!(executor.clamp_limit(100), 7);
+        assert!(executor.is_hybrid());
+    }
+
+    #[tokio::test]
+    async fn test_execute_forwards_scope_prefix() {
+        let store = Arc::new(MockStore::with_results(vec![create_test_result(
+            "/project/src/auth/login.rs",
+            "login",
+            0.9,
+        )]));
+        let last_query = store.last_query.clone();
+        let embedder = Arc::new(MockEmbedder::new(TEST_DIM));
+        let executor = QueryExecutor::new(store, embedder, 10, false)
+            .with_scope(Some("src/auth/".to_string()));
+
+        executor.execute("authentication").await.unwrap();
+
+        let query = last_query.read().await.clone().expect("search was called");
+        assert_eq!(query.scope_prefix.as_deref(), Some("src/auth"));
     }
 }

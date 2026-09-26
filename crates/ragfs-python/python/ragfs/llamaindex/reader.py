@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List, Optional, Union
+from typing import Any
 
 from ragfs import RagfsDocumentLoader as CoreLoader
 
@@ -20,7 +20,7 @@ except ImportError:
 class LlamaIndexRagfsReader(BaseReader):
     """LlamaIndex-compatible document reader using RAGFS.
 
-    Supports 40+ text formats, PDFs, and images.
+    Supports UTF-8 text/code, PDFs, and images.
 
     Example:
         from ragfs.llamaindex import RagfsReader
@@ -35,7 +35,7 @@ class LlamaIndexRagfsReader(BaseReader):
 
     def __init__(
         self,
-        extractors: Optional[List[str]] = None,
+        extractors: list[str] | None = None,
         recursive: bool = True,
         **kwargs: Any,
     ):
@@ -52,9 +52,9 @@ class LlamaIndexRagfsReader(BaseReader):
 
     def load_data(
         self,
-        file_path: Union[str, Path],
+        file_path: str | Path,
         **kwargs: Any,
-    ) -> List[Document]:
+    ) -> list[Document]:
         """Load documents from a file or directory synchronously.
 
         Args:
@@ -70,9 +70,9 @@ class LlamaIndexRagfsReader(BaseReader):
 
     async def aload_data(
         self,
-        file_path: Union[str, Path],
+        file_path: str | Path,
         **kwargs: Any,
-    ) -> List[Document]:
+    ) -> list[Document]:
         """Load documents from a file or directory asynchronously.
 
         Args:
@@ -90,7 +90,7 @@ class LlamaIndexRagfsReader(BaseReader):
         else:
             raise ValueError(f"Path does not exist: {path}")
 
-    async def _load_file(self, file_path: Path) -> List[Document]:
+    async def _load_file(self, file_path: Path) -> list[Document]:
         """Load a single file.
 
         Args:
@@ -119,7 +119,7 @@ class LlamaIndexRagfsReader(BaseReader):
 
         return documents
 
-    async def _load_directory(self, dir_path: Path) -> List[Document]:
+    async def _load_directory(self, dir_path: Path) -> list[Document]:
         """Load all files from a directory.
 
         Args:
@@ -152,7 +152,7 @@ class LlamaIndexRagfsReader(BaseReader):
 
         return documents
 
-    def can_load(self, file_path: Union[str, Path]) -> bool:
+    def can_load(self, file_path: str | Path) -> bool:
         """Check if a file can be loaded.
 
         Args:
@@ -164,7 +164,7 @@ class LlamaIndexRagfsReader(BaseReader):
         return self._loader.can_load(str(file_path))
 
     @property
-    def supported_types(self) -> List[str]:
+    def supported_types(self) -> list[str]:
         """Get list of supported MIME types."""
         return self._loader.supported_types()
 

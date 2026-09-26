@@ -11,12 +11,13 @@
 //! |-----------|---------|----------|
 //! | [`TextExtractor`] | `.txt`, `.md`, `.rs`, `.py`, `.js`, `.ts`, `.go`, `.java`, `.json`, `.yaml`, `.toml`, `.xml`, `.html`, `.css`, and 30+ more | UTF-8 text extraction |
 //! | [`PdfExtractor`] | `.pdf` | Text extraction + embedded images (JPEG, PNG, JPEG2000) |
+//! | [`OfficeExtractor`] | `.docx`, `.xlsx`, `.pptx`, `.odt` | ZIP+XML visible text (not binary `.doc`) |
 //! | [`ImageExtractor`] | `.png`, `.jpg`, `.gif`, `.webp`, `.bmp` | Metadata extraction, optional vision captioning |
 //!
 //! ## Usage
 //!
 //! ```rust,ignore
-//! use ragfs_extract::{ExtractorRegistry, TextExtractor, PdfExtractor, ImageExtractor};
+//! use ragfs_extract::{ExtractorRegistry, TextExtractor, PdfExtractor, ImageExtractor, OfficeExtractor};
 //! use std::path::Path;
 //!
 //! // Create a registry with all extractors
@@ -24,6 +25,7 @@
 //! registry.register("text", TextExtractor);
 //! registry.register("pdf", PdfExtractor::new());
 //! registry.register("image", ImageExtractor::new(None));
+//! registry.register("office", OfficeExtractor::new());
 //!
 //! // Extract content from a file
 //! let content = registry.extract(Path::new("document.pdf"), "application/pdf").await?;
@@ -48,19 +50,22 @@
 //! | Type | Description |
 //! |------|-------------|
 //! | [`ExtractorRegistry`] | Routes files to appropriate extractors by MIME type |
-//! | [`TextExtractor`] | Handles text-based files (40+ types) |
+//! | [`TextExtractor`] | UTF-8 text/code/markup by extension (not Office parsers) |
 //! | [`PdfExtractor`] | PDF text and image extraction |
+//! | [`OfficeExtractor`] | OOXML/ODT text (docx/xlsx/pptx/odt) |
 //! | [`ImageExtractor`] | Image metadata and optional captioning |
 //! | [`ImageCaptioner`] | Trait for vision model integration |
 //! | [`PlaceholderCaptioner`] | No-op captioner implementation |
 
 pub mod image;
+pub mod office;
 pub mod pdf;
 pub mod registry;
 pub mod text;
 pub mod vision;
 
 pub use image::ImageExtractor;
+pub use office::OfficeExtractor;
 pub use pdf::PdfExtractor;
 #[cfg(feature = "pdf_oxide")]
 pub use pdf::PdfOxideExtractor;

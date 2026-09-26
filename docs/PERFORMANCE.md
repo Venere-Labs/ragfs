@@ -22,7 +22,7 @@ Typical indexing throughput on modern hardware (SSD, 8+ cores):
 | File Type | Files/min | Notes |
 |-----------|-----------|-------|
 | Plain text (.txt, .md) | 300-500 | Fastest |
-| Source code (.rs, .py, .js) | 200-400 | Tree-sitter parsing adds overhead |
+| Source code (.rs, .py, .js) | 200-400 | Pattern-based code chunking |
 | PDF documents | 50-100 | Depends on page count and images |
 | Large files (>1MB) | 10-50 | Limited by embedding batch size |
 
@@ -32,7 +32,7 @@ Typical indexing throughput on modern hardware (SSD, 8+ cores):
 
 | Query Type | Latency | Notes |
 |------------|---------|-------|
-| Vector search | 5-50ms | Depends on index size |
+| Vector search | 5-50ms | Exact scan on small tables and for L2/Dot; best-effort cosine IVF-PQ ANN at ≥256 rows (exact scan fallback) |
 | Hybrid search | 10-100ms | Adds full-text component |
 | Similar files | 20-100ms | Multiple queries per file |
 

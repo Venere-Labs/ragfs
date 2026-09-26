@@ -136,6 +136,7 @@
 pub mod filesystem;
 pub mod inode;
 pub mod ops;
+mod path_jail;
 pub mod safety;
 pub mod semantic;
 

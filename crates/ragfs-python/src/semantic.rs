@@ -28,7 +28,7 @@ use tokio::sync::RwLock;
 // ============================================================================
 
 /// Python wrapper for OrganizeStrategy.
-#[pyclass(name = "OrganizeStrategy")]
+#[pyclass(name = "OrganizeStrategy", from_py_object)]
 #[derive(Clone)]
 pub struct PyOrganizeStrategy {
     inner: OrganizeStrategy,
@@ -78,13 +78,18 @@ impl PyOrganizeStrategy {
         }
     }
 
+    #[getter]
+    fn strategy_type(&self) -> String {
+        self.name()
+    }
+
     fn __repr__(&self) -> String {
         format!("OrganizeStrategy('{}')", self.name())
     }
 }
 
 /// Python wrapper for OrganizeRequest.
-#[pyclass(name = "OrganizeRequest")]
+#[pyclass(name = "OrganizeRequest", from_py_object)]
 #[derive(Clone)]
 pub struct PyOrganizeRequest {
     /// Directory scope (relative to source root)
@@ -142,7 +147,7 @@ impl From<&PyOrganizeRequest> for OrganizeRequest {
 }
 
 /// Python wrapper for ActionType.
-#[pyclass(name = "ActionType")]
+#[pyclass(name = "ActionType", from_py_object)]
 #[derive(Clone)]
 pub struct PyActionType {
     /// Action type: "move", "mkdir", "delete", "symlink"
@@ -218,7 +223,7 @@ impl From<&ActionType> for PyActionType {
 }
 
 /// Python wrapper for PlanAction.
-#[pyclass(name = "PlanAction")]
+#[pyclass(name = "PlanAction", from_py_object)]
 #[derive(Clone)]
 pub struct PyPlanAction {
     /// The action to perform
@@ -255,7 +260,7 @@ impl From<&PlanAction> for PyPlanAction {
 }
 
 /// Python wrapper for PlanImpact.
-#[pyclass(name = "PlanImpact")]
+#[pyclass(name = "PlanImpact", from_py_object)]
 #[derive(Clone)]
 pub struct PyPlanImpact {
     /// Total files affected
@@ -294,7 +299,7 @@ impl From<&PlanImpact> for PyPlanImpact {
 }
 
 /// Python wrapper for SemanticPlan.
-#[pyclass(name = "SemanticPlan")]
+#[pyclass(name = "SemanticPlan", from_py_object)]
 #[derive(Clone)]
 pub struct PySemanticPlan {
     /// Unique plan identifier
@@ -386,7 +391,7 @@ impl From<&SemanticPlan> for PySemanticPlan {
 }
 
 /// Python wrapper for SimilarFile.
-#[pyclass(name = "SimilarFile")]
+#[pyclass(name = "SimilarFile", from_py_object)]
 #[derive(Clone)]
 pub struct PySimilarFile {
     /// File path
@@ -421,7 +426,7 @@ impl From<&SimilarFile> for PySimilarFile {
 }
 
 /// Python wrapper for SimilarFilesResult.
-#[pyclass(name = "SimilarFilesResult")]
+#[pyclass(name = "SimilarFilesResult", from_py_object)]
 #[derive(Clone)]
 pub struct PySimilarFilesResult {
     /// Source file path
@@ -453,7 +458,7 @@ impl From<&SimilarFilesResult> for PySimilarFilesResult {
 }
 
 /// Python wrapper for DuplicateEntry.
-#[pyclass(name = "DuplicateEntry")]
+#[pyclass(name = "DuplicateEntry", from_py_object)]
 #[derive(Clone)]
 pub struct PyDuplicateEntry {
     /// File path
@@ -488,7 +493,7 @@ impl From<&DuplicateEntry> for PyDuplicateEntry {
 }
 
 /// Python wrapper for DuplicateGroup.
-#[pyclass(name = "DuplicateGroup")]
+#[pyclass(name = "DuplicateGroup", from_py_object)]
 #[derive(Clone)]
 pub struct PyDuplicateGroup {
     /// Group identifier
@@ -533,7 +538,7 @@ impl From<&DuplicateGroup> for PyDuplicateGroup {
 }
 
 /// Python wrapper for DuplicateGroups.
-#[pyclass(name = "DuplicateGroups")]
+#[pyclass(name = "DuplicateGroups", from_py_object)]
 #[derive(Clone)]
 pub struct PyDuplicateGroups {
     /// When the analysis was performed (ISO 8601)
@@ -573,7 +578,7 @@ impl From<&DuplicateGroups> for PyDuplicateGroups {
 }
 
 /// Python wrapper for CleanupCandidate.
-#[pyclass(name = "CleanupCandidate")]
+#[pyclass(name = "CleanupCandidate", from_py_object)]
 #[derive(Clone)]
 pub struct PyCleanupCandidate {
     /// File path
@@ -640,7 +645,7 @@ impl From<&CleanupCandidate> for PyCleanupCandidate {
 }
 
 /// Python wrapper for CleanupAnalysis.
-#[pyclass(name = "CleanupAnalysis")]
+#[pyclass(name = "CleanupAnalysis", from_py_object)]
 #[derive(Clone)]
 pub struct PyCleanupAnalysis {
     /// When the analysis was performed (ISO 8601)

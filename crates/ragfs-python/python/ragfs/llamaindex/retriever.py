@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any
 
 from ragfs import RagfsRetriever as CoreRetriever
 
 try:
-    from llama_index.core.retrievers import BaseRetriever
-    from llama_index.core.schema import NodeWithScore, TextNode, QueryBundle
     from llama_index.core.bridge.pydantic import PrivateAttr
     from llama_index.core.callbacks import CallbackManager
+    from llama_index.core.retrievers import BaseRetriever
+    from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
 except ImportError:
     raise ImportError(
         "llama-index-core is required for LlamaIndex integration. "
@@ -38,10 +38,10 @@ class LlamaIndexRagfsRetriever(BaseRetriever):
     def __init__(
         self,
         db_path: str,
-        model_path: Optional[str] = None,
+        model_path: str | None = None,
         hybrid: bool = True,
         k: int = 4,
-        callback_manager: Optional[CallbackManager] = None,
+        callback_manager: CallbackManager | None = None,
         **kwargs: Any,
     ):
         """Initialize the retriever.
@@ -68,7 +68,7 @@ class LlamaIndexRagfsRetriever(BaseRetriever):
             await self._retriever.init()
             self._initialized = True
 
-    def _retrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
+    def _retrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
         """Retrieve nodes synchronously."""
         import asyncio
 
@@ -76,7 +76,7 @@ class LlamaIndexRagfsRetriever(BaseRetriever):
             self._aretrieve(query_bundle)
         )
 
-    async def _aretrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
+    async def _aretrieve(self, query_bundle: QueryBundle) -> list[NodeWithScore]:
         """Retrieve nodes asynchronously."""
         await self._ainit()
 

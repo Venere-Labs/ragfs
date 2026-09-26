@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+from ragfs import HistoryEntry, RagfsSafetyManager, TrashEntry
 
 from .vectorstore import LlamaIndexRagfsVectorStore
-from ragfs import RagfsSafetyManager, TrashEntry, HistoryEntry
 
 try:
     from llama_index.core.schema import BaseNode
@@ -46,7 +47,7 @@ class LlamaIndexRagfsSafeVectorStore(LlamaIndexRagfsVectorStore):
             print(f"{entry.operation.operation_type} at {entry.timestamp}")
     """
 
-    _safety: Optional[RagfsSafetyManager] = None
+    _safety: RagfsSafetyManager | None = None
     _safety_enabled: bool = False
     _source_path: str = ""
 
@@ -55,7 +56,7 @@ class LlamaIndexRagfsSafeVectorStore(LlamaIndexRagfsVectorStore):
         db_path: str,
         dimension: int = 384,
         safety_enabled: bool = True,
-        source_path: Optional[str] = None,
+        source_path: str | None = None,
         **kwargs: Any,
     ):
         """Initialize the safe vector store.
@@ -79,7 +80,7 @@ class LlamaIndexRagfsSafeVectorStore(LlamaIndexRagfsVectorStore):
         self,
         ref_doc_id: str,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Delete with soft-delete support (can be undone).
 
         Unlike the standard delete, this moves the reference to trash
@@ -135,7 +136,7 @@ class LlamaIndexRagfsSafeVectorStore(LlamaIndexRagfsVectorStore):
         restored_path = await self._safety.restore_from_trash(undo_id)
         return restored_path
 
-    async def get_trash_contents(self) -> List[TrashEntry]:
+    async def get_trash_contents(self) -> list[TrashEntry]:
         """List all items in trash that can be restored.
 
         Returns:
@@ -151,8 +152,8 @@ class LlamaIndexRagfsSafeVectorStore(LlamaIndexRagfsVectorStore):
 
     async def get_history(
         self,
-        limit: Optional[int] = None,
-    ) -> List[HistoryEntry]:
+        limit: int | None = None,
+    ) -> list[HistoryEntry]:
         """Get operation history for audit trail.
 
         Args:
@@ -206,7 +207,7 @@ class LlamaIndexRagfsSafeVectorStore(LlamaIndexRagfsVectorStore):
         return self._safety_enabled
 
     @property
-    def safety_manager(self) -> Optional[RagfsSafetyManager]:
+    def safety_manager(self) -> RagfsSafetyManager | None:
         """Get the underlying safety manager."""
         return self._safety
 

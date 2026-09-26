@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from ragfs import RagfsVectorStore as CoreVectorStore, PyChunk
+from ragfs import PyChunk
+from ragfs import RagfsVectorStore as CoreVectorStore
 
 try:
+    from llama_index.core.bridge.pydantic import PrivateAttr
+    from llama_index.core.schema import BaseNode, TextNode
     from llama_index.core.vector_stores.types import (
         BasePydanticVectorStore,
         VectorStoreQuery,
-        VectorStoreQueryResult,
         VectorStoreQueryMode,
+        VectorStoreQueryResult,
     )
-    from llama_index.core.schema import BaseNode, TextNode
-    from llama_index.core.bridge.pydantic import PrivateAttr
 except ImportError:
     raise ImportError(
         "llama-index-core is required for LlamaIndex integration. "
@@ -90,9 +91,9 @@ class LlamaIndexRagfsVectorStore(BasePydanticVectorStore):
 
     def add(
         self,
-        nodes: List[BaseNode],
+        nodes: list[BaseNode],
         **kwargs: Any,
-    ) -> List[str]:
+    ) -> list[str]:
         """Add nodes to the vector store synchronously.
 
         Args:
@@ -108,9 +109,9 @@ class LlamaIndexRagfsVectorStore(BasePydanticVectorStore):
 
     async def async_add(
         self,
-        nodes: List[BaseNode],
+        nodes: list[BaseNode],
         **kwargs: Any,
-    ) -> List[str]:
+    ) -> list[str]:
         """Add nodes to the vector store asynchronously.
 
         Args:

@@ -140,22 +140,23 @@ Options for the embedding model.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `model` | string | `"jina-embeddings-v3"` | Embedding model to use |
+| `model` | string | `"thenlper/gte-small"` | Embedding model to use |
 | `batch_size` | int | `32` | Batch size for embedding generation |
-| `use_gpu` | bool | `true` | Use GPU if available |
+| `use_gpu` | bool | `true` | Use GPU if available (falls back to CPU) |
 | `max_concurrent` | int | `4` | Maximum concurrent embedding jobs |
 
 ```toml
 [embedding]
-model = "jina-embeddings-v3"  # Or "gte-small" for 384-dim
+model = "thenlper/gte-small"  # alias: "gte-small"
 batch_size = 32
 use_gpu = true
 max_concurrent = 4
 ```
 
 **Models available:**
-- `jina-embeddings-v3` - Default, high quality (requires API or local model)
-- `gte-small` - Local, 384 dimensions, ~100MB download
+- `thenlper/gte-small` (alias `gte-small`) — local BERT embeddings, 384 dimensions, ~67–100MB download
+
+Any other `model` value (including `jina-embeddings-v3`) is rejected with a clear error before download. These settings are applied to `index`, `query`, and `mount`.
 
 ---
 
@@ -208,7 +209,7 @@ rerank = false
 ```
 
 **Hybrid search:**
-When enabled, combines vector similarity with full-text search using reciprocal rank fusion. Improves results when exact keyword matches are important.
+When enabled (the default), `ragfs query` and FUSE `.query` use vector similarity plus full-text search. Override for a single invocation with `ragfs query <path> "<text>" --hybrid` (forces on). Set `hybrid = false` in this file to use vector-only search.
 
 ---
 

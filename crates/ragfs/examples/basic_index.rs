@@ -102,8 +102,8 @@ async fn main() -> Result<()> {
     // Start indexing
     indexer.start().await.context("Failed to start indexer")?;
 
-    // Wait for initial indexing to complete
-    tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+    // Wait until the initial scan has been processed
+    indexer.wait_until_idle().await;
 
     // Get statistics
     let stats = store.stats().await?;

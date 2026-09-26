@@ -131,7 +131,10 @@ fn extract_pdf_images(bytes: &[u8]) -> Vec<ExtractedImage> {
                         continue;
                     }
 
-                    if let Some(extracted) = decode_pdf_image(&pdf_image, page_num) {
+                    // Never let a single image, or the running total, exceed the
+                    // cap: a small FlateDecode stream can inflate without bound.
+                    let budget = MAX_TOTAL_BYTES - total_bytes;
+                    if let Some(extracted) = decode_pdf_image(&pdf_image, page_num, budget) {
                         total_bytes += extracted.data.len();
                         images.push(extracted);
                     }
@@ -152,7 +155,14 @@ fn extract_pdf_images(bytes: &[u8]) -> Vec<ExtractedImage> {
 }
 
 /// Decode a PDF image into `ExtractedImage` format.
-fn decode_pdf_image(pdf_image: &lopdf::xobject::PdfImage, page_num: u32) -> Option<ExtractedImage> {
+///
+/// `budget` is the number of bytes still available under `MAX_TOTAL_BYTES`;
+/// anything larger is rejected rather than allocated.
+fn decode_pdf_image(
+    pdf_image: &lopdf::xobject::PdfImage<'_>,
+    page_num: u32,
+    budget: usize,
+) -> Option<ExtractedImage> {
     let filters = pdf_image.filters.as_ref()?;
 
     // Determine MIME type and decode based on filter
@@ -161,7 +171,7 @@ fn decode_pdf_image(pdf_image: &lopdf::xobject::PdfImage, page_num: u32) -> Opti
         (pdf_image.content.to_vec(), "image/jpeg".to_string())
     } else if filters.iter().any(|f| f == "FlateDecode") {
         // Compressed raw image data - decompress and convert to PNG
-        match decode_flate_image(pdf_image) {
+        match decode_flate_image(pdf_image, budget) {
             Ok((data, mime)) => (data, mime),
             Err(e) => {
                 debug!("Failed to decode FlateDecode image: {}", e);
@@ -177,6 +187,17 @@ fn decode_pdf_image(pdf_image: &lopdf::xobject::PdfImage, page_num: u32) -> Opti
         return None;
     };
 
+    // The DCT/JPX paths are bounded by the file size, but they still have to
+    // respect the remaining budget.
+    if data.len() > budget {
+        debug!(
+            "Skipping image: {} bytes exceeds the remaining budget of {} bytes",
+            data.len(),
+            budget
+        );
+        return None;
+    }
+
     Some(ExtractedImage {
         data,
         mime_type,
@@ -186,13 +207,26 @@ fn decode_pdf_image(pdf_image: &lopdf::xobject::PdfImage, page_num: u32) -> Opti
 }
 
 /// Decode `FlateDecode` compressed image to PNG.
-fn decode_flate_image(pdf_image: &lopdf::xobject::PdfImage) -> Result<(Vec<u8>, String), String> {
-    // Decompress the data
+fn decode_flate_image(
+    pdf_image: &lopdf::xobject::PdfImage<'_>,
+    budget: usize,
+) -> Result<(Vec<u8>, String), String> {
+    // Decompress with a hard bound. `read_to_end` on a hostile stream is a
+    // decompression bomb; read at most one byte past the budget so an oversized
+    // image is rejected instead of silently truncated.
     let mut decoder = ZlibDecoder::new(pdf_image.content);
     let mut decompressed = Vec::new();
     decoder
+        .by_ref()
+        .take(budget as u64 + 1)
         .read_to_end(&mut decompressed)
         .map_err(|e| format!("Decompression failed: {e}"))?;
+
+    if decompressed.len() > budget {
+        return Err(format!(
+            "Decompressed image exceeds the remaining budget of {budget} bytes"
+        ));
+    }
 
     // Determine color space and create image
     let color_space = pdf_image.color_space.as_deref().unwrap_or("DeviceRGB");
@@ -234,7 +268,7 @@ fn decode_flate_image(pdf_image: &lopdf::xobject::PdfImage) -> Result<(Vec<u8>, 
 #[allow(clippy::many_single_char_names)]
 fn cmyk_to_rgb(cmyk: &[u8]) -> Vec<u8> {
     let mut rgb = Vec::with_capacity((cmyk.len() / 4) * 3);
-    for chunk in cmyk.chunks_exact(4) {
+    for chunk in cmyk.as_chunks::<4>().0 {
         let c = f32::from(chunk[0]) / 255.0;
         let m = f32::from(chunk[1]) / 255.0;
         let y = f32::from(chunk[2]) / 255.0;
@@ -510,5 +544,40 @@ mod tests {
         let text = "Title\n\nFirst paragraph here.\n\nSecond paragraph.";
         let elements = build_elements(text);
         assert_eq!(elements.len(), 3);
+    }
+
+    /// A hostile PDF can make a tiny `FlateDecode` stream inflate without
+    /// bound, so the decoder must refuse anything above the remaining budget.
+    #[test]
+    fn test_decode_flate_image_respects_budget() {
+        use flate2::Compression;
+        use flate2::write::ZlibEncoder;
+        use std::io::Write;
+
+        // 4x4 DeviceRGB = 48 bytes of pixel data.
+        let pixels = vec![7u8; 48];
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&pixels).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let dict = lopdf::Dictionary::new();
+        let image = lopdf::xobject::PdfImage {
+            id: (1, 0),
+            width: 4,
+            height: 4,
+            color_space: Some("DeviceRGB".to_string()),
+            filters: Some(vec!["FlateDecode".to_string()]),
+            bits_per_component: Some(8),
+            content: &compressed,
+            origin_dict: &dict,
+        };
+
+        // A budget below the decompressed size must be refused, not truncated.
+        assert!(decode_flate_image(&image, 16).is_err());
+
+        // A sufficient budget decodes to a PNG.
+        let (png, mime) = decode_flate_image(&image, 4096).unwrap();
+        assert_eq!(mime, "image/png");
+        assert!(!png.is_empty());
     }
 }

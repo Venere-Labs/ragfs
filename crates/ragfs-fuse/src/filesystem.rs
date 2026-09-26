@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
 use std::os::unix::fs::MetadataExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::runtime::Handle;
@@ -90,6 +90,8 @@ impl RagFs {
     }
 
     /// Create a new RAGFS filesystem with full RAG capabilities.
+    ///
+    /// Hybrid search defaults to on (same as `[query].hybrid` in config.toml).
     pub fn with_rag(
         source: PathBuf,
         store: Arc<dyn VectorStore>,
@@ -97,12 +99,33 @@ impl RagFs {
         runtime: Handle,
         reindex_sender: Option<mpsc::Sender<PathBuf>>,
     ) -> Self {
-        let query_executor = Arc::new(QueryExecutor::new(
-            store.clone(),
-            embedder.clone(),
-            10,    // default limit
-            false, // hybrid search
-        ));
+        Self::with_rag_query(
+            source,
+            store,
+            embedder,
+            runtime,
+            reindex_sender,
+            10,
+            true,
+            100,
+        )
+    }
+
+    /// Create a RAG-enabled filesystem with query settings from config / CLI.
+    pub fn with_rag_query(
+        source: PathBuf,
+        store: Arc<dyn VectorStore>,
+        embedder: Arc<dyn Embedder>,
+        runtime: Handle,
+        reindex_sender: Option<mpsc::Sender<PathBuf>>,
+        default_limit: usize,
+        hybrid: bool,
+        max_limit: usize,
+    ) -> Self {
+        let query_executor = Arc::new(
+            QueryExecutor::new(store.clone(), embedder.clone(), default_limit, hybrid)
+                .with_max_limit(max_limit),
+        );
 
         let safety_manager = Arc::new(SafetyManager::new(&source, None));
         let ops_manager = Arc::new(OpsManager::with_safety(
@@ -137,6 +160,11 @@ impl RagFs {
     #[must_use]
     pub fn source(&self) -> &PathBuf {
         &self.source
+    }
+
+    /// Resolve a `.reindex` path and reject anything that escapes the source root.
+    fn jail_reindex_path(&self, path: &Path) -> Result<PathBuf, String> {
+        crate::path_jail::resolve_under_root(&self.source, path)
     }
 
     /// Convert a real path to a FUSE inode.
@@ -298,11 +326,21 @@ impl RagFs {
     }
 
     /// Get configuration as JSON.
+    ///
+    /// This is mount wiring, not `~/.config/ragfs/config.toml`.
     fn get_config(&self) -> Vec<u8> {
         let json = serde_json::json!({
+            "api_version": "0.2",
             "source": self.source.to_string_lossy(),
             "store_configured": self.store.is_some(),
             "query_executor_configured": self.query_executor.is_some(),
+            "interfaces": {
+                "query": true,
+                "ops": true,
+                "safety": true,
+                "semantic": true
+            },
+            "note": "Mount wiring only. User TOML is not echoed here.",
         });
         serde_json::to_string_pretty(&json)
             .unwrap_or_default()
@@ -331,45 +369,62 @@ impl RagFs {
         r#"RAGFS Virtual Control Directory
 ================================
 
-The .ragfs directory provides a virtual interface to RAGFS functionality.
+The .ragfs directory is the agent control plane: search, file ops,
+soft-delete, and propose/approve semantic plans.
 
-Available paths:
-
-  .index          Read to get index statistics (JSON)
-                  Shows file count, chunk count, and last update time.
-
-  .config         Read to get current configuration (JSON)
-                  Shows source directory and component status.
-
-  .reindex        Write a file path to trigger reindexing.
+Search and index
+----------------
+  .index          Read index statistics (JSON).
+  .config         Read mount wiring (JSON). Includes api_version.
+                  This is not ~/.config/ragfs/config.toml.
+  .reindex        Write a path to queue reindex (relative paths join source).
+                  Absolute paths and escapes that leave the source are rejected.
                   Example: echo "src/main.rs" > .ragfs/.reindex
+  .query/<q>      Semantic search. Filename is the query.
+                  Returns JSON results.
+                  Example: cat ".ragfs/.query/authentication"
+  .search/<q>     Symlinks to matching files.
+  .similar/<path> Symlinks to files similar to <path>.
+  .help           This file.
 
-  .query/<q>      Read to execute a semantic search query.
-                  The filename is the query string.
-                  Returns JSON with matching results.
-                  Example: cat .ragfs/.query/authentication
+Agent operations (.ops/)
+------------------------
+  .ops/.create    Write: path<newline>content
+  .ops/.delete    Write: path  (soft-delete when safety is on)
+  .ops/.move      Write: src<newline>dst
+  .ops/.batch     Write: JSON BatchRequest (create/delete/move/copy/write/mkdir/symlink)
+  .ops/.result    Read:  JSON OperationResult of the last op (global; not per-agent)
 
-  .search/        Directory for search results (symlinks).
-                  Access .search/<query>/ to get symlinks to matching files.
+  echo -e "notes.md\n# Hello" > .ragfs/.ops/.create
+  cat .ragfs/.ops/.result
 
-  .similar/       Directory for finding similar files.
-                  Access .similar/<path>/ to get symlinks to similar files.
+Safety (.safety/)
+-----------------
+  .safety/.trash/   Soft-deleted files (recoverable)
+  .safety/.history  Audit log (JSONL)
+  .safety/.undo     Write the history operation_id (same as undo_id in .result)
 
-  .help           This help file.
+  echo "<undo_id>" > .ragfs/.safety/.undo
 
-Examples:
+Semantic (.semantic/) — Beta
+----------------------------
+  .semantic/.organize  Write OrganizeRequest JSON → plan in .pending/
+  .semantic/.similar   Write a path → similar files JSON
+  .semantic/.cleanup   Read cleanup analysis (duplicates today)
+  .semantic/.dedupe    Read duplicate groups
+  .semantic/.pending/  Proposed plans
+  .semantic/.approve   Write plan_id to execute
+  .semantic/.reject    Write plan_id to cancel
 
-  # Check index status
-  cat .ragfs/.index
-
-  # Search for files about authentication
-  cat ".ragfs/.query/how to authenticate users"
-
-  # Trigger reindex of a specific file
-  echo "src/lib.rs" > .ragfs/.reindex
-
-  # View configuration
-  cat .ragfs/.config
+Limits (honest)
+---------------
+  - .ops/.semantic/.reindex paths are jailed to the source root. Absolute paths
+    and `..`/symlink hops that leave the source are rejected.
+  - .ops/.result is the last operation only; concurrent agents overwrite it.
+  - Semantic ByProject/cleanup is Beta: organize may only mkdir; cleanup is mostly duplicates.
+  - allow_other (if enabled) exposes .ops/.safety/.semantic to every local user.
+  - Code chunking is pattern-based (function/class signatures), not tree-sitter.
+  - Default extractors: UTF-8 text/code, PDF, images. Binary .doc is not supported.
 "#
         .as_bytes()
         .to_vec()
@@ -1308,12 +1363,13 @@ impl Filesystem for RagFs {
             }
 
             let path = PathBuf::from(&path_str);
-
-            // Convert relative paths to absolute paths relative to source
-            let absolute_path = if path.is_absolute() {
-                path
-            } else {
-                self.source.join(&path)
+            let absolute_path = match self.jail_reindex_path(&path) {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!("Rejected reindex path: {e}");
+                    reply.error(EINVAL);
+                    return;
+                }
             };
 
             info!("Reindex requested for: {:?}", absolute_path);
@@ -2049,6 +2105,8 @@ mod tests {
         assert_eq!(json["source"], "/tmp/test-config");
         assert_eq!(json["store_configured"], false);
         assert_eq!(json["query_executor_configured"], false);
+        assert_eq!(json["api_version"], "0.2");
+        assert_eq!(json["interfaces"]["ops"], true);
     }
 
     #[tokio::test]
@@ -2066,6 +2124,27 @@ mod tests {
         assert!(json.get("source").is_some());
         assert!(json.get("store_configured").is_some());
         assert!(json.get("query_executor_configured").is_some());
+        assert_eq!(json["api_version"], "0.2");
+        assert!(json.get("interfaces").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_help_mentions_agent_interfaces() {
+        let fs = RagFs::new(PathBuf::from("/tmp/test-help"));
+        let help = String::from_utf8(fs.get_help_content()).expect("Valid UTF-8");
+        assert!(help.contains(".ops/"), "help must document .ops/");
+        assert!(help.contains(".safety/"), "help must document .safety/");
+        assert!(help.contains(".semantic/"), "help must document .semantic/");
+        assert!(help.contains(".undo"), "help must document undo");
+        assert!(help.contains("api_version"));
+        assert!(
+            help.contains("jailed to the source root"),
+            "help must document the source-root path jail"
+        );
+        assert!(
+            !help.contains("not path-jailed"),
+            "help must not claim .reindex is unjailed"
+        );
     }
 
     // ========== get_index_status() Tests ==========
@@ -2115,6 +2194,25 @@ mod tests {
 
         // Should be parseable JSON
         let _json: serde_json::Value = serde_json::from_str(&result_str).expect("Valid JSON");
+    }
+
+    #[tokio::test]
+    async fn test_jail_reindex_rejects_absolute_outside_source() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let fs = RagFs::new(temp.path().to_path_buf());
+        let outside = tempfile::TempDir::new().unwrap();
+        let err = fs
+            .jail_reindex_path(&outside.path().join("secret.txt"))
+            .unwrap_err();
+        assert!(err.contains("escapes"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_jail_reindex_allows_relative_inside_source() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let fs = RagFs::new(temp.path().to_path_buf());
+        let resolved = fs.jail_reindex_path(Path::new("src/main.rs")).unwrap();
+        assert!(resolved.starts_with(temp.path().canonicalize().unwrap()));
     }
 
     // ========== Constants Tests ==========

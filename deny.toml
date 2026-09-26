@@ -11,18 +11,20 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 
 # How to handle advisories
-vulnerability = "deny"
-unmaintained = "warn"
+# Note: In cargo-deny v2, advisories are denied by default
+# The unmaintained field uses scope ("all", "workspace", "transitive", "none")
+unmaintained = "workspace"  # Only fail for direct workspace dependencies
 yanked = "warn"
-notice = "warn"
 
-# Ignore specific advisories (with justification)
+# No suppressions. The lancedb 0.37 migration dropped every advisory that used
+# to need an ignore. Re-adding an ID requires a reachability analysis and a
+# review date in docs/AUDIT.md.
 ignore = []
 
 [licenses]
 # Ensure licenses are compatible with our dual MIT/Apache-2.0 license
-unlicensed = "deny"
-default = "deny"
+# Note: In cargo-deny v2, unlicensed and copyleft are denied by default
+# Only need to specify allowed licenses
 
 # Allowed licenses
 allow = [
@@ -31,16 +33,18 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "BSL-1.0",          # Boost Software License - used by xxhash-rust
     "ISC",
     "Zlib",
     "0BSD",
-    "Unicode-DFS-2016",
+    "Unicode-3.0",
     "MPL-2.0",
     "CC0-1.0",
+    "OpenSSL",
+    "NCSA",             # NCSA License - used by libfuzzer-sys
+    "bzip2-1.0.6",      # bzip2 License - used by libbz2-rs-sys
+    "CDLA-Permissive-2.0",  # Community Data License - used by webpki-roots
 ]
-
-# Deny copyleft licenses
-copyleft = "deny"
 
 # Allow specific crates with non-standard licenses
 exceptions = []
@@ -55,20 +59,23 @@ license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 # Lint multiple versions of the same crate
 multiple-versions = "warn"
 
-# Don't allow wildcard dependencies
-wildcards = "deny"
+# Workspace members use `version.workspace = true`; cargo-deny treats that as a
+# wildcard. Allow it here so the policy can stay strict everywhere else.
+wildcards = "allow"
 
 # Allow workspace dependencies
 workspace-default-features = "allow"
-
-# Don't allow build scripts to do network operations
-build-script-allow-network = false
 
 # Deny specific crates
 deny = []
 
 # Allow specific duplicate crates (when justified)
-skip = []
+skip = [
+    # Multiple versions needed for transitive dependency compatibility
+    { crate = "base64", reason = "Multiple versions required by different deps" },
+    { crate = "bitflags", reason = "v1 and v2 both needed" },
+    { crate = "zune-jpeg", reason = "Different versions from image and tiff deps" },
+]
 
 [sources]
 # Only allow crates from crates.io

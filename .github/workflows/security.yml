@@ -3,15 +3,30 @@ name: Security Audit
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  # Deliberately no `pull_request` trigger.
+  #
+  # PR-time advisory gating is already done by the `cargo-deny` job in ci.yml.
+  # Running the full audit on PRs as well would make every PR red for
+  # pre-existing lockfile advisories it did not introduce, which is exactly the
+  # noise this file is meant to remove. The scheduled run is the canonical,
+  # blocking signal for the repository as a whole.
   schedule:
     - cron: '0 0 * * 1'
   workflow_dispatch:
 
 permissions:
   contents: read
+  # `rustsec/audit-check` opens (and updates) a tracking issue when it finds
+  # advisories. Without `issues: write` the action aborts with
+  # "Resource not accessible by integration" *after* it has already scanned,
+  # which is why this workflow reported failure on every run since 2026-05
+  # while producing no report anyone could act on.
+  issues: write
   checks: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   audit:
@@ -19,6 +34,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # No `ignore:` list, on purpose.
+      #
+      # It previously suppressed advisories pinned by the `lancedb` 0.23
+      # generation; the move to `lancedb` 0.37 removed every one of them, so the
+      # audit now runs unsuppressed. Re-adding an ID requires a reachability
+      # analysis and a review date in docs/AUDIT.md.
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

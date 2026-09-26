@@ -6,8 +6,8 @@ This example demonstrates building a complete RAG (Retrieval Augmented Generatio
 pipeline using ragfs components with Haystack's Pipeline API.
 
 Features demonstrated:
-- Multi-format document loading (40+ formats including PDF, images)
-- Code-aware text chunking with tree-sitter
+- Multi-format document loading (UTF-8 text/code, PDF, images)
+- Code-aware text chunking (pattern-based function/class splits)
 - Local embeddings (GTE-small, 384 dimensions, no API calls)
 - Hybrid search (vector + full-text)
 - Haystack Pipeline API for composable pipelines
@@ -59,7 +59,6 @@ import asyncio
 import os
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
 
 # Load .env file if present (for API keys and defaults)
 try:
@@ -72,14 +71,13 @@ except ImportError:
 # ragfs imports
 from ragfs.haystack import (
     RagfsDocumentConverter,
-    RagfsDocumentSplitter,
     RagfsDocumentEmbedder,
+    RagfsDocumentSplitter,
     RagfsDocumentStore,
     RagfsDocumentWriter,
-    RagfsRetriever,
-    RagfsTextEmbedder,
-    RagfsSafeDocumentStore,
     RagfsOrganizer,
+    RagfsRetriever,
+    RagfsSafeDocumentStore,
 )
 
 # Haystack imports
@@ -100,7 +98,7 @@ class LLMProvider(Enum):
     OLLAMA = "ollama"
 
 
-def get_generator(provider: LLMProvider, model: Optional[str] = None):
+def get_generator(provider: LLMProvider, model: str | None = None):
     """Create a Haystack Generator based on provider.
 
     Args:
@@ -162,7 +160,7 @@ def get_generator(provider: LLMProvider, model: Optional[str] = None):
     raise ValueError(f"Unknown provider: {provider}")
 
 
-def format_documents(documents: List[Document]) -> str:
+def format_documents(documents: list[Document]) -> str:
     """Format retrieved documents as context string.
 
     Args:
@@ -225,7 +223,7 @@ def create_indexing_pipeline(
 def create_rag_pipeline(
     db_path: str,
     provider: LLMProvider,
-    model: Optional[str] = None,
+    model: str | None = None,
     k: int = 4,
     hybrid: bool = True,
 ) -> Pipeline:
@@ -315,7 +313,7 @@ async def query_rag(
     question: str,
     db_path: str,
     provider: LLMProvider,
-    model: Optional[str] = None,
+    model: str | None = None,
     k: int = 4,
     hybrid: bool = True,
 ) -> str:
@@ -390,7 +388,7 @@ async def search_only(
 async def delete_document(
     file_path: str,
     db_path: str,
-    source_path: Optional[str] = None,
+    source_path: str | None = None,
 ) -> None:
     """Soft delete a document (can be undone).
 
@@ -417,7 +415,7 @@ async def delete_document(
         print(f"Hard deleted: {file_path} (no undo available)")
 
 
-async def show_trash(db_path: str, source_path: Optional[str] = None) -> None:
+async def show_trash(db_path: str, source_path: str | None = None) -> None:
     """List all items in trash.
 
     Args:
@@ -447,7 +445,7 @@ async def show_trash(db_path: str, source_path: Optional[str] = None) -> None:
 async def restore_document(
     undo_id: str,
     db_path: str,
-    source_path: Optional[str] = None,
+    source_path: str | None = None,
 ) -> None:
     """Restore a soft-deleted document from trash.
 
@@ -474,7 +472,7 @@ async def restore_document(
 
 async def show_history(
     db_path: str,
-    source_path: Optional[str] = None,
+    source_path: str | None = None,
     limit: int = 10,
 ) -> None:
     """Show operation history.
@@ -514,7 +512,7 @@ async def show_history(
 async def propose_organization(
     scope: str,
     db_path: str,
-    source_path: Optional[str] = None,
+    source_path: str | None = None,
     strategy: str = "by_topic",
     max_groups: int = 10,
 ) -> None:
@@ -546,7 +544,7 @@ async def propose_organization(
         print("Failed to create plan")
         return
 
-    print(f"\n=== Plan Created ===")
+    print("\n=== Plan Created ===")
     print(f"Plan ID: {plan.id}")
     print(f"Status: {plan.status}")
     print(f"Actions: {len(plan.actions)}")
@@ -562,7 +560,7 @@ async def propose_organization(
 
 async def list_pending_plans(
     db_path: str,
-    source_path: Optional[str] = None,
+    source_path: str | None = None,
 ) -> None:
     """List all pending plans.
 
@@ -591,7 +589,7 @@ async def list_pending_plans(
 async def approve_plan(
     plan_id: str,
     db_path: str,
-    source_path: Optional[str] = None,
+    source_path: str | None = None,
 ) -> None:
     """Approve and execute a plan.
 
@@ -618,7 +616,7 @@ async def approve_plan(
 async def reject_plan(
     plan_id: str,
     db_path: str,
-    source_path: Optional[str] = None,
+    source_path: str | None = None,
 ) -> None:
     """Reject and discard a plan.
 

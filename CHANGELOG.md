@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-25
+
+### Security
+- Bump `lopdf` to `0.42` (RUSTSEC-2026-0187 nesting-depth DoS). Already on the 0.42 API in `ragfs-extract`.
+- Bump `pyo3` and `pyo3-async-runtimes` to `0.29` (RUSTSEC-2026-0176 / RUSTSEC-2026-0177).
+- Replace unmaintained `daemonize` with `nix` (`fork` + `setsid`, stdio redirect, pid file) for `ragfs mount` without `--foreground`. rustix 1.x does not expose `fork` outside its unstable `runtime` feature.
+
+### Changed
+- Background `ragfs mount` still writes a PID file to `$XDG_RUNTIME_DIR/ragfs/<hash>.pid` (fallback `~/.cache/ragfs/run/`) and logs to `~/.cache/ragfs/logs/<hash>.log`. Unmount remains `fusermount -u <mountpoint>`.
+- Documented actual code chunking (pattern matching) and removed unused `tree-sitter` dependency
+- FUSE `.help` now covers `.ops/`, `.safety/`, `.semantic/` and product limits
+- FUSE `.config` includes `api_version` and states it is mount wiring, not user TOML
+
 ### Added
+- Directory-scoped vector search: persist relative `dir_path` on chunks and filter with `ragfs query --scope <dir>` (exact directory or subdirectory; IVF-PQ ANN is unchanged)
+- Lance chunks schema v2 migration: existing indexes gain `dir_path` / `dir_depth` / `path_components` on open (sidecar `ragfs-schema.json`); `--force` is not a schema upgrade
+- FUSE `mount2` runs on a dedicated OS thread so callbacks can `block_on` without panicking
+- Best-effort IVF-PQ ANN index on `vector` when a Lance table has at least 256 rows (cosine-trained; incrementally refreshed after large appends; L2/Dot and failed builds stay exact)
+- Office text extraction for `.docx`, `.xlsx`, `.pptx`, and `.odt` (ZIP+XML; not binary `.doc`)
 - **Python bindings**: New `ragfs-python` crate with PyO3 bindings
   - `RAGFSIndex` class for indexing and querying
   - `RAGFSStore` for direct vector store access
@@ -86,38 +104,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `vision` feature: Enables `BlipCaptioner` for image captioning
   - `full` feature: Enables all optional features
   - Build profiles: `cargo build` (default), `--features full`, `--no-default-features` (minimal)
-
-### Fixed
-- N/A
-
-## [0.2.0] - 2026-01-11
-
-### Added
-- **Multimodal support**: PDF extraction, image handling
-- **Advanced chunking**: CodeChunker with tree-sitter for syntax-aware code splitting
-- **Semantic chunking**: SemanticChunker for document structure-aware chunking
-- **Comprehensive test suite**: 291 tests across all crates
-  - ragfs-core: 59 tests (types, errors)
-  - ragfs-extract: 56 tests (text, PDF, image extractors)
-  - ragfs-chunker: 54 tests (fixed-size, code, semantic chunkers)
-  - ragfs-fuse: 65 tests (inode management, filesystem helpers)
-  - ragfs-index: 18 tests (indexing pipeline)
-  - ragfs-store: 14 tests (LanceDB operations)
-  - ragfs-embed: 13 tests (embeddings)
-  - ragfs-query: 9 tests (query execution)
-- **Reindex trigger**: `.ragfs/.reindex` file write support for on-demand reindexing
-- **Data integrity**: Full round-trip for line ranges, embeddings, timestamps in LanceDB
-- **Benchmarks**: Criterion-based benchmarks for embedding, search, and indexing
-
-### Changed
-- Improved error handling with proper error chain propagation
-- Enhanced InodeTable with proper FUSE reference counting
-- Better MIME type preservation through the indexing pipeline
-
-### Fixed
-- Line range parsing from LanceDB results
-- Embedding vector round-trip in search results
-- Timestamp parsing for file records
 
 ## [0.1.0] - 2025-01-11
 

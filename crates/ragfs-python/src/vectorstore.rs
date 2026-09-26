@@ -4,7 +4,9 @@ use chrono::Utc;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3_async_runtimes::tokio::future_into_py;
-use ragfs_core::{Chunk, ChunkMetadata, ContentType, DistanceMetric, SearchQuery, VectorStore};
+use ragfs_core::{
+    Chunk, ChunkMetadata, ContentType, DirectoryScope, DistanceMetric, SearchQuery, VectorStore,
+};
 use ragfs_store::LanceStore;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -12,7 +14,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /// Document with content and metadata.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct Document {
     #[pyo3(get, set)]
@@ -35,14 +37,14 @@ impl Document {
     fn __repr__(&self) -> String {
         format!(
             "Document(page_content='{}...', metadata={:?})",
-            &self.page_content.chars().take(50).collect::<String>(),
+            self.page_content.chars().take(50).collect::<String>(),
             self.metadata
         )
     }
 }
 
 /// Search result with document and score.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct SearchResultPy {
     #[pyo3(get)]
@@ -55,13 +57,22 @@ pub struct SearchResultPy {
 
 #[pymethods]
 impl SearchResultPy {
+    #[new]
+    #[pyo3(signature = (document, score, chunk_id=""))]
+    fn new(document: Document, score: f32, chunk_id: &str) -> Self {
+        Self {
+            document,
+            score,
+            chunk_id: chunk_id.to_string(),
+        }
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "SearchResult(score={:.4}, chunk_id='{}', content='{}...')",
             self.score,
             self.chunk_id,
-            &self
-                .document
+            self.document
                 .page_content
                 .chars()
                 .take(50)
@@ -73,7 +84,7 @@ impl SearchResultPy {
 /// A chunk of content for vector storage.
 ///
 /// Used to add documents programmatically to the vector store.
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct PyChunk {
     /// Unique chunk identifier (UUID string)
@@ -159,7 +170,7 @@ impl PyChunk {
             "PyChunk(id='{}', file='{}', content='{}...')",
             self.id,
             self.file_path,
-            &self.content.chars().take(50).collect::<String>()
+            self.content.chars().take(50).collect::<String>()
         )
     }
 }
@@ -180,10 +191,12 @@ impl PyChunk {
             _ => None,
         };
 
+        let file_path = PathBuf::from(&self.file_path);
+        let scope = DirectoryScope::from_file_path(&file_path);
         Ok(Chunk {
             id,
             file_id,
-            file_path: PathBuf::from(&self.file_path),
+            file_path,
             content: self.content.clone(),
             content_type,
             mime_type: self.mime_type.clone(),
@@ -193,6 +206,9 @@ impl PyChunk {
             parent_chunk_id: None,
             depth: 0,
             embedding: self.embedding.clone(),
+            dir_path: scope.dir_path,
+            dir_depth: scope.dir_depth,
+            path_components: scope.path_components,
             metadata: ChunkMetadata {
                 embedding_model: None,
                 indexed_at: Some(Utc::now()),
@@ -237,7 +253,7 @@ fn parse_content_type(s: &str) -> ContentType {
 /// await store.init()
 /// results = await store.similarity_search(query_embedding, k=5)
 /// ```
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct RagfsVectorStore {
     store: Arc<LanceStore>,
@@ -300,6 +316,7 @@ impl RagfsVectorStore {
                 limit: k,
                 filters: vec![],
                 metric: DistanceMetric::Cosine,
+                scope_prefix: None,
             };
 
             let results = store
@@ -365,6 +382,7 @@ impl RagfsVectorStore {
                 limit: k,
                 filters: vec![],
                 metric: DistanceMetric::Cosine,
+                scope_prefix: None,
             };
 
             let results = store

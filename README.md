@@ -5,7 +5,7 @@
 [![codecov](https://codecov.io/gh/Venere-Labs/ragfs/branch/main/graph/badge.svg)](https://codecov.io/gh/Venere-Labs/ragfs)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://Venere-Labs.github.io/ragfs/ragfs/)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.91%2B-orange.svg)](https://www.rust-lang.org)
 
 An agentic FUSE filesystem that makes file management safe and structured for LLM agents. Includes JSON-based operations with undo support, complete audit logging, and AI-powered features like semantic search, auto-organization, and deduplication.
 
@@ -18,11 +18,11 @@ An agentic FUSE filesystem that makes file management safe and structured for LL
 - **Local Embeddings** - Runs entirely offline using the `gte-small` model via Candle
 - **FUSE Integration** - Mount indexed directories as a virtual filesystem
 - **Real-time Indexing** - Watch directories for changes and update the index automatically
-- **Multimodal Support** - Extract content from text, code, markdown, PDF, and images
-- **Code-aware Chunking** - Syntax-aware splitting using tree-sitter for source code
-- **Hybrid Search** - Combine vector similarity with full-text search
+- **Multimodal Support** - Extract content from text, code, markdown, PDF, images, and Office OOXML/ODT
+- **Code-aware Chunking** - Splits source at function/class signatures (pattern matching, not tree-sitter)
+- **Hybrid Search** - Combine vector similarity with full-text search (when enabled)
 - **MCP Server** - Claude Desktop integration for AI assistants
-- **Comprehensive Testing** - 270+ tests across all crates ensuring reliability
+- **Tests** - Unit and integration tests across crates (CI on every PR)
 
 ## Feature Status
 
@@ -32,8 +32,8 @@ An agentic FUSE filesystem that makes file management safe and structured for LL
 | FUSE mount | Stable | Linux only |
 | Semantic search | Stable | Vector similarity with LanceDB |
 | Hybrid search | Stable | Vector + full-text |
-| Text extraction | Stable | 40+ formats |
-| Code chunking | Stable | Tree-sitter based |
+| Text extraction | Stable | UTF-8 text/code/markup, PDF, images, OOXML (docx/xlsx/pptx/odt). No binary `.doc` |
+| Code chunking | Stable | Pattern-based function/class splits |
 | PDF extraction | Stable | Text + embedded images |
 | Agent operations (.ops/) | Stable | JSON feedback, batch support |
 | Safety layer (.safety/) | Stable | Trash, history, undo |
@@ -54,27 +54,41 @@ An agentic FUSE filesystem that makes file management safe and structured for LL
 - Local-first semantic search
 
 **Limitations:**
-- Linux only (FUSE requirement)
-- Embedding model requires ~500MB disk
-- Large repositories (100K+ files) may need tuning
+- Linux only (FUSE requirement). macOS CI artifacts are not a supported FUSE product.
+- `ragfs index` without `--watch` does not remove files that disappeared while the process was not running. `--watch` receives those deletions.
+- Embedding model is `thenlper/gte-small` (~67–100MB download, hundreds of MB RAM).
+- Code chunking is regex/signature based, not a tree-sitter AST.
+- Default extractors do not parse binary `.doc` / RTF / EPUB.
+- Vector search is an exact scan until cosine IVF-PQ is built (≥256 chunks). L2/Dot stay exact.
+- Semantic organize/cleanup is Beta.
+- Large repositories (100K+ files) may need tuning.
 
 ## Requirements
 
-- Rust 1.88 or later
+- Rust 1.91 or later
 - Linux with FUSE support (`libfuse-dev` on Debian/Ubuntu, `fuse` on Arch)
-- ~500MB disk space for the embedding model (downloaded on first run)
+- Disk space for the `gte-small` embedding model (downloaded on first run, ~67–100MB). `HF_HUB_OFFLINE=1` uses only a cache that is already present.
 
 ## Installation
 
+GitHub Release `v0.2.0` publishes the CLI only. The crates are not on crates.io, and the Python bindings are not on PyPI.
+
+Linux archives, each with a `.sha256` file:
+
+- `ragfs-linux-x86_64.tar.gz`
+- `ragfs-linux-aarch64.tar.gz`
+
+macOS is not part of the release. `fuser` needs libfuse, and the macOS runners do not provide it.
+
 ```bash
-# Clone the repository
+# From a Linux release archive
+tar -xzf ragfs-linux-x86_64.tar.gz
+sudo install ragfs /usr/local/bin/ragfs
+
+# Or build from source
 git clone https://github.com/Venere-Labs/ragfs.git
 cd ragfs
-
-# Build in release mode
 cargo build --release
-
-# Install to ~/.cargo/bin
 cargo install --path crates/ragfs
 ```
 
@@ -180,8 +194,12 @@ Arguments:
   <PATH>  Directory to index
 
 Options:
-  -f, --force  Force reindexing of all files
-  -w, --watch  Watch for changes after initial indexing
+  -f, --force  Force reindexing of all files (rewrites directory-scope fields;
+               schema upgrades for old Lance indexes run automatically on open)
+  -w, --watch  Watch for changes after initial indexing. Deletions are
+               applied only while this process is running. A later
+               `ragfs index` without `--watch` keeps chunks for files
+               that disappeared in between.
 ```
 
 ### query
@@ -195,6 +213,8 @@ Arguments:
 
 Options:
   -l, --limit <LIMIT>  Maximum results [default: 10]
+      --scope <DIR>    Restrict results to this directory and its subdirectories
+                       (existing indexes are migrated on open; see USER_GUIDE)
 ```
 
 ### status
@@ -248,6 +268,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 - [Python Bindings](docs/PYTHON.md) - Python SDK and framework integrations
 - [MCP Server](docs/MCP.md) - Claude Desktop integration
 - [Development Guide](docs/DEVELOPMENT.md) - Contributing to RAGFS
+- [Audit & Improvement Tracker](docs/AUDIT.md) - Security posture, accepted advisories, open work
 
 ## How It Works
 
@@ -261,6 +282,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture docum
 
 - **Indices**: `~/.local/share/ragfs/indices/{hash}/index.lance`
 - **Models**: `~/.local/share/ragfs/models/`
+
+`RAGFS_DATA_DIR` moves both. The default remains `~/.local/share/ragfs`.
 
 ## License
 

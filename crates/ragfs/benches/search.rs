@@ -3,7 +3,9 @@
 //! Measures search latency (p50, p95, p99) across different index sizes.
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use ragfs_core::{Chunk, ChunkMetadata, ContentType, DistanceMetric, SearchQuery, VectorStore};
+use ragfs_core::{
+    Chunk, ChunkMetadata, ContentType, DirectoryScope, DistanceMetric, SearchQuery, VectorStore,
+};
 use ragfs_store::LanceStore;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -32,6 +34,7 @@ fn create_random_embedding(dim: usize, seed: u64) -> Vec<f32> {
 
 /// Create a test chunk with random embedding.
 fn create_test_chunk(file_path: &PathBuf, content: &str, chunk_index: u32, seed: u64) -> Chunk {
+    let scope = DirectoryScope::from_file_path(file_path);
     Chunk {
         id: Uuid::new_v4(),
         file_id: Uuid::new_v4(),
@@ -45,6 +48,9 @@ fn create_test_chunk(file_path: &PathBuf, content: &str, chunk_index: u32, seed:
         parent_chunk_id: None,
         depth: 0,
         embedding: Some(create_random_embedding(EMBEDDING_DIM, seed)),
+        dir_path: scope.dir_path,
+        dir_depth: scope.dir_depth,
+        path_components: scope.path_components,
         metadata: ChunkMetadata::default(),
     }
 }
@@ -103,6 +109,7 @@ fn search_benchmark(c: &mut Criterion) {
                         limit: 10,
                         filters: vec![],
                         metric: DistanceMetric::Cosine,
+                        scope_prefix: None,
                     };
                     black_box(store.search(query).await)
                 });
@@ -122,6 +129,7 @@ fn search_benchmark(c: &mut Criterion) {
                         limit: 10,
                         filters: vec![],
                         metric: DistanceMetric::Cosine,
+                        scope_prefix: None,
                     };
                     black_box(store.hybrid_search(query).await)
                 });
@@ -146,6 +154,7 @@ fn search_benchmark(c: &mut Criterion) {
                             limit: *limit,
                             filters: vec![],
                             metric: DistanceMetric::Cosine,
+                            scope_prefix: None,
                         };
                         black_box(store.search(query).await)
                     });

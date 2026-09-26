@@ -10,7 +10,7 @@
 //! | Chunker | Best For | Method |
 //! |---------|----------|--------|
 //! | [`FixedSizeChunker`] | General text | Token-based splitting with overlap |
-//! | [`CodeChunker`] | Source code | AST-aware splitting via tree-sitter |
+//! | [`CodeChunker`] | Source code | Pattern matching on function/class signatures |
 //! | [`SemanticChunker`] | Documents | Structure-aware (headings, paragraphs) |
 //!
 //! ## Usage
@@ -49,11 +49,12 @@
 //!
 //! ## Code-Aware Chunking
 //!
-//! The [`CodeChunker`] uses tree-sitter for syntax-aware splitting:
+//! The [`CodeChunker`] splits on function/class signatures via regex-style
+//! pattern matching (not a tree-sitter AST):
 //!
-//! - Respects function/class boundaries
-//! - Preserves complete code constructs
-//! - Supports Rust, Python, JavaScript, TypeScript, Go, Java, and more
+//! - Prefers function/class boundaries when patterns match
+//! - Falls back to line-based chunks when no signatures are found
+//! - Supports Rust, Python, JavaScript, TypeScript, Go, Java, and C/C++
 //!
 //! ## Semantic Chunking
 //!
@@ -69,7 +70,7 @@
 //! |------|-------------|
 //! | [`ChunkerRegistry`] | Routes content to appropriate chunkers |
 //! | [`FixedSizeChunker`] | Token-based chunking with overlap |
-//! | [`CodeChunker`] | AST-aware code chunking |
+//! | [`CodeChunker`] | Pattern-based code chunking |
 //! | [`SemanticChunker`] | Document structure-aware chunking |
 
 pub mod code;

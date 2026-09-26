@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from ragfs import RagfsVectorStore as CoreVectorStore, RagfsEmbeddings as CoreEmbeddings, PyChunk
+from ragfs import PyChunk
+from ragfs import RagfsEmbeddings as CoreEmbeddings
+from ragfs import RagfsVectorStore as CoreVectorStore
 
 try:
     from haystack import Document
@@ -36,7 +38,7 @@ class HaystackRagfsDocumentStore:
         self,
         db_path: str,
         dimension: int = 384,
-        embedding_model_path: Optional[str] = None,
+        embedding_model_path: str | None = None,
     ):
         """Initialize the document store.
 
@@ -75,8 +77,8 @@ class HaystackRagfsDocumentStore:
 
     def filter_documents(
         self,
-        filters: Optional[Dict[str, Any]] = None,
-    ) -> List[Document]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[Document]:
         """Retrieve documents matching the given filters.
 
         Note: RAGFS stores chunks, so this returns all chunks as documents.
@@ -106,7 +108,7 @@ class HaystackRagfsDocumentStore:
 
     def write_documents(
         self,
-        documents: List[Document],
+        documents: list[Document],
         policy: DuplicatePolicy = DuplicatePolicy.NONE,
     ) -> int:
         """Write documents to the store.
@@ -127,7 +129,7 @@ class HaystackRagfsDocumentStore:
 
     async def _async_write_documents(
         self,
-        documents: List[Document],
+        documents: list[Document],
         policy: DuplicatePolicy,
     ) -> int:
         """Write documents asynchronously."""
@@ -181,7 +183,7 @@ class HaystackRagfsDocumentStore:
 
         return len(documents)
 
-    def delete_documents(self, document_ids: List[str]) -> None:
+    def delete_documents(self, document_ids: list[str]) -> None:
         """Delete documents by their IDs.
 
         Note: RAGFS deletes by file path. Document IDs are treated as file paths.
@@ -194,12 +196,12 @@ class HaystackRagfsDocumentStore:
             self._async_delete_documents(document_ids)
         )
 
-    async def _async_delete_documents(self, document_ids: List[str]) -> None:
+    async def _async_delete_documents(self, document_ids: list[str]) -> None:
         """Delete documents asynchronously."""
         for doc_id in document_ids:
             await self._store.delete_by_path(doc_id)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize the document store to a dictionary.
 
         Returns:
@@ -214,7 +216,7 @@ class HaystackRagfsDocumentStore:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "HaystackRagfsDocumentStore":
+    def from_dict(cls, data: dict[str, Any]) -> HaystackRagfsDocumentStore:
         """Create a document store from a dictionary.
 
         Args:

@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
-
 from ragfs import RagfsRetriever as CoreRetriever
 
 try:
+    from langchain_core.callbacks import CallbackManagerForRetrieverRun
     from langchain_core.documents import Document
     from langchain_core.retrievers import BaseRetriever
-    from langchain_core.callbacks import CallbackManagerForRetrieverRun
 except ImportError:
     raise ImportError(
         "langchain-core is required for LangChain integration. "
@@ -30,11 +28,11 @@ class LangChainRagfsRetriever(BaseRetriever):
     """
 
     db_path: str
-    model_path: Optional[str] = None
+    model_path: str | None = None
     hybrid: bool = True
     k: int = 4
 
-    _retriever: Optional[CoreRetriever] = None
+    _retriever: CoreRetriever | None = None
     _initialized: bool = False
 
     class Config:
@@ -43,7 +41,7 @@ class LangChainRagfsRetriever(BaseRetriever):
     def __init__(
         self,
         db_path: str,
-        model_path: Optional[str] = None,
+        model_path: str | None = None,
         hybrid: bool = True,
         k: int = 4,
         **kwargs,
@@ -81,8 +79,8 @@ class LangChainRagfsRetriever(BaseRetriever):
         self,
         query: str,
         *,
-        run_manager: Optional[CallbackManagerForRetrieverRun] = None,
-    ) -> List[Document]:
+        run_manager: CallbackManagerForRetrieverRun | None = None,
+    ) -> list[Document]:
         """Get relevant documents synchronously.
 
         Note: This blocks the event loop. Use aget_relevant_documents for async.
@@ -97,8 +95,8 @@ class LangChainRagfsRetriever(BaseRetriever):
         self,
         query: str,
         *,
-        run_manager: Optional[CallbackManagerForRetrieverRun] = None,
-    ) -> List[Document]:
+        run_manager: CallbackManagerForRetrieverRun | None = None,
+    ) -> list[Document]:
         """Get relevant documents asynchronously."""
         await self.ainit()
 
@@ -115,9 +113,9 @@ class LangChainRagfsRetriever(BaseRetriever):
     async def asearch(
         self,
         query: str,
-        hybrid: Optional[bool] = None,
-        k: Optional[int] = None,
-    ) -> List[tuple[Document, float]]:
+        hybrid: bool | None = None,
+        k: int | None = None,
+    ) -> list[tuple[Document, float]]:
         """Search with explicit control and scores."""
         await self.ainit()
 

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List, Optional, Union
+from typing import Any
 
 try:
-    from llama_index.core import VectorStoreIndex, StorageContext
+    from llama_index.core import StorageContext, VectorStoreIndex
     from llama_index.core.schema import Document
 except ImportError:
     raise ImportError(
@@ -14,16 +14,16 @@ except ImportError:
         "Install with: pip install ragfs[llamaindex]"
     )
 
-from .vectorstore import LlamaIndexRagfsVectorStore
 from .embeddings import LlamaIndexRagfsEmbeddings
 from .node_parser import LlamaIndexRagfsNodeParser
 from .reader import LlamaIndexRagfsReader
+from .vectorstore import LlamaIndexRagfsVectorStore
 
 
 async def create_ragfs_index(
     db_path: str,
-    documents: Optional[List[Document]] = None,
-    source_path: Optional[Union[str, Path]] = None,
+    documents: list[Document] | None = None,
+    source_path: str | Path | None = None,
     chunk_size: int = 512,
     chunk_overlap: int = 64,
     chunker_type: str = "auto",
@@ -116,8 +116,8 @@ async def create_ragfs_index(
 
 def create_ragfs_index_sync(
     db_path: str,
-    documents: Optional[List[Document]] = None,
-    source_path: Optional[Union[str, Path]] = None,
+    documents: list[Document] | None = None,
+    source_path: str | Path | None = None,
     chunk_size: int = 512,
     chunk_overlap: int = 64,
     chunker_type: str = "auto",

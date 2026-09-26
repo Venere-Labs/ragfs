@@ -5,8 +5,8 @@
 use async_trait::async_trait;
 use ragfs_chunker::{ChunkerRegistry, FixedSizeChunker};
 use ragfs_core::{
-    Chunk, ChunkConfig, ChunkMetadata, ContentType, DistanceMetric, EmbedError, Embedder,
-    EmbeddingConfig, EmbeddingOutput, Modality, SearchQuery, VectorStore,
+    Chunk, ChunkConfig, ChunkMetadata, ContentType, DirectoryScope, DistanceMetric, EmbedError,
+    Embedder, EmbeddingConfig, EmbeddingOutput, Modality, SearchQuery, SearchResult, VectorStore,
 };
 use ragfs_extract::{ExtractorRegistry, TextExtractor};
 use ragfs_store::LanceStore;
@@ -89,6 +89,7 @@ fn create_chunk(
     chunk_index: u32,
     token_count: usize,
 ) -> Chunk {
+    let scope = DirectoryScope::from_file_path(file_path);
     Chunk {
         id: Uuid::new_v4(),
         file_id: Uuid::new_v4(),
@@ -102,6 +103,9 @@ fn create_chunk(
         parent_chunk_id: None,
         depth: chunk_output.depth,
         embedding: Some(embedding),
+        dir_path: scope.dir_path,
+        dir_depth: scope.dir_depth,
+        path_components: scope.path_components,
         metadata: ChunkMetadata {
             embedding_model: Some("mock-embedder".to_string()),
             indexed_at: Some(chrono::Utc::now()),
@@ -109,6 +113,23 @@ fn create_chunk(
             extra: HashMap::new(),
         },
     }
+}
+
+/// Mock embeddings are blake3 hashes, not semantic vectors. Honoring
+/// `DistanceMetric::Cosine` (previously ignored; `LanceDB` defaulted to L2)
+/// can change nearest-neighbor order, so tests assert the expected file is
+/// present rather than that it is always rank 1.
+fn assert_results_include(results: &[SearchResult], file_name: &str) {
+    assert!(
+        results
+            .iter()
+            .any(|r| r.file_path.to_string_lossy().contains(file_name)),
+        "Expected a hit from {file_name}, got {:?}",
+        results
+            .iter()
+            .map(|r| r.file_path.clone())
+            .collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test]
@@ -207,19 +228,13 @@ async fn test_full_pipeline_extract_chunk_embed_store_search() {
             limit: 5,
             metric: DistanceMetric::Cosine,
             filters: vec![],
+            scope_prefix: None,
         })
         .await
         .unwrap();
 
     assert!(!results.is_empty(), "Should find results for ML query");
-
-    // The first result should be from ml.txt (best semantic match)
-    let top_result = &results[0];
-    assert!(
-        top_result.file_path.to_string_lossy().contains("ml.txt"),
-        "Top result should be from ml.txt, got {:?}",
-        top_result.file_path
-    );
+    assert_results_include(&results, "ml.txt");
 
     // 6. Search for "database SQL"
     let query_embedding = embedder
@@ -234,20 +249,13 @@ async fn test_full_pipeline_extract_chunk_embed_store_search() {
             limit: 5,
             metric: DistanceMetric::Cosine,
             filters: vec![],
+            scope_prefix: None,
         })
         .await
         .unwrap();
 
     assert!(!results.is_empty(), "Should find results for DB query");
-    let top_result = &results[0];
-    assert!(
-        top_result
-            .file_path
-            .to_string_lossy()
-            .contains("database.txt"),
-        "Top result should be from database.txt, got {:?}",
-        top_result.file_path
-    );
+    assert_results_include(&results, "database.txt");
 
     // 7. Search for "authentication"
     let query_embedding = embedder
@@ -262,20 +270,13 @@ async fn test_full_pipeline_extract_chunk_embed_store_search() {
             limit: 5,
             metric: DistanceMetric::Cosine,
             filters: vec![],
+            scope_prefix: None,
         })
         .await
         .unwrap();
 
     assert!(!results.is_empty(), "Should find results for auth query");
-    let top_result = &results[0];
-    assert!(
-        top_result
-            .file_path
-            .to_string_lossy()
-            .contains("security.txt"),
-        "Top result should be from security.txt, got {:?}",
-        top_result.file_path
-    );
+    assert_results_include(&results, "security.txt");
 }
 
 #[tokio::test]
@@ -389,6 +390,7 @@ async fn test_pipeline_delete_and_reindex() {
             limit: 5,
             metric: DistanceMetric::Cosine,
             filters: vec![],
+            scope_prefix: None,
         })
         .await
         .unwrap();
@@ -466,6 +468,7 @@ async fn test_pipeline_hybrid_search() {
             limit: 5,
             metric: DistanceMetric::Cosine,
             filters: vec![],
+            scope_prefix: None,
         })
         .await
         .unwrap();

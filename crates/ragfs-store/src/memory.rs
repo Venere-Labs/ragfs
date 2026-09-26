@@ -9,7 +9,8 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use ragfs_core::{
-    Chunk, FileRecord, SearchQuery, SearchResult, StoreError, StoreStats, VectorStore,
+    Chunk, DirectoryScope, FileRecord, SearchQuery, SearchResult, StoreError, StoreStats,
+    VectorStore, dir_path_matches_scope,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -107,6 +108,11 @@ impl VectorStore for MemoryStore {
 
         // Brute force search with cosine similarity
         for chunk in chunks.values() {
+            if let Some(ref scope) = query.scope_prefix
+                && !dir_path_matches_scope(&chunk.dir_path, scope)
+            {
+                continue;
+            }
             if let Some(embedding) = &chunk.embedding {
                 let score = Self::cosine_similarity(&query.embedding, embedding);
                 results.push((score, chunk));
@@ -162,7 +168,12 @@ impl VectorStore for MemoryStore {
         // Update chunks
         for chunk in chunks.values_mut() {
             if chunk.file_path == from {
+                let root = DirectoryScope::infer_root(&chunk.file_path, &chunk.dir_path);
+                let scope = DirectoryScope::from_paths(to, root.as_deref());
                 chunk.file_path = to.to_path_buf();
+                chunk.dir_path = scope.dir_path;
+                chunk.dir_depth = scope.dir_depth;
+                chunk.path_components = scope.path_components;
                 updated += 1;
             }
         }
@@ -225,13 +236,15 @@ impl VectorStore for MemoryStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ragfs_core::{ChunkMetadata, ContentType};
+    use ragfs_core::{ChunkMetadata, ContentType, DistanceMetric};
 
     fn create_test_chunk(id: Uuid, file_id: Uuid, path: &str, embedding: Vec<f32>) -> Chunk {
+        let file_path = PathBuf::from(path);
+        let scope = DirectoryScope::from_file_path(&file_path);
         Chunk {
             id,
             file_id,
-            file_path: PathBuf::from(path),
+            file_path,
             content: "test content".to_string(),
             content_type: ContentType::Text,
             mime_type: Some("text/plain".to_string()),
@@ -241,6 +254,37 @@ mod tests {
             parent_chunk_id: None,
             depth: 0,
             embedding: Some(embedding),
+            dir_path: scope.dir_path,
+            dir_depth: scope.dir_depth,
+            path_components: scope.path_components,
+            metadata: ChunkMetadata::default(),
+        }
+    }
+
+    fn create_scoped_chunk(
+        path: &str,
+        root: Option<&Path>,
+        embedding: Vec<f32>,
+        content: &str,
+    ) -> Chunk {
+        let file_path = PathBuf::from(path);
+        let scope = DirectoryScope::from_paths(&file_path, root);
+        Chunk {
+            id: Uuid::new_v4(),
+            file_id: Uuid::new_v4(),
+            file_path,
+            content: content.to_string(),
+            content_type: ContentType::Text,
+            mime_type: Some("text/plain".to_string()),
+            chunk_index: 0,
+            byte_range: 0..content.len() as u64,
+            line_range: Some(0..1),
+            parent_chunk_id: None,
+            depth: 0,
+            embedding: Some(embedding),
+            dir_path: scope.dir_path,
+            dir_depth: scope.dir_depth,
+            path_components: scope.path_components,
             metadata: ChunkMetadata::default(),
         }
     }
@@ -316,6 +360,7 @@ mod tests {
             limit: 2,
             filters: vec![],
             metric: Default::default(),
+            scope_prefix: None,
         };
 
         let results = store.search(query).await.unwrap();
@@ -381,6 +426,96 @@ mod tests {
 
         let all_chunks = store.get_all_chunks().await.unwrap();
         assert_eq!(all_chunks.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_memory_store_scoped_search() {
+        let store = MemoryStore::new(3);
+        store.init().await.unwrap();
+        let root = Path::new("/project");
+        let embedding = vec![1.0, 0.0, 0.0];
+        store
+            .upsert_chunks(&[
+                create_scoped_chunk(
+                    "/project/src/auth/login.rs",
+                    Some(root),
+                    embedding.clone(),
+                    "login",
+                ),
+                create_scoped_chunk(
+                    "/project/src/auth/oauth/token.rs",
+                    Some(root),
+                    embedding.clone(),
+                    "oauth",
+                ),
+                create_scoped_chunk("/project/src/db.rs", Some(root), embedding.clone(), "db"),
+                create_scoped_chunk(
+                    "/project/docs/readme.md",
+                    Some(root),
+                    embedding.clone(),
+                    "docs",
+                ),
+            ])
+            .await
+            .unwrap();
+
+        let stored = store
+            .get_chunks_for_file(Path::new("/project/src/auth/login.rs"))
+            .await
+            .unwrap();
+        assert_eq!(stored[0].dir_path, "src/auth");
+        assert!(!stored[0].dir_path.starts_with('/'));
+
+        let exact = store
+            .search(SearchQuery {
+                embedding: embedding.clone(),
+                text: None,
+                limit: 10,
+                filters: vec![],
+                metric: DistanceMetric::Cosine,
+                scope_prefix: Some("src/auth".to_string()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(exact.len(), 2);
+        assert!(
+            exact
+                .iter()
+                .any(|r| r.file_path.ends_with("src/auth/login.rs"))
+        );
+        assert!(
+            exact
+                .iter()
+                .any(|r| r.file_path.ends_with("src/auth/oauth/token.rs"))
+        );
+
+        let src = store
+            .search(SearchQuery {
+                embedding: embedding.clone(),
+                text: None,
+                limit: 10,
+                filters: vec![],
+                metric: DistanceMetric::Cosine,
+                scope_prefix: Some("src".to_string()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(src.len(), 3);
+        assert!(src.iter().any(|r| r.file_path.ends_with("src/db.rs")));
+
+        let docs = store
+            .search(SearchQuery {
+                embedding,
+                text: None,
+                limit: 10,
+                filters: vec![],
+                metric: DistanceMetric::Cosine,
+                scope_prefix: Some("docs".to_string()),
+            })
+            .await
+            .unwrap();
+        assert_eq!(docs.len(), 1);
+        assert!(docs[0].file_path.ends_with("docs/readme.md"));
     }
 
     #[test]

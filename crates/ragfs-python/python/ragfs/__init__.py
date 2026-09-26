@@ -7,8 +7,8 @@ written in Rust.
 Features:
 - Local embeddings using GTE-small (384 dimensions, no API calls)
 - Vector storage with LanceDB (hybrid search support)
-- Multi-format document loading (40+ text formats, PDF, images)
-- Code-aware text splitting with tree-sitter
+- Multi-format document loading (UTF-8 text/code, PDF, images)
+- Code-aware text splitting (pattern-based function/class splits)
 - Framework adapters for LangChain, LlamaIndex, and Haystack
 - **FUSE filesystem capabilities for AI agent operations**
 
@@ -57,40 +57,42 @@ AI-Powered Organization (Propose-Review-Apply pattern):
 """
 
 from ragfs._core import (
+    BatchResult,
+    CleanupAnalysis,
+    CleanupCandidate,
     # Core types
     Document,
-    SearchResultPy as SearchResult,
-    PyChunk,
-    # Core components
-    RagfsEmbeddings,
-    RagfsVectorStore,
-    RagfsDocumentLoader,
-    RagfsTextSplitter,
-    RagfsRetriever,
-    # Safety layer (soft delete, undo, history)
-    RagfsSafetyManager,
-    TrashEntry,
-    HistoryEntry,
-    HistoryOperation,
-    # Semantic operations (AI-powered file organization)
-    RagfsSemanticManager,
-    OrganizeStrategy,
-    OrganizeRequest,
-    SemanticPlan,
-    PlanAction,
-    PlanImpact,
-    SimilarFile,
-    SimilarFilesResult,
     DuplicateEntry,
     DuplicateGroup,
     DuplicateGroups,
-    CleanupCandidate,
-    CleanupAnalysis,
-    # Operations manager (structured file ops with JSON feedback)
-    RagfsOpsManager,
+    HistoryEntry,
+    HistoryOperation,
     Operation,
     OperationResult,
-    BatchResult,
+    OrganizeRequest,
+    OrganizeStrategy,
+    PlanAction,
+    PlanImpact,
+    PyChunk,
+    RagfsDocumentLoader,
+    # Core components
+    RagfsEmbeddings,
+    # Operations manager (structured file ops with JSON feedback)
+    RagfsOpsManager,
+    RagfsRetriever,
+    # Safety layer (soft delete, undo, history)
+    RagfsSafetyManager,
+    # Semantic operations (AI-powered file organization)
+    RagfsSemanticManager,
+    RagfsTextSplitter,
+    RagfsVectorStore,
+    SemanticPlan,
+    SimilarFile,
+    SimilarFilesResult,
+    TrashEntry,
+)
+from ragfs._core import (
+    SearchResultPy as SearchResult,
 )
 
 __all__ = [

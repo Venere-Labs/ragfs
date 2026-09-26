@@ -1,8 +1,8 @@
 name: Python Release
 
 on:
-  release:
-    types: [published]
+  # Bindings stay beta. A GitHub Release of the CLI must not publish PyPI.
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -1,6 +1,8 @@
 [target.aarch64-unknown-linux-gnu]
+# cross 0.2.5's default image is Ubuntu 16.04. openssl-sys 0.9 needs OpenSSL 1.1+.
+image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main"
 pre-build = [
     "dpkg --add-architecture arm64",
     "apt-get update",
-    "apt-get install -y libfuse-dev:arm64"
+    "apt-get install -y pkg-config libssl-dev:arm64 libfuse-dev:arm64 protobuf-compiler",
 ]

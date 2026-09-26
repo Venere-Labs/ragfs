@@ -212,9 +212,9 @@ OLLAMA_MODEL=phi3 docker compose up
 ## Supported File Types
 
 - **Text**: .txt, .md, .rst, .html
-- **Code**: .py, .rs, .js, .ts, .go, .java, .c, .cpp (40+ languages)
+- **Code**: .py, .rs, .js, .ts, .go, .java, .c, .cpp (UTF-8 source; not a language parser)
 - **Data**: .json, .yaml, .yml, .toml, .xml, .csv
-- **Documents**: .pdf, .doc, .docx
+- **Documents**: .pdf, .docx, .xlsx, .pptx, .odt (not binary `.doc`)
 
 ## Resources
 

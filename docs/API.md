@@ -146,6 +146,9 @@ pub struct Chunk {
     pub parent_chunk_id: Option<Uuid>,
     pub depth: u8,
     pub embedding: Option<Vec<f32>>,
+    pub dir_path: String,
+    pub dir_depth: u16,
+    pub path_components: String,
     pub metadata: ChunkMetadata,
 }
 ```
@@ -161,6 +164,7 @@ pub struct SearchQuery {
     pub limit: usize,
     pub filters: Vec<SearchFilter>,
     pub metric: DistanceMetric,
+    pub scope_prefix: Option<String>, // directory scope; see schema v2 note below
 }
 ```
 
@@ -198,9 +202,11 @@ impl LanceStore {
 ```
 
 Implements `VectorStore` trait. Features:
-- HNSW vector index for fast similarity search
+- Vector search (exact scan; cosine IVF-PQ ANN at ≥256 rows; L2/Dot stay exact)
+- Directory scope via `SearchQuery.scope_prefix` (`only_if` pre-filter; IVF-PQ unchanged)
 - Full-text search (FTS) index for hybrid search
-- Automatic index creation on init
+- FTS created on init; ANN created best-effort after ingest
+- **Schema v2** (`dir_path`, `dir_depth`, `path_components`): `init()` migrates existing Lance tables in place and writes `ragfs-schema.json` (`chunks_schema_version = 2`) beside the database. `ragfs index --force` rewrites index-root-relative scope fields; it does **not** add Lance columns. If migration fails, the index is left intact — remove `~/.local/share/ragfs/indices/<hash>/` (the `index.lance` directory plus sidecar) and rebuild with `ragfs index <dir> --force`. See [USER_GUIDE](USER_GUIDE.md#scoped-search-and-existing-indexes).
 
 ### Usage Example
 

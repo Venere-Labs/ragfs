@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from ragfs import RagfsDocumentLoader as CoreLoader
 
 try:
-    from haystack import component, Document
+    from haystack import Document, component
 except ImportError:
     raise ImportError(
         "haystack-ai is required for Haystack integration. "
@@ -21,7 +21,7 @@ except ImportError:
 class HaystackRagfsDocumentConverter:
     """Haystack-compatible document converter using RAGFS.
 
-    Converts files to Haystack Documents. Supports 40+ text formats, PDFs, and images.
+    Converts files to Haystack Documents. Supports UTF-8 text/code, PDFs, and images.
 
     Example:
         from ragfs.haystack import RagfsDocumentConverter
@@ -33,7 +33,7 @@ class HaystackRagfsDocumentConverter:
 
     def __init__(
         self,
-        extractors: Optional[List[str]] = None,
+        extractors: list[str] | None = None,
         recursive: bool = True,
     ):
         """Initialize the document converter.
@@ -50,12 +50,12 @@ class HaystackRagfsDocumentConverter:
         """Warm up the converter (no-op for this component)."""
         pass
 
-    @component.output_types(documents=List[Document])
+    @component.output_types(documents=list[Document])
     def run(
         self,
-        sources: List[Union[str, Path]],
-        meta: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, List[Document]]:
+        sources: list[str | Path],
+        meta: dict[str, Any] | None = None,
+    ) -> dict[str, list[Document]]:
         """Convert files to Haystack Documents.
 
         Args:
@@ -72,9 +72,9 @@ class HaystackRagfsDocumentConverter:
 
     async def _async_convert(
         self,
-        sources: List[Union[str, Path]],
-        meta: Optional[Dict[str, Any]],
-    ) -> List[Document]:
+        sources: list[str | Path],
+        meta: dict[str, Any] | None,
+    ) -> list[Document]:
         """Convert files asynchronously."""
         documents = []
         base_meta = meta or {}
@@ -94,8 +94,8 @@ class HaystackRagfsDocumentConverter:
     async def _convert_file(
         self,
         file_path: Path,
-        base_meta: Dict[str, Any],
-    ) -> List[Document]:
+        base_meta: dict[str, Any],
+    ) -> list[Document]:
         """Convert a single file."""
         if not self._loader.can_load(str(file_path)):
             return []
@@ -123,8 +123,8 @@ class HaystackRagfsDocumentConverter:
     async def _convert_directory(
         self,
         dir_path: Path,
-        base_meta: Dict[str, Any],
-    ) -> List[Document]:
+        base_meta: dict[str, Any],
+    ) -> list[Document]:
         """Convert all files in a directory."""
         documents = []
 
@@ -141,7 +141,7 @@ class HaystackRagfsDocumentConverter:
         return documents
 
     @property
-    def supported_types(self) -> List[str]:
+    def supported_types(self) -> list[str]:
         """Get list of supported MIME types."""
         return self._loader.supported_types()
 

@@ -2,7 +2,7 @@
 
 use arrow_array::{
     Array, ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator,
-    StringArray, UInt8Array, UInt32Array, UInt64Array,
+    RecordBatchReader, StringArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
 use arrow_schema::{DataType, Field, Schema};
 use async_trait::async_trait;
@@ -10,21 +10,31 @@ use chrono::Utc;
 use futures::TryStreamExt;
 use lancedb::index::Index;
 use lancedb::index::scalar::{FtsIndexBuilder, FullTextSearchQuery};
+use lancedb::index::vector::IvfPqIndexBuilder;
 use lancedb::query::{ExecutableQuery, QueryBase, QueryExecutionOptions};
-use lancedb::{Connection, Table, connect};
+use lancedb::table::{NewColumnTransform, OptimizeAction, OptimizeOptions};
+use lancedb::{Connection, DistanceType, Table, connect};
 use ragfs_core::{
-    Chunk, ChunkMetadata, ContentType, FileRecord, FileStatus, SearchQuery, SearchResult,
-    StoreError, StoreStats, VectorStore,
+    Chunk, ChunkMetadata, ContentType, DirectoryScope, DistanceMetric, FileRecord, FileStatus,
+    SearchFilter, SearchQuery, SearchResult, StoreError, StoreStats, VectorStore,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use crate::schema::{
+    CHUNKS_SCHEMA_VERSION, SCHEMA_SIDECAR_FILENAME, SchemaSidecar, missing_scope_columns,
+};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 const CHUNKS_TABLE: &str = "chunks";
 const FILES_TABLE: &str = "files";
+/// Lance IVF training uses a default sample rate of 256. Below this, stay on exact scan.
+const MIN_ANN_ROWS: usize = 256;
+/// Product default search metric (`gte-small`). Train IVF-PQ with this so ANN is valid.
+const ANN_INDEX_METRIC: DistanceMetric = DistanceMetric::Cosine;
 
 /// LanceDB-based vector store.
 pub struct LanceStore {
@@ -61,6 +71,120 @@ impl LanceStore {
     /// Get the embedding dimension.
     pub fn embedding_dim(&self) -> usize {
         self.embedding_dim
+    }
+
+    /// Whether the table is large enough for Lance IVF-PQ training.
+    pub(crate) fn should_build_ann_index(row_count: usize) -> bool {
+        row_count >= MIN_ANN_ROWS
+    }
+
+    /// Refresh IVF-PQ once the unindexed tail is large enough to train another sample.
+    pub(crate) fn should_refresh_ann_index(unindexed_rows: usize) -> bool {
+        unindexed_rows >= MIN_ANN_ROWS
+    }
+
+    /// ANN is trained as cosine; other metrics must not use the index.
+    pub(crate) fn ann_index_covers_metric(metric: DistanceMetric) -> bool {
+        metric == ANN_INDEX_METRIC
+    }
+
+    /// Reuse/refresh only a cosine-trained vector index.
+    pub(crate) fn ann_index_is_cosine(distance_type: Option<DistanceType>) -> bool {
+        distance_type == Some(DistanceType::Cosine)
+    }
+
+    async fn vector_index_name(table: &Table) -> Option<String> {
+        match table.list_indices().await {
+            Ok(indices) => indices
+                .into_iter()
+                .find(|idx| idx.columns.iter().any(|col| col == "vector"))
+                .map(|idx| idx.name),
+            Err(_) => None,
+        }
+    }
+
+    async fn refresh_vector_index(table: &Table, index_name: &str) {
+        let unindexed = match table.index_stats(index_name).await {
+            Ok(Some(stats)) => stats.num_unindexed_rows,
+            Ok(None) => return,
+            Err(e) => {
+                debug!("Skipping ANN refresh; could not read index stats: {e}");
+                return;
+            }
+        };
+
+        if !Self::should_refresh_ann_index(unindexed) {
+            debug!("Skipping ANN refresh: {unindexed} unindexed rows < {MIN_ANN_ROWS}");
+            return;
+        }
+
+        info!("Refreshing IVF-PQ ANN index ({unindexed} unindexed rows)");
+        match table
+            .optimize(OptimizeAction::Index(
+                OptimizeOptions::append().index_names(vec![index_name.to_string()]),
+            ))
+            .await
+        {
+            Ok(_) => info!("IVF-PQ ANN index refreshed"),
+            Err(e) => warn!("IVF-PQ ANN index refresh failed (unindexed tail stays exact): {e}"),
+        }
+    }
+
+    /// Best-effort IVF-PQ on `vector`. Small tables keep exact scan.
+    /// Existing cosine indexes are incrementally refreshed after large appends.
+    /// A non-cosine vector index is dropped and replaced when the table is large enough.
+    async fn ensure_vector_index(&self) -> Result<(), StoreError> {
+        let table = self.get_chunks_table().await?;
+        if let Some(name) = Self::vector_index_name(&table).await {
+            match table.index_stats(&name).await {
+                Ok(Some(stats)) if Self::ann_index_is_cosine(stats.distance_type) => {
+                    Self::refresh_vector_index(&table, &name).await;
+                    return Ok(());
+                }
+                Ok(Some(stats)) => {
+                    info!(
+                        "Replacing vector index trained as {:?} with cosine IVF-PQ",
+                        stats.distance_type
+                    );
+                    if let Err(e) = table.drop_index(&name).await {
+                        warn!("Could not drop mismatched vector index (search may bypass): {e}");
+                        return Ok(());
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    debug!("Skipping ANN reuse; could not read index stats: {e}");
+                    return Ok(());
+                }
+            }
+        }
+
+        let count = match table.count_rows(None).await {
+            Ok(n) => n,
+            Err(e) => {
+                debug!("Skipping ANN index; could not count rows: {e}");
+                return Ok(());
+            }
+        };
+
+        if !Self::should_build_ann_index(count) {
+            debug!("Skipping IVF-PQ ANN index: {count} rows < {MIN_ANN_ROWS} (exact scan)");
+            return Ok(());
+        }
+
+        info!("Creating IVF-PQ ANN index on vector ({count} rows, cosine)");
+        match table
+            .create_index(
+                &["vector"],
+                Index::IvfPq(IvfPqIndexBuilder::default().distance_type(DistanceType::Cosine)),
+            )
+            .execute()
+            .await
+        {
+            Ok(()) => info!("IVF-PQ ANN index ready"),
+            Err(e) => warn!("IVF-PQ ANN index not created (search stays exact scan): {e}"),
+        }
+        Ok(())
     }
 
     /// Get or create connection.
@@ -113,6 +237,9 @@ impl LanceStore {
             Field::new("language", DataType::Utf8, true),
             Field::new("symbol_type", DataType::Utf8, true),
             Field::new("symbol_name", DataType::Utf8, true),
+            Field::new("dir_path", DataType::Utf8, false),
+            Field::new("dir_depth", DataType::UInt16, false),
+            Field::new("path_components", DataType::Utf8, false),
         ])
     }
 
@@ -178,6 +305,168 @@ impl LanceStore {
         }
 
         Ok(table_lock.as_ref().unwrap().clone())
+    }
+
+    fn schema_sidecar_path(&self) -> PathBuf {
+        self.db_path
+            .parent()
+            .unwrap_or(self.db_path.as_path())
+            .join(SCHEMA_SIDECAR_FILENAME)
+    }
+
+    async fn read_schema_sidecar(&self) -> Option<u32> {
+        let bytes = tokio::fs::read(self.schema_sidecar_path()).await.ok()?;
+        serde_json::from_slice::<SchemaSidecar>(&bytes)
+            .ok()
+            .map(|s| s.chunks_schema_version)
+    }
+
+    async fn write_schema_sidecar(&self, version: u32) -> Result<(), StoreError> {
+        let path = self.schema_sidecar_path();
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                StoreError::Schema(format!(
+                    "Failed to create schema sidecar directory {}: {e}",
+                    parent.display()
+                ))
+            })?;
+        }
+        let json = serde_json::to_string_pretty(&SchemaSidecar {
+            chunks_schema_version: version,
+        })
+        .map_err(|e| StoreError::Schema(format!("Failed to serialize schema sidecar: {e}")))?;
+        tokio::fs::write(&path, json).await.map_err(|e| {
+            StoreError::Schema(format!(
+                "Failed to write schema sidecar {}: {e}",
+                path.display()
+            ))
+        })?;
+        Ok(())
+    }
+
+    fn schema_migration_failed_message(db_path: &Path, error: &impl std::fmt::Display) -> String {
+        let index_dir = db_path.parent().unwrap_or(db_path);
+        format!(
+            "Existing Lance index is missing directory-scope columns \
+             (dir_path, dir_depth, path_components) and automatic schema \
+             migration to v{CHUNKS_SCHEMA_VERSION} failed ({error}). \
+             The index was not deleted. Remove `{}` and run \
+             `ragfs index <dir> --force` to rebuild.",
+            index_dir.display()
+        )
+    }
+
+    /// Detect a pre-v2 chunks table, add scope columns, and backfill from `file_path`.
+    ///
+    /// `--force` rewrites index-root-relative `dir_path` on new upserts; it cannot
+    /// add Lance columns. This path is what existing indexes need on upgrade.
+    async fn ensure_chunks_schema_v2(&self) -> Result<(), StoreError> {
+        let table = {
+            let conn = self.get_connection().await?;
+            conn.open_table(CHUNKS_TABLE)
+                .execute()
+                .await
+                .map_err(|e| StoreError::Init(format!("Failed to open chunks table: {e}")))?
+        };
+
+        let schema = table
+            .schema()
+            .await
+            .map_err(|e| StoreError::Schema(format!("Failed to read chunks schema: {e}")))?;
+        let missing = missing_scope_columns(&schema);
+        let sidecar_version = self.read_schema_sidecar().await.unwrap_or(0);
+
+        if missing.is_empty() && sidecar_version >= CHUNKS_SCHEMA_VERSION {
+            return Ok(());
+        }
+
+        if !missing.is_empty() {
+            info!(
+                "Migrating chunks table to schema v{CHUNKS_SCHEMA_VERSION} \
+                 (adding directory-scope columns)"
+            );
+            table
+                .add_columns()
+                .transform(NewColumnTransform::AllNulls(Arc::new(Schema::new(missing))))
+                .execute()
+                .await
+                .map_err(|e| {
+                    StoreError::Schema(Self::schema_migration_failed_message(&self.db_path, &e))
+                })?;
+
+            // Drop the cached handle so later ops see the evolved schema.
+            *self.chunks_table.write().await = None;
+        }
+
+        self.backfill_scope_columns().await?;
+        self.write_schema_sidecar(CHUNKS_SCHEMA_VERSION).await?;
+        info!("Chunks table schema is v{CHUNKS_SCHEMA_VERSION}");
+        Ok(())
+    }
+
+    async fn backfill_scope_columns(&self) -> Result<(), StoreError> {
+        let table = self.get_chunks_table().await?;
+        let mut results = table
+            .query()
+            .only_if("dir_path IS NULL OR dir_path = ''")
+            .execute()
+            .await
+            .map_err(|e| {
+                StoreError::Schema(format!(
+                    "Failed to scan chunks for directory-scope backfill: {e}"
+                ))
+            })?;
+
+        let mut paths = HashSet::new();
+        while let Some(batch) = results.try_next().await.map_err(|e| {
+            StoreError::Schema(format!(
+                "Failed to read chunks for directory-scope backfill: {e}"
+            ))
+        })? {
+            let Some(file_paths) = batch
+                .column_by_name("file_path")
+                .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+            else {
+                continue;
+            };
+            for i in 0..batch.num_rows() {
+                if !file_paths.is_null(i) {
+                    paths.insert(file_paths.value(i).to_string());
+                }
+            }
+        }
+
+        if paths.is_empty() {
+            return Ok(());
+        }
+
+        info!(
+            "Backfilling directory-scope columns for {} file path(s)",
+            paths.len()
+        );
+        for path in paths {
+            let scope = DirectoryScope::from_file_path(Path::new(&path));
+            table
+                .update()
+                .only_if(format!("file_path = '{}'", escape_sql_literal(&path)))
+                .column(
+                    "dir_path",
+                    format!("'{}'", escape_sql_literal(&scope.dir_path)),
+                )
+                .column("dir_depth", scope.dir_depth.to_string())
+                .column(
+                    "path_components",
+                    format!("'{}'", escape_sql_literal(&scope.path_components)),
+                )
+                .execute()
+                .await
+                .map_err(|e| {
+                    StoreError::Schema(format!(
+                        "Failed to backfill directory-scope columns for '{path}': {e}"
+                    ))
+                })?;
+        }
+        Ok(())
     }
 
     /// Convert chunks to Arrow `RecordBatch`.
@@ -260,6 +549,10 @@ impl LanceStore {
 
         let mime_types: Vec<Option<String>> = chunks.iter().map(|c| c.mime_type.clone()).collect();
 
+        let dir_paths: Vec<_> = chunks.iter().map(|c| c.dir_path.clone()).collect();
+        let dir_depths: Vec<_> = chunks.iter().map(|c| c.dir_depth).collect();
+        let path_components: Vec<_> = chunks.iter().map(|c| c.path_components.clone()).collect();
+
         // Build arrays
         let schema = Arc::new(self.chunks_schema());
 
@@ -287,6 +580,9 @@ impl LanceStore {
                 Arc::new(StringArray::from(languages)),
                 Arc::new(StringArray::from(symbol_types)),
                 Arc::new(StringArray::from(symbol_names)),
+                Arc::new(StringArray::from(dir_paths)),
+                Arc::new(UInt16Array::from(dir_depths)),
+                Arc::new(StringArray::from(path_components)),
             ],
         )
         .map_err(|e| StoreError::Insert(format!("Failed to create RecordBatch: {e}")))?;
@@ -321,6 +617,55 @@ impl LanceStore {
 
         Ok(batch)
     }
+
+    /// Combine chunk-column filters with source-file `modified_at` constraints.
+    async fn chunk_filter_sql(
+        &self,
+        filters: &[SearchFilter],
+    ) -> Result<Option<String>, StoreError> {
+        Ok(combine_predicates(
+            filters_to_sql(filters),
+            self.modified_at_path_predicate(filters).await?,
+        ))
+    }
+
+    /// Resolve `ModifiedAfter` / `ModifiedBefore` against the files table.
+    async fn modified_at_path_predicate(
+        &self,
+        filters: &[SearchFilter],
+    ) -> Result<Option<String>, StoreError> {
+        let Some(date_sql) = file_date_filters_to_sql(filters) else {
+            return Ok(None);
+        };
+
+        let table = self.get_files_table().await?;
+        let mut results = table
+            .query()
+            .only_if(date_sql)
+            .execute()
+            .await
+            .map_err(|e| StoreError::Query(format!("Failed to apply modified_at filter: {e}")))?;
+
+        let mut paths = Vec::new();
+        while let Some(batch) = results.try_next().await.map_err(|e| {
+            StoreError::Query(format!("Failed to fetch files for modified_at filter: {e}"))
+        })? {
+            for record in batch_to_file_records(&batch)? {
+                paths.push(record.path.to_string_lossy().to_string());
+            }
+        }
+
+        if paths.is_empty() {
+            return Ok(Some("1 = 0".to_string()));
+        }
+
+        let in_list = paths
+            .iter()
+            .map(|p| format!("'{}'", escape_sql_literal(p)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Ok(Some(format!("file_path IN ({in_list})")))
+    }
 }
 
 #[async_trait]
@@ -344,8 +689,9 @@ impl VectorStore for LanceStore {
             .await
             .map_err(|e| StoreError::Init(format!("Failed to list tables: {e}")))?;
 
-        // Create chunks table if not exists
-        if !tables.contains(&CHUNKS_TABLE.to_string()) {
+        if tables.contains(&CHUNKS_TABLE.to_string()) {
+            self.ensure_chunks_schema_v2().await?;
+        } else {
             info!("Creating chunks table");
             let schema = Arc::new(self.chunks_schema());
             conn.create_empty_table(CHUNKS_TABLE, schema)
@@ -368,6 +714,8 @@ impl VectorStore for LanceStore {
             {
                 warn!("Failed to create FTS index (may already exist): {e}");
             }
+
+            self.write_schema_sidecar(CHUNKS_SCHEMA_VERSION).await?;
         }
 
         // Create files table if not exists
@@ -378,6 +726,11 @@ impl VectorStore for LanceStore {
                 .execute()
                 .await
                 .map_err(|e| StoreError::Init(format!("Failed to create files table: {e}")))?;
+        }
+
+        // Existing tables may already have enough rows for ANN.
+        if let Err(e) = self.ensure_vector_index().await {
+            warn!("ANN index check on init failed: {e}");
         }
 
         info!("LanceDB initialized successfully");
@@ -398,24 +751,48 @@ impl VectorStore for LanceStore {
         let batches = RecordBatchIterator::new(vec![Ok(batch)], schema);
 
         table
-            .add(Box::new(batches))
+            .add(Box::new(batches) as Box<dyn RecordBatchReader + Send>)
             .execute()
             .await
             .map_err(|e| StoreError::Insert(format!("Failed to insert chunks: {e}")))?;
 
         debug!("Successfully upserted {} chunks", chunks.len());
+        if let Err(e) = self.ensure_vector_index().await {
+            warn!("ANN index check after upsert failed: {e}");
+        }
         Ok(())
     }
 
     async fn search(&self, query: SearchQuery) -> Result<Vec<SearchResult>, StoreError> {
-        debug!("Searching with limit {}", query.limit);
+        debug!(
+            "Searching with limit {} metric {:?} filters {}",
+            query.limit,
+            query.metric,
+            query.filters.len()
+        );
 
         let table = self.get_chunks_table().await?;
+        let filter_sql = combine_predicates(
+            self.chunk_filter_sql(&query.filters).await?,
+            query.scope_prefix.as_deref().and_then(scope_prefix_sql),
+        );
 
-        let mut results = table
+        let mut search_q = table
             .vector_search(query.embedding.clone())
             .map_err(|e| StoreError::Query(format!("Failed to create search query: {e}")))?
-            .limit(query.limit)
+            .distance_type(distance_type_from_metric(query.metric))
+            .limit(query.limit);
+
+        if !Self::ann_index_covers_metric(query.metric) {
+            search_q = search_q.bypass_vector_index();
+        }
+
+        if let Some(ref filter) = filter_sql {
+            debug!("Applying search filter: {filter}");
+            search_q = search_q.only_if(filter);
+        }
+
+        let mut results = search_q
             .execute()
             .await
             .map_err(|e| StoreError::Query(format!("Failed to execute search: {e}")))?;
@@ -442,21 +819,40 @@ impl VectorStore for LanceStore {
         };
 
         debug!(
-            "Performing hybrid search with text: '{}' and limit {}",
-            query_text, query.limit
+            "Performing hybrid search with text: '{}' limit {} metric {:?} filters {}",
+            query_text,
+            query.limit,
+            query.metric,
+            query.filters.len()
         );
 
         let table = self.get_chunks_table().await?;
+        let filter_sql = combine_predicates(
+            self.chunk_filter_sql(&query.filters).await?,
+            query.scope_prefix.as_deref().and_then(scope_prefix_sql),
+        );
 
         // Build hybrid query combining FTS and vector search
         let fts_query = FullTextSearchQuery::new(query_text);
 
-        let mut results = table
+        let mut search_q = table
             .query()
             .full_text_search(fts_query)
             .nearest_to(query.embedding.clone())
             .map_err(|e| StoreError::Query(format!("Failed to create hybrid query: {e}")))?
-            .limit(query.limit)
+            .distance_type(distance_type_from_metric(query.metric))
+            .limit(query.limit);
+
+        if !Self::ann_index_covers_metric(query.metric) {
+            search_q = search_q.bypass_vector_index();
+        }
+
+        if let Some(ref filter) = filter_sql {
+            debug!("Applying hybrid search filter: {filter}");
+            search_q = search_q.only_if(filter);
+        }
+
+        let mut results = search_q
             .execute_hybrid(QueryExecutionOptions::default())
             .await
             .map_err(|e| StoreError::Query(format!("Failed to execute hybrid search: {e}")))?;
@@ -509,9 +905,14 @@ impl VectorStore for LanceStore {
 
         let chunk_count = chunks.len() as u64;
 
-        // 2. Update the file_path in each chunk
+        // 2. Update the file_path and directory-scope fields in each chunk
         for chunk in &mut chunks {
+            let root = DirectoryScope::infer_root(&chunk.file_path, &chunk.dir_path);
+            let scope = DirectoryScope::from_paths(to, root.as_deref());
             chunk.file_path = to.to_path_buf();
+            chunk.dir_path = scope.dir_path;
+            chunk.dir_depth = scope.dir_depth;
+            chunk.path_components = scope.path_components;
         }
 
         // 3. Delete old chunks
@@ -600,7 +1001,7 @@ impl VectorStore for LanceStore {
         let batches = RecordBatchIterator::new(vec![Ok(batch)], schema);
 
         files_table
-            .add(Box::new(batches))
+            .add(Box::new(batches) as Box<dyn RecordBatchReader + Send>)
             .execute()
             .await
             .map_err(|e| StoreError::Insert(format!("Failed to insert file record: {e}")))?;
@@ -736,6 +1137,189 @@ fn calculate_dir_size(path: &Path) -> u64 {
     }
 
     total_size
+}
+
+/// Map [`DistanceMetric`] to the `LanceDB` distance type used at query time.
+fn distance_type_from_metric(metric: DistanceMetric) -> DistanceType {
+    match metric {
+        DistanceMetric::Cosine => DistanceType::Cosine,
+        DistanceMetric::L2 => DistanceType::L2,
+        DistanceMetric::Dot => DistanceType::Dot,
+    }
+}
+
+/// Escape a string for use inside a single-quoted SQL literal.
+fn escape_sql_literal(value: &str) -> String {
+    value.replace('\'', "''")
+}
+
+/// Escape `%` and `_` so they are treated as literals in `LIKE` patterns.
+fn escape_like_literal(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+/// Convert a glob (`*`, `**`, `?`) into an anchored regular expression.
+///
+/// `*` and `?` do not cross `/`. `**` matches across directories; `**/` also
+/// matches zero intervening segments without collapsing the following name.
+fn glob_to_regex(glob: &str) -> String {
+    let mut regex = String::from("^");
+    let chars: Vec<char> = glob.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        match chars[i] {
+            '*' => {
+                if i + 1 < chars.len() && chars[i + 1] == '*' {
+                    i += 2;
+                    if i < chars.len() && chars[i] == '/' {
+                        i += 1;
+                        regex.push_str("(?:.*/)?");
+                    } else {
+                        regex.push_str(".*");
+                    }
+                } else {
+                    regex.push_str("[^/]*");
+                    i += 1;
+                }
+            }
+            '?' => {
+                regex.push_str("[^/]");
+                i += 1;
+            }
+            c => {
+                regex.push_str(&regex_escape_char(c));
+                i += 1;
+            }
+        }
+    }
+
+    regex.push('$');
+    regex
+}
+
+fn regex_escape_char(c: char) -> String {
+    if matches!(
+        c,
+        '.' | '+' | '(' | ')' | '|' | '[' | ']' | '{' | '}' | '^' | '$' | '\\'
+    ) {
+        format!("\\{c}")
+    } else {
+        c.to_string()
+    }
+}
+
+/// Convert one [`SearchFilter`] into a chunks-table SQL predicate.
+///
+/// Date filters are omitted here; they are resolved against `files.modified_at`.
+fn filter_to_sql(filter: &SearchFilter) -> Option<String> {
+    Some(match filter {
+        SearchFilter::PathPrefix(prefix) => {
+            let pattern = escape_sql_literal(&format!("{}%", escape_like_literal(prefix)));
+            format!("file_path LIKE '{pattern}' ESCAPE '\\'")
+        }
+        SearchFilter::PathGlob(glob) => {
+            let pattern = escape_sql_literal(&glob_to_regex(glob));
+            format!("regexp_like(file_path, '{pattern}')")
+        }
+        SearchFilter::MimeType(value) => type_or_mime_sql(value),
+        SearchFilter::Language(lang) => {
+            let escaped = escape_sql_literal(&lang.to_lowercase());
+            format!("(LOWER(language) = '{escaped}' OR LOWER(content_type) = 'code:{escaped}')")
+        }
+        SearchFilter::ModifiedAfter(_) | SearchFilter::ModifiedBefore(_) => return None,
+        SearchFilter::MinDepth(depth) => format!("depth >= {depth}"),
+        SearchFilter::MaxDepth(depth) => format!("depth <= {depth}"),
+    })
+}
+
+/// Files-table predicates for source modification time (inclusive).
+fn file_date_filters_to_sql(filters: &[SearchFilter]) -> Option<String> {
+    let clauses: Vec<String> = filters
+        .iter()
+        .filter_map(|filter| match filter {
+            SearchFilter::ModifiedAfter(ts) => {
+                let escaped = escape_sql_literal(&ts.to_rfc3339());
+                Some(format!("modified_at >= '{escaped}'"))
+            }
+            SearchFilter::ModifiedBefore(ts) => {
+                let escaped = escape_sql_literal(&ts.to_rfc3339());
+                Some(format!("modified_at <= '{escaped}'"))
+            }
+            _ => None,
+        })
+        .collect();
+
+    if clauses.is_empty() {
+        None
+    } else {
+        Some(clauses.join(" AND "))
+    }
+}
+
+fn combine_predicates(left: Option<String>, right: Option<String>) -> Option<String> {
+    match (left, right) {
+        (Some(a), Some(b)) => Some(format!("{a} AND {b}")),
+        (Some(a), None) | (None, Some(a)) => Some(a),
+        (None, None) => None,
+    }
+}
+
+/// `type:` / `mime:` values may name a content-type alias or a MIME type.
+fn type_or_mime_sql(value: &str) -> String {
+    let lowered = value.to_lowercase();
+    let escaped = escape_sql_literal(&lowered);
+
+    if lowered.contains('/') {
+        return format!("LOWER(file_mime_type) = '{escaped}'");
+    }
+
+    match lowered.as_str() {
+        "code" => "(LOWER(content_type) LIKE 'code:%' OR LOWER(content_type) = 'code')".to_string(),
+        "text" => "LOWER(content_type) = 'text'".to_string(),
+        "markdown" | "md" => "LOWER(content_type) = 'markdown'".to_string(),
+        "pdf" => "(LOWER(content_type) LIKE 'pdf:%' OR LOWER(content_type) = 'pdf')".to_string(),
+        "image" | "image_caption" => "LOWER(content_type) = 'image_caption'".to_string(),
+        _ => format!(
+            "(LOWER(content_type) = '{escaped}' OR LOWER(content_type) LIKE '{escaped}:%' OR LOWER(file_mime_type) = '{escaped}')"
+        ),
+    }
+}
+
+/// Pre-filter for directory-scoped search (exact dir, subdirectory, or suffix).
+///
+/// Used with IVF-PQ ANN via `only_if`; this is not a replacement for ANN.
+/// Suffix `LIKE` clauses cover schema-v1 rows backfilled from absolute `file_path`.
+fn scope_prefix_sql(scope: &str) -> Option<String> {
+    let scope = DirectoryScope::normalize_prefix(scope);
+    if scope.is_empty() || scope == "." {
+        return None;
+    }
+    let exact = escape_sql_literal(&scope);
+    let prefix = escape_sql_literal(&format!("{}/%", escape_like_literal(&scope)));
+    let suffix = escape_sql_literal(&format!("%/{}", escape_like_literal(&scope)));
+    let mid = escape_sql_literal(&format!("%/{}/%", escape_like_literal(&scope)));
+    Some(format!(
+        "dir_path = '{exact}' OR dir_path LIKE '{prefix}' ESCAPE '\\' \
+         OR dir_path LIKE '{suffix}' ESCAPE '\\' OR dir_path LIKE '{mid}' ESCAPE '\\'"
+    ))
+}
+
+/// Combine [`SearchQuery`] filters into a single SQL predicate, if any.
+fn filters_to_sql(filters: &[SearchFilter]) -> Option<String> {
+    if filters.is_empty() {
+        return None;
+    }
+
+    let clauses: Vec<String> = filters.iter().filter_map(filter_to_sql).collect();
+    if clauses.is_empty() {
+        None
+    } else {
+        Some(clauses.join(" AND "))
+    }
 }
 
 fn content_type_to_string(ct: &ContentType) -> String {
@@ -927,6 +1511,15 @@ fn batch_to_chunks(batch: &RecordBatch) -> Result<Vec<Chunk>, StoreError> {
     let embeddings = batch
         .column_by_name("embedding")
         .and_then(|c| c.as_any().downcast_ref::<FixedSizeListArray>());
+    let dir_paths = batch
+        .column_by_name("dir_path")
+        .and_then(|c| c.as_any().downcast_ref::<StringArray>());
+    let dir_depths = batch
+        .column_by_name("dir_depth")
+        .and_then(|c| c.as_any().downcast_ref::<UInt16Array>());
+    let path_components_arr = batch
+        .column_by_name("path_components")
+        .and_then(|c| c.as_any().downcast_ref::<StringArray>());
 
     let (
         Some(chunk_ids),
@@ -998,6 +1591,24 @@ fn batch_to_chunks(batch: &RecordBatch) -> Result<Vec<Chunk>, StoreError> {
             parent_chunk_id: None,
             depth: depths.value(i),
             embedding,
+            dir_path: dir_paths.map_or_else(
+                || DirectoryScope::from_file_path(&PathBuf::from(file_paths.value(i))).dir_path,
+                |arr| {
+                    if arr.is_null(i) {
+                        String::new()
+                    } else {
+                        arr.value(i).to_string()
+                    }
+                },
+            ),
+            dir_depth: dir_depths.map_or(0, |arr| if arr.is_null(i) { 0 } else { arr.value(i) }),
+            path_components: path_components_arr.map_or_else(String::new, |arr| {
+                if arr.is_null(i) {
+                    String::new()
+                } else {
+                    arr.value(i).to_string()
+                }
+            }),
             metadata: ChunkMetadata::default(),
         });
     }
@@ -1096,7 +1707,8 @@ fn batch_to_file_records(batch: &RecordBatch) -> Result<Vec<FileRecord>, StoreEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ragfs_core::DistanceMetric;
+    use crate::schema::{CHUNKS_SCHEMA_VERSION, SCHEMA_SIDECAR_FILENAME, SchemaSidecar};
+    use ragfs_core::{DistanceMetric, SearchFilter};
     use std::collections::HashMap;
     use tempfile::tempdir;
 
@@ -1121,6 +1733,9 @@ mod tests {
             parent_chunk_id: None,
             depth: 0,
             embedding: Some(embedding),
+            dir_path: DirectoryScope::from_file_path(file_path).dir_path,
+            dir_depth: DirectoryScope::from_file_path(file_path).dir_depth,
+            path_components: DirectoryScope::from_file_path(file_path).path_components,
             metadata: ChunkMetadata {
                 indexed_at: Some(Utc::now()),
                 embedding_model: Some("test-model".to_string()),
@@ -1255,6 +1870,7 @@ mod tests {
             limit: 10,
             filters: vec![],
             metric: DistanceMetric::Cosine,
+            scope_prefix: None,
         };
 
         let results = store.search(query).await.unwrap();
@@ -1290,6 +1906,7 @@ mod tests {
             limit: 3,
             filters: vec![],
             metric: DistanceMetric::Cosine,
+            scope_prefix: None,
         };
 
         let results = store.search(query).await.unwrap();
@@ -1471,6 +2088,9 @@ mod tests {
             parent_chunk_id: None,
             depth: 0,
             embedding: Some(create_random_embedding(TEST_DIM)),
+            dir_path: DirectoryScope::from_file_path(&file_path).dir_path,
+            dir_depth: DirectoryScope::from_file_path(&file_path).dir_depth,
+            path_components: DirectoryScope::from_file_path(&file_path).path_components,
             metadata: ChunkMetadata::default(),
         };
 
@@ -1508,6 +2128,149 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[test]
+    fn test_ann_threshold() {
+        assert!(!LanceStore::should_build_ann_index(0));
+        assert!(!LanceStore::should_build_ann_index(255));
+        assert!(LanceStore::should_build_ann_index(256));
+        assert!(LanceStore::should_build_ann_index(10_000));
+    }
+
+    #[test]
+    fn test_should_refresh_ann_index_after_post_threshold_appends() {
+        // Repeated-batch ingest: first batch crosses 256, later batches are unindexed.
+        assert!(LanceStore::should_build_ann_index(300));
+        assert!(!LanceStore::should_refresh_ann_index(0));
+        assert!(!LanceStore::should_refresh_ann_index(255));
+        assert!(LanceStore::should_refresh_ann_index(256));
+        assert!(LanceStore::should_refresh_ann_index(700));
+        assert!(LanceStore::should_refresh_ann_index(9_700));
+    }
+
+    #[test]
+    fn test_ann_index_covers_cosine_only() {
+        assert!(LanceStore::ann_index_covers_metric(DistanceMetric::Cosine));
+        assert!(!LanceStore::ann_index_covers_metric(DistanceMetric::L2));
+        assert!(!LanceStore::ann_index_covers_metric(DistanceMetric::Dot));
+        assert!(LanceStore::ann_index_is_cosine(Some(DistanceType::Cosine)));
+        assert!(!LanceStore::ann_index_is_cosine(Some(DistanceType::L2)));
+        assert!(!LanceStore::ann_index_is_cosine(Some(DistanceType::Dot)));
+        assert!(!LanceStore::ann_index_is_cosine(None));
+    }
+
+    #[tokio::test]
+    async fn test_small_table_skips_ann_and_still_searches() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path, TEST_DIM);
+        store.init().await.unwrap();
+
+        let file_path = PathBuf::from("/test/small.txt");
+        let chunk = create_test_chunk(
+            &file_path,
+            "hello ann",
+            create_random_embedding(TEST_DIM),
+            0,
+        );
+        store.upsert_chunks(&[chunk]).await.unwrap();
+        store.ensure_vector_index().await.unwrap();
+
+        let results = store
+            .search(SearchQuery {
+                text: None,
+                embedding: create_random_embedding(TEST_DIM),
+                limit: 5,
+                filters: vec![],
+                metric: DistanceMetric::Cosine,
+                scope_prefix: None,
+            })
+            .await
+            .unwrap();
+        assert!(!results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_replaces_preexisting_l2_vector_index() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path, TEST_DIM);
+        store.init().await.unwrap();
+
+        let file_path = PathBuf::from("/test/l2.txt");
+        let chunks: Vec<Chunk> = (0..16)
+            .map(|i| {
+                create_test_chunk(
+                    &file_path,
+                    &format!("legacy l2 chunk {i}"),
+                    create_random_embedding(TEST_DIM),
+                    i,
+                )
+            })
+            .collect();
+        store.upsert_chunks(&chunks).await.unwrap();
+
+        let table = store.get_chunks_table().await.unwrap();
+        let created = table
+            .create_index(
+                &["vector"],
+                Index::IvfPq(
+                    IvfPqIndexBuilder::default()
+                        .distance_type(DistanceType::L2)
+                        .num_partitions(1)
+                        .sample_rate(4),
+                ),
+            )
+            .execute()
+            .await;
+        if created.is_err() {
+            // Fixture only: Lance may refuse a tiny L2 index. Cosine search must still work.
+            let results = store
+                .search(SearchQuery {
+                    text: None,
+                    embedding: create_random_embedding(TEST_DIM),
+                    limit: 5,
+                    filters: vec![],
+                    metric: DistanceMetric::Cosine,
+                    scope_prefix: None,
+                })
+                .await
+                .unwrap();
+            assert!(!results.is_empty());
+            return;
+        }
+
+        let name = LanceStore::vector_index_name(&table)
+            .await
+            .expect("L2 fixture index");
+        let before = table.index_stats(&name).await.unwrap().unwrap();
+        assert_eq!(before.distance_type, Some(DistanceType::L2));
+
+        store.ensure_vector_index().await.unwrap();
+
+        if let Some(after_name) = LanceStore::vector_index_name(&table).await {
+            let after = table.index_stats(&after_name).await.unwrap().unwrap();
+            assert!(
+                LanceStore::ann_index_is_cosine(after.distance_type),
+                "mismatched L2 index must be replaced with cosine"
+            );
+        } else {
+            // Below MIN_ANN_ROWS: drop L2 and stay on exact scan.
+        }
+
+        let results = store
+            .search(SearchQuery {
+                text: None,
+                embedding: create_random_embedding(TEST_DIM),
+                limit: 5,
+                filters: vec![],
+                metric: DistanceMetric::Cosine,
+                scope_prefix: None,
+            })
+            .await
+            .unwrap();
+        assert!(!results.is_empty());
+    }
+
     #[tokio::test]
     async fn test_get_file_not_found() {
         let temp = tempdir().unwrap();
@@ -1518,5 +2281,746 @@ mod tests {
         let path = PathBuf::from("/nonexistent/file.txt");
         let result = store.get_file(&path).await.unwrap();
         assert!(result.is_none());
+    }
+
+    fn create_chunk_with_meta(
+        file_path: &Path,
+        content: &str,
+        embedding: Vec<f32>,
+        content_type: ContentType,
+        mime_type: Option<String>,
+        depth: u8,
+    ) -> Chunk {
+        Chunk {
+            id: Uuid::new_v4(),
+            file_id: Uuid::new_v4(),
+            file_path: file_path.to_path_buf(),
+            content: content.to_string(),
+            content_type,
+            mime_type,
+            chunk_index: 0,
+            byte_range: 0..content.len() as u64,
+            line_range: Some(0..1),
+            parent_chunk_id: None,
+            depth,
+            embedding: Some(embedding),
+            dir_path: DirectoryScope::from_file_path(file_path).dir_path,
+            dir_depth: DirectoryScope::from_file_path(file_path).dir_depth,
+            path_components: DirectoryScope::from_file_path(file_path).path_components,
+            metadata: ChunkMetadata {
+                indexed_at: Some(Utc::now()),
+                embedding_model: Some("test-model".to_string()),
+                token_count: None,
+                extra: HashMap::new(),
+            },
+        }
+    }
+
+    async fn seeded_filter_store() -> (tempfile::TempDir, LanceStore, Vec<f32>) {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path, TEST_DIM);
+        store.init().await.unwrap();
+
+        let embedding = create_random_embedding(TEST_DIM);
+        let chunks = vec![
+            create_chunk_with_meta(
+                Path::new("src/lib.rs"),
+                "fn rust_auth() {}",
+                embedding.clone(),
+                ContentType::Code {
+                    language: "rust".to_string(),
+                    symbol: None,
+                },
+                Some("text/x-rust".to_string()),
+                0,
+            ),
+            create_chunk_with_meta(
+                Path::new("src/app.py"),
+                "def python_auth(): pass",
+                embedding.clone(),
+                ContentType::Code {
+                    language: "python".to_string(),
+                    symbol: None,
+                },
+                Some("text/x-python".to_string()),
+                1,
+            ),
+            create_chunk_with_meta(
+                Path::new("docs/readme.md"),
+                "authentication notes",
+                embedding.clone(),
+                ContentType::Markdown,
+                Some("text/markdown".to_string()),
+                3,
+            ),
+            create_chunk_with_meta(
+                Path::new("notes/plain.txt"),
+                "plain authentication text",
+                embedding.clone(),
+                ContentType::Text,
+                Some("text/plain".to_string()),
+                2,
+            ),
+        ];
+        store.upsert_chunks(&chunks).await.unwrap();
+        (temp, store, embedding)
+    }
+
+    fn search_query(
+        embedding: Vec<f32>,
+        filters: Vec<SearchFilter>,
+        metric: DistanceMetric,
+    ) -> SearchQuery {
+        SearchQuery {
+            text: Some("authentication".to_string()),
+            embedding,
+            limit: 10,
+            filters,
+            metric,
+            scope_prefix: None,
+        }
+    }
+
+    #[test]
+    fn test_filters_to_sql_language_path_type_depth() {
+        let sql = filters_to_sql(&[
+            SearchFilter::Language("Rust".to_string()),
+            SearchFilter::PathPrefix("src/".to_string()),
+            SearchFilter::MimeType("code".to_string()),
+            SearchFilter::MaxDepth(2),
+        ])
+        .unwrap();
+
+        assert!(sql.contains("LOWER(language) = 'rust'"));
+        assert!(sql.contains("LOWER(content_type) = 'code:rust'"));
+        assert!(sql.contains("file_path LIKE 'src/%' ESCAPE '\\'"));
+        assert!(sql.contains("LOWER(content_type) LIKE 'code:%'"));
+        assert!(sql.contains("depth <= 2"));
+        assert!(sql.contains(" AND "));
+    }
+
+    #[test]
+    fn test_filters_to_sql_path_glob_and_mime() {
+        let sql = filters_to_sql(&[
+            SearchFilter::PathGlob("src/**/*.rs".to_string()),
+            SearchFilter::MimeType("text/x-rust".to_string()),
+            SearchFilter::MinDepth(1),
+        ])
+        .unwrap();
+
+        assert!(sql.contains("regexp_like(file_path, '^src/(?:.*/)?[^/]*\\.rs$')"));
+        assert!(sql.contains("LOWER(file_mime_type) = 'text/x-rust'"));
+        assert!(sql.contains("depth >= 1"));
+    }
+
+    #[test]
+    fn test_filters_to_sql_escapes_quotes() {
+        let sql = filters_to_sql(&[SearchFilter::PathPrefix("o'brien".to_string())]).unwrap();
+        assert!(sql.contains("o''brien"));
+    }
+
+    #[test]
+    fn test_filters_to_sql_empty() {
+        assert!(filters_to_sql(&[]).is_none());
+    }
+
+    #[test]
+    fn test_glob_to_regex_preserves_path_segments() {
+        assert_eq!(glob_to_regex("src/*.rs"), r"^src/[^/]*\.rs$");
+        assert_eq!(glob_to_regex("src/**/mod.rs"), r"^src/(?:.*/)?mod\.rs$");
+        assert_eq!(glob_to_regex("src/**"), r"^src/.*$");
+        assert_eq!(glob_to_regex("file?.txt"), r"^file[^/]\.txt$");
+        assert!(!glob_to_regex("src/*.rs").contains(".*"));
+        assert!(!glob_to_regex("src/**/mod.rs").contains("%mod"));
+    }
+
+    #[test]
+    fn test_file_date_filters_use_modified_at() {
+        let after = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        let sql = file_date_filters_to_sql(&[SearchFilter::ModifiedAfter(after)]).unwrap();
+        assert!(sql.contains("modified_at >= "));
+        assert!(!sql.contains("indexed_at"));
+        assert!(filters_to_sql(&[SearchFilter::ModifiedAfter(after)]).is_none());
+    }
+
+    #[test]
+    fn test_distance_type_from_metric() {
+        assert_eq!(
+            distance_type_from_metric(DistanceMetric::Cosine),
+            DistanceType::Cosine
+        );
+        assert_eq!(
+            distance_type_from_metric(DistanceMetric::L2),
+            DistanceType::L2
+        );
+        assert_eq!(
+            distance_type_from_metric(DistanceMetric::Dot),
+            DistanceType::Dot
+        );
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_language() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::Language("rust".to_string())],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, PathBuf::from("src/lib.rs"));
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_path_prefix() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::PathPrefix("src/".to_string())],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        let paths: Vec<_> = results.iter().map(|r| r.file_path.clone()).collect();
+        assert_eq!(results.len(), 2);
+        assert!(paths.contains(&PathBuf::from("src/lib.rs")));
+        assert!(paths.contains(&PathBuf::from("src/app.py")));
+        assert!(!paths.contains(&PathBuf::from("docs/readme.md")));
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_path_glob() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::PathGlob("src/**".to_string())],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        let paths: Vec<_> = results.iter().map(|r| r.file_path.clone()).collect();
+        assert_eq!(results.len(), 2);
+        assert!(paths.contains(&PathBuf::from("src/lib.rs")));
+        assert!(paths.contains(&PathBuf::from("src/app.py")));
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_type_code() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::MimeType("code".to_string())],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        let paths: Vec<_> = results.iter().map(|r| r.file_path.clone()).collect();
+        assert_eq!(results.len(), 2);
+        assert!(paths.contains(&PathBuf::from("src/lib.rs")));
+        assert!(paths.contains(&PathBuf::from("src/app.py")));
+        assert!(!paths.contains(&PathBuf::from("notes/plain.txt")));
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_mime_type() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::MimeType("text/plain".to_string())],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, PathBuf::from("notes/plain.txt"));
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_max_depth() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::MaxDepth(1)],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        let paths: Vec<_> = results.iter().map(|r| r.file_path.clone()).collect();
+        assert_eq!(results.len(), 2);
+        assert!(paths.contains(&PathBuf::from("src/lib.rs")));
+        assert!(paths.contains(&PathBuf::from("src/app.py")));
+        assert!(!paths.contains(&PathBuf::from("docs/readme.md")));
+        assert!(!paths.contains(&PathBuf::from("notes/plain.txt")));
+    }
+
+    #[tokio::test]
+    async fn test_search_combines_filters() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![
+                    SearchFilter::PathPrefix("src/".to_string()),
+                    SearchFilter::Language("python".to_string()),
+                    SearchFilter::MaxDepth(2),
+                ],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, PathBuf::from("src/app.py"));
+    }
+
+    #[tokio::test]
+    async fn test_search_applies_l2_and_dot_metrics() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let filters = vec![SearchFilter::Language("rust".to_string())];
+
+        for metric in [
+            DistanceMetric::L2,
+            DistanceMetric::Dot,
+            DistanceMetric::Cosine,
+        ] {
+            let results = store
+                .search(search_query(embedding.clone(), filters.clone(), metric))
+                .await
+                .unwrap();
+            assert_eq!(
+                results.len(),
+                1,
+                "metric {metric:?} should still honor language filter"
+            );
+            assert_eq!(results[0].file_path, PathBuf::from("src/lib.rs"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hybrid_search_applies_filters_and_metric() {
+        let (_temp, store, embedding) = seeded_filter_store().await;
+        let results = store
+            .hybrid_search(search_query(
+                embedding,
+                vec![
+                    SearchFilter::Language("rust".to_string()),
+                    SearchFilter::MimeType("code".to_string()),
+                    SearchFilter::MaxDepth(1),
+                ],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, PathBuf::from("src/lib.rs"));
+        assert!(results[0].content.contains("rust_auth"));
+    }
+
+    async fn seeded_glob_boundary_store() -> (tempfile::TempDir, LanceStore, Vec<f32>) {
+        let temp = tempdir().unwrap();
+        let store = LanceStore::new(temp.path().join("test.lance"), TEST_DIM);
+        store.init().await.unwrap();
+        let embedding = create_random_embedding(TEST_DIM);
+        store
+            .upsert_chunks(&[
+                create_test_chunk(Path::new("src/lib.rs"), "lib", embedding.clone(), 0),
+                create_test_chunk(
+                    Path::new("src/nested/file.rs"),
+                    "nested",
+                    embedding.clone(),
+                    0,
+                ),
+                create_test_chunk(Path::new("src/mod.rs"), "mod file", embedding.clone(), 0),
+                create_test_chunk(Path::new("src/notmod.rs"), "not mod", embedding.clone(), 0),
+            ])
+            .await
+            .unwrap();
+        (temp, store, embedding)
+    }
+
+    #[tokio::test]
+    async fn test_search_path_glob_star_does_not_cross_slash() {
+        let (_temp, store, embedding) = seeded_glob_boundary_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::PathGlob("src/*.rs".to_string())],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        let paths: Vec<_> = results.iter().map(|r| r.file_path.clone()).collect();
+        assert!(paths.contains(&PathBuf::from("src/lib.rs")));
+        assert!(paths.contains(&PathBuf::from("src/mod.rs")));
+        assert!(paths.contains(&PathBuf::from("src/notmod.rs")));
+        assert!(!paths.contains(&PathBuf::from("src/nested/file.rs")));
+    }
+
+    #[tokio::test]
+    async fn test_search_path_glob_doublestar_keeps_separator() {
+        let (_temp, store, embedding) = seeded_glob_boundary_store().await;
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::PathGlob("src/**/mod.rs".to_string())],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        let paths: Vec<_> = results.iter().map(|r| r.file_path.clone()).collect();
+        assert_eq!(results.len(), 1);
+        assert!(paths.contains(&PathBuf::from("src/mod.rs")));
+        assert!(!paths.contains(&PathBuf::from("src/notmod.rs")));
+        assert!(!paths.contains(&PathBuf::from("src/lib.rs")));
+    }
+
+    #[tokio::test]
+    async fn test_search_filters_by_source_modified_at() {
+        let temp = tempdir().unwrap();
+        let store = LanceStore::new(temp.path().join("test.lance"), TEST_DIM);
+        store.init().await.unwrap();
+        let embedding = create_random_embedding(TEST_DIM);
+
+        let old_path = PathBuf::from("old.txt");
+        let new_path = PathBuf::from("new.txt");
+        store
+            .upsert_chunks(&[
+                create_test_chunk(&old_path, "old file", embedding.clone(), 0),
+                create_test_chunk(&new_path, "new file", embedding.clone(), 0),
+            ])
+            .await
+            .unwrap();
+
+        let old_modified = chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        let new_modified = chrono::DateTime::parse_from_rfc3339("2024-06-01T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        let cutoff = chrono::DateTime::parse_from_rfc3339("2022-01-01T00:00:00+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let mut old_record = create_test_file_record(&old_path);
+        old_record.modified_at = old_modified;
+        let mut new_record = create_test_file_record(&new_path);
+        new_record.modified_at = new_modified;
+        store.upsert_file(&old_record).await.unwrap();
+        store.upsert_file(&new_record).await.unwrap();
+
+        let results = store
+            .search(search_query(
+                embedding,
+                vec![SearchFilter::ModifiedAfter(cutoff)],
+                DistanceMetric::Cosine,
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].file_path, new_path);
+    }
+
+    fn create_chunk_with_scope(
+        file_path: &Path,
+        root: Option<&Path>,
+        content: &str,
+        embedding: Vec<f32>,
+    ) -> Chunk {
+        let scope = DirectoryScope::from_paths(file_path, root);
+        let mut chunk = create_test_chunk(file_path, content, embedding, 0);
+        chunk.dir_path = scope.dir_path;
+        chunk.dir_depth = scope.dir_depth;
+        chunk.path_components = scope.path_components;
+        chunk
+    }
+
+    async fn seeded_scope_store() -> (tempfile::TempDir, LanceStore, Vec<f32>) {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path, TEST_DIM);
+        store.init().await.unwrap();
+
+        let root = Path::new("/project");
+        let embedding = create_random_embedding(TEST_DIM);
+        let chunks = vec![
+            create_chunk_with_scope(
+                Path::new("/project/src/auth/login.rs"),
+                Some(root),
+                "login handler",
+                embedding.clone(),
+            ),
+            create_chunk_with_scope(
+                Path::new("/project/src/auth/oauth/token.rs"),
+                Some(root),
+                "oauth token",
+                embedding.clone(),
+            ),
+            create_chunk_with_scope(
+                Path::new("/project/src/db.rs"),
+                Some(root),
+                "database pool",
+                embedding.clone(),
+            ),
+            create_chunk_with_scope(
+                Path::new("/project/docs/readme.md"),
+                Some(root),
+                "project readme",
+                embedding.clone(),
+            ),
+        ];
+        store.upsert_chunks(&chunks).await.unwrap();
+        (temp, store, embedding)
+    }
+
+    fn scoped_query(embedding: Vec<f32>, scope: &str) -> SearchQuery {
+        SearchQuery {
+            text: None,
+            embedding,
+            limit: 10,
+            filters: vec![],
+            metric: DistanceMetric::Cosine,
+            scope_prefix: Some(scope.to_string()),
+        }
+    }
+
+    #[test]
+    fn test_scope_prefix_sql_exact_or_subdirectory() {
+        let sql = scope_prefix_sql("src/auth/").unwrap();
+        assert!(sql.contains("dir_path = 'src/auth'"));
+        assert!(sql.contains("dir_path LIKE 'src/auth/%'"));
+        assert!(sql.contains("dir_path LIKE '%/src/auth'"));
+        assert!(sql.contains("dir_path LIKE '%/src/auth/%'"));
+        assert!(scope_prefix_sql("").is_none());
+        assert!(scope_prefix_sql(".").is_none());
+    }
+
+    #[test]
+    fn test_scope_prefix_sql_escapes_quotes() {
+        let sql = scope_prefix_sql("o'brien").unwrap();
+        assert!(sql.contains("o''brien"));
+    }
+
+    #[tokio::test]
+    async fn test_scoped_search_stores_relative_dir_path() {
+        let (_temp, store, _) = seeded_scope_store().await;
+        let chunks = store
+            .get_chunks_for_file(Path::new("/project/src/auth/login.rs"))
+            .await
+            .unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].dir_path, "src/auth");
+        assert_eq!(chunks[0].dir_depth, 2);
+        assert_eq!(chunks[0].path_components, "src,auth,login.rs");
+        assert!(!chunks[0].dir_path.starts_with('/'));
+    }
+
+    #[tokio::test]
+    async fn test_scoped_search_exact_directory() {
+        let (_temp, store, embedding) = seeded_scope_store().await;
+        let results = store
+            .search(scoped_query(embedding, "src/auth"))
+            .await
+            .unwrap();
+        let paths: Vec<_> = results
+            .iter()
+            .map(|r| r.file_path.to_string_lossy().to_string())
+            .collect();
+        assert!(paths.iter().any(|p| p.ends_with("src/auth/login.rs")));
+        assert!(paths.iter().any(|p| p.ends_with("src/auth/oauth/token.rs")));
+        assert!(!paths.iter().any(|p| p.ends_with("src/db.rs")));
+        assert!(!paths.iter().any(|p| p.ends_with("docs/readme.md")));
+    }
+
+    #[tokio::test]
+    async fn test_scoped_search_includes_subdirectory() {
+        let (_temp, store, embedding) = seeded_scope_store().await;
+        let results = store.search(scoped_query(embedding, "src")).await.unwrap();
+        let paths: Vec<_> = results
+            .iter()
+            .map(|r| r.file_path.to_string_lossy().to_string())
+            .collect();
+        assert!(paths.iter().any(|p| p.ends_with("src/auth/login.rs")));
+        assert!(paths.iter().any(|p| p.ends_with("src/auth/oauth/token.rs")));
+        assert!(paths.iter().any(|p| p.ends_with("src/db.rs")));
+        assert!(!paths.iter().any(|p| p.ends_with("docs/readme.md")));
+    }
+
+    #[tokio::test]
+    async fn test_scoped_search_excludes_outside_directory() {
+        let (_temp, store, embedding) = seeded_scope_store().await;
+        let results = store.search(scoped_query(embedding, "docs")).await.unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0]
+                .file_path
+                .to_string_lossy()
+                .ends_with("docs/readme.md")
+        );
+    }
+
+    fn v1_chunks_schema(dim: usize) -> Schema {
+        Schema::new(vec![
+            Field::new("chunk_id", DataType::Utf8, false),
+            Field::new("file_id", DataType::Utf8, false),
+            Field::new("file_path", DataType::Utf8, false),
+            Field::new("content", DataType::Utf8, false),
+            Field::new("content_type", DataType::Utf8, false),
+            Field::new("chunk_index", DataType::UInt32, false),
+            Field::new("start_byte", DataType::UInt64, false),
+            Field::new("end_byte", DataType::UInt64, false),
+            Field::new("start_line", DataType::UInt32, true),
+            Field::new("end_line", DataType::UInt32, true),
+            Field::new("parent_chunk_id", DataType::Utf8, true),
+            Field::new("depth", DataType::UInt8, false),
+            Field::new(
+                "vector",
+                DataType::FixedSizeList(
+                    Arc::new(Field::new("item", DataType::Float32, true)),
+                    dim as i32,
+                ),
+                false,
+            ),
+            Field::new("embedding_model", DataType::Utf8, true),
+            Field::new("indexed_at", DataType::Utf8, false),
+            Field::new("file_mime_type", DataType::Utf8, true),
+            Field::new("language", DataType::Utf8, true),
+            Field::new("symbol_type", DataType::Utf8, true),
+            Field::new("symbol_name", DataType::Utf8, true),
+        ])
+    }
+
+    async fn seed_v1_chunks_table(
+        db_path: &Path,
+        file_path: &str,
+        content: &str,
+        embedding: &[f32],
+    ) {
+        let conn = connect(db_path.to_str().unwrap()).execute().await.unwrap();
+        let schema = Arc::new(v1_chunks_schema(TEST_DIM));
+        conn.create_empty_table(CHUNKS_TABLE, schema.clone())
+            .execute()
+            .await
+            .unwrap();
+
+        let embeddings = vec![Some(embedding.iter().copied().map(Some).collect())];
+        let vector = build_vector_array(&embeddings, TEST_DIM).unwrap();
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec![Uuid::new_v4().to_string()])),
+                Arc::new(StringArray::from(vec![Uuid::new_v4().to_string()])),
+                Arc::new(StringArray::from(vec![file_path.to_string()])),
+                Arc::new(StringArray::from(vec![content.to_string()])),
+                Arc::new(StringArray::from(vec!["text".to_string()])),
+                Arc::new(UInt32Array::from(vec![0u32])),
+                Arc::new(UInt64Array::from(vec![0u64])),
+                Arc::new(UInt64Array::from(vec![content.len() as u64])),
+                Arc::new(UInt32Array::from(vec![Some(0u32)])),
+                Arc::new(UInt32Array::from(vec![Some(1u32)])),
+                Arc::new(StringArray::from(vec![None::<String>])),
+                Arc::new(UInt8Array::from(vec![0u8])),
+                vector,
+                Arc::new(StringArray::from(vec![Some("test-model".to_string())])),
+                Arc::new(StringArray::from(vec![Utc::now().to_rfc3339()])),
+                Arc::new(StringArray::from(vec![Some("text/plain".to_string())])),
+                Arc::new(StringArray::from(vec![None::<String>])),
+                Arc::new(StringArray::from(vec![None::<String>])),
+                Arc::new(StringArray::from(vec![None::<String>])),
+            ],
+        )
+        .unwrap();
+
+        let table = conn.open_table(CHUNKS_TABLE).execute().await.unwrap();
+        let schema = batch.schema();
+        let batches = RecordBatchIterator::new(vec![Ok(batch)], schema);
+        table
+            .add(Box::new(batches) as Box<dyn RecordBatchReader + Send>)
+            .execute()
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_schema_v2_migrates_existing_index() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let file_path = "/project/src/auth/login.rs";
+        let embedding = create_random_embedding(TEST_DIM);
+        seed_v1_chunks_table(&db_path, file_path, "login handler", &embedding).await;
+
+        assert!(!temp.path().join(SCHEMA_SIDECAR_FILENAME).exists());
+
+        let store = LanceStore::new(db_path, TEST_DIM);
+        store.init().await.unwrap();
+
+        let sidecar: SchemaSidecar = serde_json::from_slice(
+            &std::fs::read(temp.path().join(SCHEMA_SIDECAR_FILENAME)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(sidecar.chunks_schema_version, CHUNKS_SCHEMA_VERSION);
+
+        let chunks = store
+            .get_chunks_for_file(Path::new(file_path))
+            .await
+            .unwrap();
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].dir_path, "project/src/auth");
+        assert_eq!(chunks[0].dir_depth, 3);
+        assert_eq!(chunks[0].path_components, "project,src,auth,login.rs");
+
+        let results = store
+            .search(scoped_query(embedding, "src/auth"))
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0]
+                .file_path
+                .to_string_lossy()
+                .ends_with("src/auth/login.rs")
+        );
+
+        // Second init is idempotent (sidecar already v2, columns present).
+        store.init().await.unwrap();
+        let again = store
+            .get_chunks_for_file(Path::new(file_path))
+            .await
+            .unwrap();
+        assert_eq!(again[0].dir_path, "project/src/auth");
+    }
+
+    #[tokio::test]
+    async fn test_new_index_writes_schema_v2_sidecar() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        let store = LanceStore::new(db_path, TEST_DIM);
+        store.init().await.unwrap();
+
+        let sidecar: SchemaSidecar = serde_json::from_slice(
+            &std::fs::read(temp.path().join(SCHEMA_SIDECAR_FILENAME)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(sidecar.chunks_schema_version, CHUNKS_SCHEMA_VERSION);
     }
 }

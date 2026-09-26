@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Optional
 
 from ragfs import (
-    RagfsSemanticManager,
-    OrganizeStrategy,
-    OrganizeRequest,
-    SemanticPlan,
-    SimilarFile,
-    SimilarFilesResult,
-    DuplicateGroups,
     CleanupAnalysis,
+    DuplicateGroups,
+    OrganizeRequest,
+    OrganizeStrategy,
+    RagfsSemanticManager,
+    SemanticPlan,
+    SimilarFilesResult,
 )
 
 try:
@@ -80,7 +79,7 @@ class HaystackRagfsOrganizer:
         self,
         source_path: str,
         db_path: str,
-        model_path: Optional[str] = None,
+        model_path: str | None = None,
         duplicate_threshold: float = 0.95,
         similar_limit: int = 10,
     ):
@@ -98,7 +97,7 @@ class HaystackRagfsOrganizer:
         self._model_path = model_path
         self._duplicate_threshold = duplicate_threshold
         self._similar_limit = similar_limit
-        self._semantic: Optional[RagfsSemanticManager] = None
+        self._semantic: RagfsSemanticManager | None = None
         self._initialized = False
 
     def warm_up(self) -> None:
@@ -131,20 +130,20 @@ class HaystackRagfsOrganizer:
         duplicates=Optional[DuplicateGroups],
         cleanup_analysis=Optional[CleanupAnalysis],
         plan=Optional[SemanticPlan],
-        pending_plans=Optional[List[SemanticPlan]],
+        pending_plans=Optional[list[SemanticPlan]],
         result=Optional[SemanticPlan],
     )
     def run(
         self,
         operation: str,
-        file_path: Optional[str] = None,
-        k: Optional[int] = None,
-        scope: Optional[str] = None,
-        strategy: Optional[str] = None,
+        file_path: str | None = None,
+        k: int | None = None,
+        scope: str | None = None,
+        strategy: str | None = None,
         max_groups: int = 10,
         similarity_threshold: float = 0.7,
-        plan_id: Optional[str] = None,
-    ) -> Dict:
+        plan_id: str | None = None,
+    ) -> dict:
         """Execute an organizer operation.
 
         Args:
@@ -189,16 +188,16 @@ class HaystackRagfsOrganizer:
     async def _async_run(
         self,
         operation: str,
-        file_path: Optional[str],
-        k: Optional[int],
-        scope: Optional[str],
-        strategy: Optional[str],
+        file_path: str | None,
+        k: int | None,
+        scope: str | None,
+        strategy: str | None,
         max_groups: int,
         similarity_threshold: float,
-        plan_id: Optional[str],
-    ) -> Dict:
+        plan_id: str | None,
+    ) -> dict:
         """Async implementation of run."""
-        result: Dict = {
+        result: dict = {
             "similar_files": None,
             "duplicates": None,
             "cleanup_analysis": None,
@@ -283,7 +282,7 @@ class HaystackRagfsOrganizer:
     async def find_similar(
         self,
         file_path: str,
-        k: Optional[int] = None,
+        k: int | None = None,
     ) -> SimilarFilesResult:
         """Find files semantically similar to a given file."""
         self._ensure_initialized()
@@ -317,12 +316,12 @@ class HaystackRagfsOrganizer:
         )
         return await self._semantic.create_organize_plan(request)
 
-    async def list_pending_plans(self) -> List[SemanticPlan]:
+    async def list_pending_plans(self) -> list[SemanticPlan]:
         """List all pending plans awaiting approval."""
         self._ensure_initialized()
         return await self._semantic.list_pending_plans()
 
-    async def get_plan(self, plan_id: str) -> Optional[SemanticPlan]:
+    async def get_plan(self, plan_id: str) -> SemanticPlan | None:
         """Get a specific plan by ID."""
         self._ensure_initialized()
         return await self._semantic.get_plan(plan_id)

@@ -25,7 +25,7 @@ use crate::vectorstore::{Document, SearchResultPy};
 /// await retriever.init()
 /// results = await retriever.get_relevant_documents("my query")
 /// ```
-#[pyclass]
+#[pyclass(from_py_object)]
 #[derive(Clone)]
 pub struct RagfsRetriever {
     embedder: Arc<RwLock<Option<CandleEmbedder>>>,
@@ -141,6 +141,7 @@ impl RagfsRetriever {
                 limit: k,
                 filters: vec![],
                 metric: ragfs_core::DistanceMetric::Cosine,
+                scope_prefix: None,
             };
 
             let results = if hybrid {
@@ -217,6 +218,7 @@ impl RagfsRetriever {
                 limit: k,
                 filters: vec![],
                 metric: ragfs_core::DistanceMetric::Cosine,
+                scope_prefix: None,
             };
 
             let results = if use_hybrid {

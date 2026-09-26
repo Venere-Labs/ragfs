@@ -6,8 +6,8 @@ Python bindings for RAGFS - a high-performance local semantic search and RAG pip
 
 - **Local Embeddings**: GTE-small model (384 dimensions), no API calls
 - **Vector Storage**: LanceDB with hybrid search (vector + full-text)
-- **Multi-format Loading**: 40+ text formats, PDF, images
-- **Code-aware Chunking**: AST-based splitting with tree-sitter
+- **Multi-format Loading**: UTF-8 text/code, PDF, images
+- **Code-aware Chunking**: Pattern-based function/class splits (not tree-sitter)
 - **Framework Adapters**: LangChain, LlamaIndex, Haystack
 
 ## Installation

@@ -165,7 +165,7 @@ recommended. Merge order: **#42 → #40 → #41 → #38 → #39**.
       Issue #50. `resolve_under_root` is in `ragfs-core`; `SafetyManager` jails
       `soft_delete` / `restore` / `undo` so the PyO3 and MCP entry points inherit it.
 - [ ] CLI integration tests for config precedence, `--force`, `--hybrid`. Issue #51.
-- [ ] Split `crates/ragfs-fuse/src/filesystem.rs` (2 189 lines). Issue #52.
+- [x] Split `crates/ragfs-fuse/src/filesystem.rs` (2 189 lines). Issue #52.
 - [x] Retire the optional `pdf_oxide` feature (§1.2). Issue #58.
 
 ### P2

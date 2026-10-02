@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Agent docs (`CLAUDE.md`, `AGENTS.md`) list all 10 Cargo workspace crates plus `ragfs-mcp`. `docs/PERFORMANCE.md` documents `[embedding].model`, CLI-only `--force`, and `--hybrid` vs `[query].hybrid`.
 - Embedding dimension and model id for `LanceStore` come from `Embedder::dimension()` / `model_name()`. Opening an index whose `vector` width differs from the embedder fails with `StoreError::Schema`.
+- Split `ragfs-fuse` FUSE handler `filesystem.rs` into `filesystem/` modules by virtual-directory family (query, ops, safety, semantic, passthrough). Issue #52.
 
 ### Fixed
 - Revert Dependabot `lancedb` 0.39.0 (#72): `Error::Http` is `cfg(feature = "remote")` while `job.rs` uses it with default features. Pin stays 0.37.1; cargo Dependabot ignores `lancedb >=0.38` and Arrow 59+.

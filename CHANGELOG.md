@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - CLI integration tests (`assert_cmd`) for config/`--force`/`--hybrid`/`max_file_size` and unsupported models, using `RAGFS_TEST_EMBEDDER=noop`.
-- Repo social card (`docs/assets/social.svg` source, `docs/assets/social.png` 1280×640 for GitHub preview and README).
+- Repo social card (`docs/assets/social.svg` source, `docs/assets/social.png` 1280×640) as the README header. README is a front page (quick start, feature matrix, grouped docs); the CLI manpage stays in `docs/USER_GUIDE.md`.
 
 ### Fixed
 - Revert Dependabot `lancedb` 0.39.0 (#72): `Error::Http` is `cfg(feature = "remote")` while `job.rs` uses it with default features. Pin stays 0.37.1; cargo Dependabot ignores `lancedb >=0.38` and Arrow 59+.

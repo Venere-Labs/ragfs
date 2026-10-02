@@ -170,7 +170,8 @@ recommended. Merge order: **#42 → #40 → #41 → #38 → #39**.
 - [x] Propagate the path jail beyond `ragfs-fuse` (`ragfs-python`, `ragfs-mcp`).
       Issue #50. `resolve_under_root` is in `ragfs-core`; `SafetyManager` jails
       `soft_delete` / `restore` / `undo` so the PyO3 and MCP entry points inherit it.
-- [ ] CLI integration tests for config precedence, `--force`, `--hybrid`. Issue #51.
+- [x] CLI integration tests for config precedence, `--force`, `--hybrid`. Issue #51.
+      `crates/ragfs/tests/cli.rs` (`assert_cmd`, `test-backends` + `RAGFS_TEST_EMBEDDER=noop`).
 - [x] Split `crates/ragfs-fuse/src/filesystem.rs` (2 189 lines). Issue #52.
 - [x] Retire the optional `pdf_oxide` feature (§1.2). Issue #58.
 

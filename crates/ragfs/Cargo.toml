@@ -37,6 +37,8 @@ vision = [
     "ragfs-index/vision",
     "ragfs-fuse/vision",
 ]
+# Lets the CLI honor RAGFS_TEST_EMBEDDER=noop (NoopEmbedder, no model download).
+test-backends = []
 
 [dependencies]
 ragfs-core.workspace = true
@@ -68,7 +70,13 @@ async-trait.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 criterion.workspace = true
+assert_cmd.workspace = true
+predicates.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+
+[[test]]
+name = "cli"
+required-features = ["test-backends"]
 
 [[bench]]
 name = "embedding"

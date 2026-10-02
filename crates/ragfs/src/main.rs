@@ -41,7 +41,7 @@ use ragfs_chunker::{ChunkerRegistry, CodeChunker, FixedSizeChunker, SemanticChun
 use ragfs_core::{Embedder, Indexer, VectorStore};
 #[cfg(feature = "candle")]
 use ragfs_embed::CandleEmbedder;
-use ragfs_embed::EmbedderPool;
+use ragfs_embed::{EmbedderPool, NoopEmbedder};
 use ragfs_extract::{
     ExtractorRegistry, ImageExtractor, OfficeExtractor, PdfExtractor, TextExtractor,
 };
@@ -253,26 +253,35 @@ async fn create_components(
     let db_path = get_db_path(&source)?;
 
     // Embedder first: store width and sidecar model id come from it.
+    // Unsupported models fail here, before any download.
     let model = config
         .resolve_embedding_model()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let cache_dir = data_dir()
-        .context("Failed to get data directory")?
-        .join("models");
-    let embedder = CandleEmbedder::try_new(cache_dir, model, config.embedding.use_gpu)
-        .context("Failed to create embedder")?;
 
-    // Initialize embedder (downloads model if needed)
-    info!("Initializing embedder (this may download the model on first run)...");
-    embedder
-        .init()
-        .await
-        .context("Failed to initialize embedder")?;
+    let embedder_pool = if use_test_noop_embedder() {
+        info!("Using NoopEmbedder (RAGFS_TEST_EMBEDDER=noop)");
+        Arc::new(EmbedderPool::new(
+            Arc::new(NoopEmbedder::new()) as Arc<dyn Embedder>,
+            config.embedder_pool_size(),
+        ))
+    } else {
+        let cache_dir = data_dir()
+            .context("Failed to get data directory")?
+            .join("models");
+        let embedder = CandleEmbedder::try_new(cache_dir, model, config.embedding.use_gpu)
+            .context("Failed to create embedder")?;
 
-    let embedder_pool = Arc::new(EmbedderPool::new(
-        Arc::new(embedder) as Arc<dyn Embedder>,
-        config.embedder_pool_size(),
-    ));
+        info!("Initializing embedder (this may download the model on first run)...");
+        embedder
+            .init()
+            .await
+            .context("Failed to initialize embedder")?;
+
+        Arc::new(EmbedderPool::new(
+            Arc::new(embedder) as Arc<dyn Embedder>,
+            config.embedder_pool_size(),
+        ))
+    };
 
     let store = Arc::new(
         LanceStore::new(db_path, embedder_pool.dimension())
@@ -294,6 +303,14 @@ async fn create_components(
     let chunkers = Arc::new(chunkers);
 
     Ok((store, extractors, chunkers, embedder_pool))
+}
+
+fn use_test_noop_embedder() -> bool {
+    cfg!(feature = "test-backends")
+        && matches!(
+            std::env::var("RAGFS_TEST_EMBEDDER").ok().as_deref(),
+            Some("noop")
+        )
 }
 
 fn load_config(cli: &Cli) -> Result<Config> {

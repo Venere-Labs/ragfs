@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Split `ragfs-fuse` FUSE handler `filesystem.rs` into `filesystem/` modules by virtual-directory family (query, ops, safety, semantic, passthrough). Issue #52.
 - CI: `Swatinem/rust-cache` uses a shared key across Check/Clippy/Test/Docs/Python; pull requests run Python 3.12 only (3.10–3.13 stays on `main`); coverage and Python integration run on `main` only. Dependabot ignores 0.x minor bumps of `criterion` and `notify-debouncer-full`.
 
+### Added
+- CLI integration tests (`assert_cmd`) for config/`--force`/`--hybrid`/`max_file_size` and unsupported models, using `RAGFS_TEST_EMBEDDER=noop`.
+
 ### Fixed
 - Revert Dependabot `lancedb` 0.39.0 (#72): `Error::Http` is `cfg(feature = "remote")` while `job.rs` uses it with default features. Pin stays 0.37.1; cargo Dependabot ignores `lancedb >=0.38` and Arrow 59+.
 - MCP `ragfs_batch_operations` serializes a failed atomic batch: `BatchResult.rollback_id` aliases the batch `id` (the previous attribute miss turned a jail reject into `{"error": "... no attribute 'rollback_id'"}`).

@@ -7,6 +7,8 @@
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
 [![Rust](https://img.shields.io/badge/rust-1.91%2B-orange.svg)](https://www.rust-lang.org)
 
+![RAGFS](docs/assets/social.png)
+
 An agentic FUSE filesystem that makes file management safe and structured for LLM agents. Includes JSON-based operations with undo support, complete audit logging, and AI-powered features like semantic search, auto-organization, and deduplication.
 
 ## Features

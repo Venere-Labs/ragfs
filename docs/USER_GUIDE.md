@@ -18,11 +18,11 @@ This guide provides comprehensive documentation for using RAGFS.
 
 ### Prerequisites
 
-- **Rust 1.88+**: Install via [rustup](https://rustup.rs/)
+- **Rust 1.91+**: Install via [rustup](https://rustup.rs/)
 - **FUSE libraries**: Required for filesystem mounting
-  - Debian/Ubuntu: `sudo apt install libfuse-dev pkg-config`
-  - Fedora: `sudo dnf install fuse-devel`
-  - Arch Linux: `sudo pacman -S fuse2`
+  - Debian/Ubuntu: `sudo apt install libfuse-dev pkg-config protobuf-compiler`
+  - Fedora: `sudo dnf install fuse-devel protobuf-compiler`
+  - Arch Linux: `sudo pacman -S fuse2 protobuf`
 - **Build tools**: `build-essential` or equivalent
 
 ### Building from Source

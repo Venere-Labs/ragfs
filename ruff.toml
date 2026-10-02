@@ -1,5 +1,7 @@
-# Ruff configuration for ragfs Python packages  
+# Ruff configuration for ragfs Python packages
 # https://docs.astral.sh/ruff/configuration/
+
+required-version = ">=0.15"
 
 [lint]
 # Enable specific rule sets

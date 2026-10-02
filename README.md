@@ -4,7 +4,7 @@
 [![Security Audit](https://github.com/Venere-Labs/ragfs/actions/workflows/security.yml/badge.svg)](https://github.com/Venere-Labs/ragfs/actions/workflows/security.yml)
 [![codecov](https://codecov.io/gh/Venere-Labs/ragfs/branch/main/graph/badge.svg)](https://codecov.io/gh/Venere-Labs/ragfs)
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://Venere-Labs.github.io/ragfs/ragfs/)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
 [![Rust](https://img.shields.io/badge/rust-1.91%2B-orange.svg)](https://www.rust-lang.org)
 
 An agentic FUSE filesystem that makes file management safe and structured for LLM agents. Includes JSON-based operations with undo support, complete audit logging, and AI-powered features like semantic search, auto-organization, and deduplication.

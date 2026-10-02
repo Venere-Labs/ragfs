@@ -37,9 +37,12 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 ### Prerequisites
 
-- Rust 1.88 or later
-- FUSE development libraries
-- Git
+- Rust 1.91 or later (workspace MSRV; CI Clippy tracks stable)
+- FUSE development libraries (`libfuse-dev`)
+- `protobuf-compiler` (LanceDB / Arrow build)
+- Git, Make
+
+`rust-toolchain.toml` selects stable plus `rustfmt` and `clippy` via rustup.
 
 ### Building
 
@@ -51,8 +54,8 @@ cd ragfs
 # Build all crates
 cargo build
 
-# Run tests
-cargo test
+# Same gates as CI (fmt, clippy -D warnings, tests, cargo deny)
+make ci
 
 # Build in release mode
 cargo build --release
@@ -80,7 +83,7 @@ cargo fmt --all
 
 ### Linting
 
-All code must pass `clippy` without warnings:
+All code must pass `clippy` without warnings (`make clippy`):
 
 ```bash
 cargo clippy --all-targets --all-features -- -D warnings
@@ -99,7 +102,8 @@ cargo clippy --all-targets --all-features -- -D warnings
 - Run the full test suite before submitting:
 
 ```bash
-cargo test --all
+cargo test --all --all-features
+# or: make test
 ```
 
 ## Commit Messages
@@ -166,10 +170,12 @@ ragfs/
 
 1. Update documentation if needed
 2. Add tests for new functionality
-3. Ensure CI passes
-4. Request review from maintainers
-5. Address review feedback
-6. Squash commits if requested
+3. Run `make ci` (or rely on GitHub Actions)
+4. Open a PR against `main` with a conventional-commit title (lowercase subject)
+5. Wait for the required checks: Check, Clippy, MSRV (1.91), Test, Format, Cargo Deny, Documentation
+6. Maintainers squash-merge; do not land a Cargo 0.x “minor” bump without review (those are breaking)
+
+Required rust jobs are enforced by the `protect-main` ruleset. Merge method is squash-only.
 
 ## Questions?
 

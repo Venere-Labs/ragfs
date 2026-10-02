@@ -69,11 +69,11 @@ RAGFS converts your files into **vector embeddings** (numerical representations 
 
 ### Prerequisites
 
-- **Rust 1.88+**: Install via [rustup.rs](https://rustup.rs)
+- **Rust 1.91+**: Install via [rustup.rs](https://rustup.rs)
 - **FUSE libraries** (for mounting):
-  - Debian/Ubuntu: `sudo apt install libfuse-dev pkg-config`
-  - Fedora: `sudo dnf install fuse-devel`
-  - Arch: `sudo pacman -S fuse2`
+  - Debian/Ubuntu: `sudo apt install libfuse-dev pkg-config protobuf-compiler`
+  - Fedora: `sudo dnf install fuse-devel protobuf-compiler`
+  - Arch: `sudo pacman -S fuse2 protobuf`
 
 ### Build from Source
 

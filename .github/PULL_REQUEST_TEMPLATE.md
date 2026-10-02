@@ -2,6 +2,9 @@
 
 Brief description of what this PR does.
 
+The PR title must be a conventional commit with a lowercase subject
+(`feat: …`, `fix(scope): …`, `chore: …`). GitHub Actions rejects other titles.
+
 ## Type of Change
 
 - [ ] Bug fix (non-breaking change that fixes an issue)

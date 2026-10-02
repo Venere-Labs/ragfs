@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Embedding dimension and model id for `LanceStore` come from `Embedder::dimension()` / `model_name()`. Opening an index whose `vector` width differs from the embedder fails with `StoreError::Schema`.
 - Split `ragfs-fuse` FUSE handler `filesystem.rs` into `filesystem/` modules by virtual-directory family (query, ops, safety, semantic, passthrough). Issue #52.
 - CI: `Swatinem/rust-cache` uses a shared key across Check/Clippy/Test/Docs/Python; pull requests run Python 3.12 only (3.10–3.13 stays on `main`); coverage and Python integration run on `main` only. Dependabot ignores 0.x minor bumps of `criterion` and `notify-debouncer-full`.
+- Project hygiene: MSRV docs 1.91, `Makefile` / `rust-toolchain.toml`, `CODEOWNERS`, GitHub private advisory as the security channel, `contents: read` on CI/coverage, pinned `ruff==0.15.9`.
 
 ### Fixed
 - Revert Dependabot `lancedb` 0.39.0 (#72): `Error::Http` is `cfg(feature = "remote")` while `job.rs` uses it with default features. Pin stays 0.37.1; cargo Dependabot ignores `lancedb >=0.38` and Arrow 59+.

@@ -14,8 +14,9 @@ If you discover a security vulnerability in RAGFS, please report it responsibly.
 ### How to Report
 
 1. **Do NOT** create a public GitHub issue for security vulnerabilities
-2. Email security concerns to: security@venere-labs.com
-3. Include:
+2. Prefer [GitHub private vulnerability reporting](https://github.com/Venere-Labs/ragfs/security/advisories/new)
+3. Fallback email: security@venere-labs.com
+4. Include:
    - Description of the vulnerability
    - Steps to reproduce
    - Potential impact

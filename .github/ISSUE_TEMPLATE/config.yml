@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Venere-Labs/ragfs/security/advisories/new
+    about: Use GitHub private vulnerability reporting. Do not open a public issue.

@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main]
@@ -70,7 +73,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install ruff
-        run: pip install ruff
+        run: pip install 'ruff==0.15.9'
       - name: Check Python code
         run: ruff check crates/ragfs-python crates/ragfs-mcp
 

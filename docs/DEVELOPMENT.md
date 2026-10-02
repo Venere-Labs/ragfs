@@ -6,7 +6,7 @@ This guide helps developers set up their environment and contribute to RAGFS.
 
 ### Rust
 
-Install Rust 1.88 or later via [rustup](https://rustup.rs/):
+Install Rust 1.91 or later via [rustup](https://rustup.rs/):
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -17,7 +17,7 @@ Verify your installation:
 
 ```bash
 rustc --version
-# Should show 1.88.0 or later
+# Should show 1.91.0 or later
 ```
 
 ### System Dependencies
@@ -26,19 +26,19 @@ rustc --version
 
 ```bash
 sudo apt update
-sudo apt install build-essential pkg-config libfuse-dev
+sudo apt install build-essential pkg-config libfuse-dev protobuf-compiler
 ```
 
 #### Fedora
 
 ```bash
-sudo dnf install gcc make pkg-config fuse-devel
+sudo dnf install gcc make pkg-config fuse-devel protobuf-compiler
 ```
 
 #### Arch Linux
 
 ```bash
-sudo pacman -S base-devel fuse2
+sudo pacman -S base-devel fuse2 protobuf
 ```
 
 #### macOS
@@ -85,8 +85,12 @@ cargo doc --no-deps --open
 ## Running Tests
 
 ```bash
-# Run all tests
-cargo test --all
+# Same gates as CI
+make ci
+
+# Tests only
+make test
+# or: cargo test --all --all-features
 
 # Run tests for a specific crate
 cargo test -p ragfs-core

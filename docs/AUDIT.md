@@ -19,7 +19,7 @@ report a slightly different set of IDs than the numbers below.
 |---|---:|---:|
 | Vulnerabilities | 28 | **0** |
 | Unsound (entries) | 8 | **0** |
-| Unmaintained (entries) | 8 | 6 (all upstream-pinned) |
+| Unmaintained (entries) | 8 | 4 (all upstream-pinned) |
 
 **There is no `ignore:` list anywhere.** The workflow that used to carry one now
 runs with no suppressions at all.
@@ -101,13 +101,12 @@ the reason and what would have to change upstream.
 |---|---|---|---|
 | RUSTSEC-2024-0436 | paste 1.0.15 | `ragfs-embed → tokenizers` | `tokenizers` 0.23.2 still requires `paste ^1.0.14`; no newer tokenizers exists |
 | RUSTSEC-2025-0119 | number_prefix 0.4.0 | `ragfs-embed → hf-hub → indicatif` | `hf-hub` 0.4.3 pulls `indicatif` unconditionally through **both** its `tokio` and `ureq` features, so it cannot be switched off; `hf-hub` 1.0 drops it but is a breaking rewrite of the model-download path |
-| RUSTSEC-2026-0105 | core2 0.4.0 | `ragfs-extract → pdf_oxide → libflate` | Optional `pdf_oxide` extractor, deliberately added by the maintainers |
-| RUSTSEC-2020-0144 | lzw 0.10.0 | `ragfs-extract → pdf_oxide` | Same |
-| RUSTSEC-2026-0192 | ttf-parser 0.24.1 | `ragfs-extract → pdf_oxide` | Same |
+| RUSTSEC-2026-0105 | core2 0.4.0 | `ragfs-extract → image → ravif → rav1e → bitstream-io` | Yanked/unmaintained; remains after retiring `pdf_oxide` because `image` 0.25 still uses rav1e for AVIF |
 | RUSTSEC-2026-0192 | ttf-parser 0.25.1 | `ragfs-extract → lopdf 0.42` | `lopdf` 0.45 replaced `ttf-parser` with `skrifa`, but moving to it re-introduces a second lopdf unless `pdf-extract` is also dropped |
 
-If the `pdf_oxide` extractor is ever retired (see issue #58), three of these rows
-disappear with it.
+The optional `pdf_oxide` extractor was retired (issue #58), which dropped
+`lzw` (RUSTSEC-2020-0144) and `ttf-parser` 0.24.1 (RUSTSEC-2026-0192).
+`core2` is still in the graph via `image` 0.25, not via `pdf_oxide`.
 
 ### 1.3 Review
 
@@ -165,7 +164,7 @@ recommended. Merge order: **#42 → #40 → #41 → #38 → #39**.
       `soft_delete` / `restore` / `undo` so the PyO3 and MCP entry points inherit it.
 - [ ] CLI integration tests for config precedence, `--force`, `--hybrid`. Issue #51.
 - [ ] Split `crates/ragfs-fuse/src/filesystem.rs` (2 189 lines). Issue #52.
-- [ ] Decide the fate of the `pdf_oxide` feature (§1.2). Issue #58.
+- [x] Retire the optional `pdf_oxide` feature (§1.2). Issue #58.
 
 ### P2
 

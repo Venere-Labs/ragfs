@@ -71,7 +71,6 @@ tokenizers = "0.22"
 # PDF parsing (>=0.42 patches RUSTSEC-2026-0187 nesting-depth DoS)
 pdf-extract = "0.12"
 lopdf = "0.42"
-pdf_oxide = "0.2"
 
 # Compression
 flate2 = "1.1"

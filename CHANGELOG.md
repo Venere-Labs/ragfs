@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Path jail (`resolve_under_root`) now lives in `ragfs-core` and is enforced by `SafetyManager` (`soft_delete` / `restore` / `undo`), so Python `RagfsSafetyManager` and MCP `ragfs_delete_to_trash` cannot escape the source root.
 
+### Removed
+- Optional `pdf_oxide` extractor feature. PDF text and images continue to use `PdfExtractor` (`pdf-extract` + `lopdf`). `--features pdf_oxide` is no longer valid.
+
 ### Changed
 - Agent docs (`CLAUDE.md`, `AGENTS.md`) list all 10 Cargo workspace crates plus `ragfs-mcp`. `docs/PERFORMANCE.md` documents `[embedding].model`, CLI-only `--force`, and `--hybrid` vs `[query].hybrid`.
 

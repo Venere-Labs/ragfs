@@ -170,9 +170,7 @@ fn hybrid_cli_flag_overrides_config_false() {
     // Noop embeddings can leave hybrid rank without `_distance`; the smoke
     // is that the CLI took the hybrid path rather than ignoring the flag.
     assert!(
-        output.status.success()
-            || blob.contains("hybrid search")
-            || blob.contains("_distance"),
+        output.status.success() || blob.contains("hybrid search") || blob.contains("_distance"),
         "expected hybrid query path, got: {blob}"
     );
 }

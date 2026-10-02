@@ -57,7 +57,7 @@ notify-debouncer-full = "0.6"
 # that variant is `#[cfg(feature = "remote")]`. 0.37.1 has the same modern
 # dependency generation (arrow 58, lance 10, object_store 0.13) without the bug.
 lancedb = "0.39.0"
-arrow-array = "58"
+arrow-array = "60"
 arrow-schema = "58"
 
 # Embeddings

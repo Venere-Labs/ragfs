@@ -144,7 +144,12 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.120
+      # `@stable` is the action tag; `toolchain` is the rustc version (MSRV).
+      # Dependabot #67 bumped `dtolnay/rust-toolchain@1.91` → `@1.120` because
+      # those tags are rustc versions, not action releases.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.91"
       - uses: Swatinem/rust-cache@v2
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler

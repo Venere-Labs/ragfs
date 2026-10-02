@@ -13,6 +13,10 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "ci"
+    ignore:
+      # dtolnay/rust-toolchain git tags are rustc versions (1.91, 1.120, …),
+      # not action releases. Bumping the tag changes the MSRV compiler.
+      - dependency-name: "dtolnay/rust-toolchain"
 
   - package-ecosystem: "pip"
     directory: "/crates/ragfs-python"

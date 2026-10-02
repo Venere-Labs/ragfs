@@ -199,6 +199,13 @@ recommended. Merge order: **#42 → #40 → #41 → #38 → #39**.
   matrix now run only on `main` and on ready-for-review PRs. Drafts still get
   `check`, `fmt`, `clippy`, `test`, `cargo-deny`, `python-lint` and one Python
   interpreter.
+- **MSRV action tag.** `dtolnay/rust-toolchain` tags *are* rustc versions.
+  Dependabot #67 bumped `@1.91` → `@1.120` and the MSRV job failed in seconds.
+  The job now uses `@stable` with `toolchain: "1.91"`; Dependabot ignores that
+  action so it cannot move the MSRV compiler.
+- **Candle 0.9 vs 0.11.** Workspace pins had `candle-core`/`candle-nn` 0.9 and
+  `candle-transformers` 0.11, so CI compiled two `candle_core::Tensor` types
+  and `ragfs-embed` failed. All three crates are pinned to 0.11.
 
 ---
 

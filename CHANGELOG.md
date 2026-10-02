@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Align `candle-core` and `candle-nn` with `candle-transformers` 0.11 so `ragfs-embed` compiles (one `Tensor` type, not 0.9 + 0.11).
+- Pin the MSRV job to rustc 1.91 via `dtolnay/rust-toolchain@stable` + `toolchain: "1.91"` (Dependabot #67 had moved the action tag to 1.120).
+
 ## [0.2.0] - 2026-09-25
 
 ### Security

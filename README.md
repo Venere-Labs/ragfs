@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/social.png" alt="RAGFS — agentic FUSE filesystem for LLM agents" width="1280">
+</p>
+
 # RAGFS
 
 [![CI](https://github.com/Venere-Labs/ragfs/actions/workflows/ci.yml/badge.svg)](https://github.com/Venere-Labs/ragfs/actions/workflows/ci.yml)
@@ -6,8 +10,6 @@
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://Venere-Labs.github.io/ragfs/ragfs/)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
 [![Rust](https://img.shields.io/badge/rust-1.91%2B-orange.svg)](https://www.rust-lang.org)
-
-![RAGFS](docs/assets/social.png)
 
 An agentic FUSE filesystem that makes file management safe and structured for LLM agents. Includes JSON-based operations with undo support, complete audit logging, and AI-powered features like semantic search, auto-organization, and deduplication.
 

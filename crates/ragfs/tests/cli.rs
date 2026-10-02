@@ -83,10 +83,10 @@ fn unsupported_model_fails_before_download() {
 fn config_max_file_size_reaches_the_indexer() {
     let h = Harness::new();
     h.write_config(
-        r#"
+        r"
         [index]
         max_file_size = 32
-        "#,
+        ",
     );
     h.write_source("small.md", "tiny");
     h.write_source("large.md", &"x".repeat(200));
@@ -135,11 +135,11 @@ fn force_flag_reaches_the_indexer() {
 fn hybrid_cli_flag_overrides_config_false() {
     let h = Harness::new();
     h.write_config(
-        r#"
+        r"
         [query]
         hybrid = false
         default_limit = 1
-        "#,
+        ",
     );
     h.write_source("note.md", "semantic search hybrid override");
     index_ok(&mut h.ragfs(), &h.source);

@@ -61,9 +61,6 @@ use ragfs::config::{Config, data_dir};
 #[cfg(unix)]
 mod daemon;
 
-/// Embedding dimension for gte-small model.
-const EMBEDDING_DIM: usize = 384;
-
 #[derive(Parser)]
 #[command(name = "ragfs")]
 #[command(about = "Agentic FUSE filesystem: semantic search, JSON file ops, undo, and organize")]
@@ -253,27 +250,9 @@ async fn create_components(
     Arc<ChunkerRegistry>,
     Arc<EmbedderPool>,
 )> {
-    // Create store
     let db_path = get_db_path(&source)?;
-    let store = Arc::new(LanceStore::new(db_path, EMBEDDING_DIM));
 
-    // Create extractor registry
-    let mut extractors = ExtractorRegistry::new();
-    extractors.register("text", TextExtractor::new());
-    extractors.register("pdf", PdfExtractor::new());
-    extractors.register("image", ImageExtractor::new());
-    extractors.register("office", OfficeExtractor::new());
-    let extractors = Arc::new(extractors);
-
-    // Create chunker registry
-    let mut chunkers = ChunkerRegistry::new();
-    chunkers.register("fixed", FixedSizeChunker::new());
-    chunkers.register("code", CodeChunker::new());
-    chunkers.register("semantic", SemanticChunker::new());
-    chunkers.set_default("fixed");
-    let chunkers = Arc::new(chunkers);
-
-    // Create embedder from config (model, GPU). Unknown models fail before download.
+    // Embedder first: store width and sidecar model id come from it.
     let model = config
         .resolve_embedding_model()
         .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -294,6 +273,25 @@ async fn create_components(
         Arc::new(embedder) as Arc<dyn Embedder>,
         config.embedder_pool_size(),
     ));
+
+    let store = Arc::new(
+        LanceStore::new(db_path, embedder_pool.dimension())
+            .with_embedding_model(embedder_pool.model_name()),
+    );
+
+    let mut extractors = ExtractorRegistry::new();
+    extractors.register("text", TextExtractor::new());
+    extractors.register("pdf", PdfExtractor::new());
+    extractors.register("image", ImageExtractor::new());
+    extractors.register("office", OfficeExtractor::new());
+    let extractors = Arc::new(extractors);
+
+    let mut chunkers = ChunkerRegistry::new();
+    chunkers.register("fixed", FixedSizeChunker::new());
+    chunkers.register("code", CodeChunker::new());
+    chunkers.register("semantic", SemanticChunker::new());
+    chunkers.set_default("fixed");
+    let chunkers = Arc::new(chunkers);
 
     Ok((store, extractors, chunkers, embedder_pool))
 }
@@ -739,7 +737,17 @@ async fn run(cli: Cli) -> Result<()> {
                 return Ok(());
             }
 
-            let store = LanceStore::new(db_path, EMBEDDING_DIM);
+            let model = config
+                .resolve_embedding_model()
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let cache_dir = data_dir()
+                .context("Failed to get data directory")?
+                .join("models");
+            // try_new does not download weights; dimension() is the SoT.
+            let embedder = CandleEmbedder::try_new(cache_dir, model, false)
+                .context("Failed to create embedder")?;
+            let store = LanceStore::new(db_path, embedder.dimension())
+                .with_embedding_model(embedder.model_name());
             store.init().await.context("Failed to initialize store")?;
 
             let stats = store.stats().await?;

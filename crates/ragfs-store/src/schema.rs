@@ -17,6 +17,12 @@ pub const SCHEMA_SIDECAR_FILENAME: &str = "ragfs-schema.json";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SchemaSidecar {
     pub chunks_schema_version: u32,
+    /// Embedding width of the `vector` FixedSizeList, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_dim: Option<usize>,
+    /// Embedder model id that wrote this index, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<String>,
 }
 
 /// Scope columns missing from a pre-v2 chunks table (nullable so `add_columns` can fill nulls).
@@ -128,5 +134,13 @@ mod tests {
     fn test_missing_scope_columns_on_v2_schema() {
         let v2 = chunks_schema(384);
         assert!(missing_scope_columns(&v2).is_empty());
+    }
+
+    #[test]
+    fn old_sidecar_deserializes_without_embedding_fields() {
+        let s: SchemaSidecar = serde_json::from_str(r#"{"chunks_schema_version":2}"#).unwrap();
+        assert_eq!(s.chunks_schema_version, 2);
+        assert_eq!(s.embedding_dim, None);
+        assert_eq!(s.embedding_model, None);
     }
 }

@@ -21,9 +21,6 @@ use std::sync::Arc;
 use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
-/// Embedding dimension for the gte-small model.
-const EMBEDDING_DIM: usize = 384;
-
 #[tokio::main]
 async fn main() -> Result<()> {
     // Parse command-line arguments
@@ -136,21 +133,15 @@ async fn create_components(
 
     info!("Using database at {:?}", db_path);
 
-    // Create vector store
-    let store = Arc::new(LanceStore::new(db_path, EMBEDDING_DIM));
-
-    // Create extractor registry with text extractor
     let mut extractors = ExtractorRegistry::new();
     extractors.register("text", TextExtractor::new());
     let extractors = Arc::new(extractors);
 
-    // Create chunker registry with fixed-size chunker
     let mut chunkers = ChunkerRegistry::new();
     chunkers.register("fixed", FixedSizeChunker::new());
     chunkers.set_default("fixed");
     let chunkers = Arc::new(chunkers);
 
-    // Create embedder (downloads model on first run)
     let cache_dir = std::env::temp_dir().join("ragfs_example").join("models");
     let embedder = CandleEmbedder::new(cache_dir);
 
@@ -160,11 +151,15 @@ async fn create_components(
         .await
         .context("Failed to initialize embedder")?;
 
-    // Wrap embedder in a pool for concurrent embedding
     let embedder_pool = Arc::new(EmbedderPool::new(
         Arc::new(embedder) as Arc<dyn Embedder>,
         4,
     ));
+
+    let store = Arc::new(
+        LanceStore::new(db_path, embedder_pool.dimension())
+            .with_embedding_model(embedder_pool.model_name()),
+    );
 
     Ok((store, extractors, chunkers, embedder_pool))
 }

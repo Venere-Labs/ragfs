@@ -42,6 +42,8 @@ pub struct LanceStore {
     db_path: PathBuf,
     /// Embedding dimension
     embedding_dim: usize,
+    /// Embedder model id that should match this index, when known.
+    embedding_model: Option<String>,
     /// Database connection (lazy initialized)
     connection: RwLock<Option<Connection>>,
     /// Chunks table handle
@@ -52,15 +54,26 @@ pub struct LanceStore {
 
 impl LanceStore {
     /// Create a new `LanceStore`.
+    ///
+    /// `embedding_dim` must come from `Embedder::dimension` at the call site.
+    /// Opening an existing index whose `vector` column width differs fails in `init`.
     #[must_use]
     pub fn new(db_path: PathBuf, embedding_dim: usize) -> Self {
         Self {
             db_path,
             embedding_dim,
+            embedding_model: None,
             connection: RwLock::new(None),
             chunks_table: RwLock::new(None),
             files_table: RwLock::new(None),
         }
+    }
+
+    /// Record the embedder model id in the schema sidecar.
+    #[must_use]
+    pub fn with_embedding_model(mut self, model: impl Into<String>) -> Self {
+        self.embedding_model = Some(model.into());
+        self
     }
 
     /// Get the database path.
@@ -71,6 +84,30 @@ impl LanceStore {
     /// Get the embedding dimension.
     pub fn embedding_dim(&self) -> usize {
         self.embedding_dim
+    }
+
+    /// Width of the chunks `vector` FixedSizeList.
+    fn stored_embedding_dim(schema: &Schema) -> Result<usize, StoreError> {
+        let field = schema.field_with_name("vector").map_err(|_| {
+            StoreError::Schema("chunks table is missing the 'vector' column".into())
+        })?;
+        match field.data_type() {
+            DataType::FixedSizeList(_, size) => Ok(*size as usize),
+            other => Err(StoreError::Schema(format!(
+                "chunks 'vector' column has type {other:?}, expected FixedSizeList"
+            ))),
+        }
+    }
+
+    fn ensure_embedding_dim_matches(&self, schema: &Schema) -> Result<(), StoreError> {
+        let stored = Self::stored_embedding_dim(schema)?;
+        if stored != self.embedding_dim {
+            return Err(StoreError::Schema(format!(
+                "Index embedding dimension {stored} does not match embedder dimension {}",
+                self.embedding_dim
+            )));
+        }
+        Ok(())
     }
 
     /// Whether the table is large enough for Lance IVF-PQ training.
@@ -333,6 +370,8 @@ impl LanceStore {
         }
         let json = serde_json::to_string_pretty(&SchemaSidecar {
             chunks_schema_version: version,
+            embedding_dim: Some(self.embedding_dim),
+            embedding_model: self.embedding_model.clone(),
         })
         .map_err(|e| StoreError::Schema(format!("Failed to serialize schema sidecar: {e}")))?;
         tokio::fs::write(&path, json).await.map_err(|e| {
@@ -373,6 +412,7 @@ impl LanceStore {
             .schema()
             .await
             .map_err(|e| StoreError::Schema(format!("Failed to read chunks schema: {e}")))?;
+        self.ensure_embedding_dim_matches(&schema)?;
         let missing = missing_scope_columns(&schema);
         let sidecar_version = self.read_schema_sidecar().await.unwrap_or(0);
 
@@ -1793,6 +1833,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_init_rejects_embedding_dim_mismatch() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.lance");
+        LanceStore::new(db_path.clone(), TEST_DIM)
+            .init()
+            .await
+            .unwrap();
+
+        let err = LanceStore::new(db_path, 768).init().await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            matches!(err, StoreError::Schema(_)),
+            "expected Schema, got {err:?}"
+        );
+        assert!(
+            msg.contains("384") && msg.contains("768"),
+            "mismatch message should name both dimensions: {msg}"
+        );
+    }
+
+    #[tokio::test]
     async fn test_upsert_and_get_chunks() {
         let temp = tempdir().unwrap();
         let db_path = temp.path().join("test.lance");
@@ -2979,6 +3040,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sidecar.chunks_schema_version, CHUNKS_SCHEMA_VERSION);
+        assert_eq!(sidecar.embedding_dim, Some(TEST_DIM));
 
         let chunks = store
             .get_chunks_for_file(Path::new(file_path))
@@ -3014,7 +3076,7 @@ mod tests {
     async fn test_new_index_writes_schema_v2_sidecar() {
         let temp = tempdir().unwrap();
         let db_path = temp.path().join("test.lance");
-        let store = LanceStore::new(db_path, TEST_DIM);
+        let store = LanceStore::new(db_path, TEST_DIM).with_embedding_model("thenlper/gte-small");
         store.init().await.unwrap();
 
         let sidecar: SchemaSidecar = serde_json::from_slice(
@@ -3022,5 +3084,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sidecar.chunks_schema_version, CHUNKS_SCHEMA_VERSION);
+        assert_eq!(sidecar.embedding_dim, Some(TEST_DIM));
+        assert_eq!(
+            sidecar.embedding_model.as_deref(),
+            Some("thenlper/gte-small")
+        );
     }
 }

@@ -19,9 +19,6 @@ use std::sync::Arc;
 use tracing::{Level, info};
 use tracing_subscriber::FmtSubscriber;
 
-/// Embedding dimension for the gte-small model.
-const EMBEDDING_DIM: usize = 384;
-
 #[tokio::main]
 async fn main() -> Result<()> {
     // Parse command-line arguments
@@ -65,11 +62,6 @@ async fn main() -> Result<()> {
         );
     }
 
-    // Create vector store and initialize
-    let store = Arc::new(LanceStore::new(db_path, EMBEDDING_DIM));
-    store.init().await.context("Failed to initialize store")?;
-
-    // Create embedder for query embedding
     let cache_dir = std::env::temp_dir().join("ragfs_example").join("models");
     let embedder = CandleEmbedder::new(cache_dir);
     embedder
@@ -81,6 +73,12 @@ async fn main() -> Result<()> {
         Arc::new(embedder) as Arc<dyn Embedder>,
         4,
     ));
+
+    let store = Arc::new(
+        LanceStore::new(db_path, embedder_pool.dimension())
+            .with_embedding_model(embedder_pool.model_name()),
+    );
+    store.init().await.context("Failed to initialize store")?;
 
     // Create query executor
     let executor = QueryExecutor::new(

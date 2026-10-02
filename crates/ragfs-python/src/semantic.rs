@@ -779,7 +779,9 @@ impl RagfsSemanticManager {
             data_dir,
         };
 
-        let store = LanceStore::new(PathBuf::from(&db_path), 384); // gte-small dimension
+        let embedder = CandleEmbedder::new(model_path.clone());
+        let store = LanceStore::new(PathBuf::from(&db_path), embedder.dimension())
+            .with_embedding_model(embedder.model_name());
 
         Self {
             manager: Arc::new(RwLock::new(None)),

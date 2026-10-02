@@ -13,6 +13,7 @@ use std::sync::Arc;
 use tempfile::tempdir;
 use uuid::Uuid;
 
+/// Fixture width for synthetic vectors (gte-small). Product code uses `Embedder::dimension()`.
 const EMBEDDING_DIM: usize = 384;
 
 /// Create a random embedding vector.

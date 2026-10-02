@@ -158,8 +158,10 @@ recommended. Merge order: **#42 → #40 → #41 → #38 → #39**.
       `AGENTS.md` (10 Cargo members + `ragfs-mcp`); no hard-coded test counts;
       `docs/PERFORMANCE.md` matches `[embedding]` / `--force` / `--hybrid`.
       Guard: `docs_drift` unit test in `crates/ragfs`. Issue #48.
-- [ ] Single source of truth for the embedding model; fail fast on a store/model
-      dimension mismatch. Issue #49.
+- [x] Single source of truth for the embedding model; fail fast on a store/model
+      dimension mismatch. Issue #49. CLI and examples take dim/model from the
+      embedder; `LanceStore::init` rejects a `vector` `FixedSizeList` width that
+      does not match.
 - [x] Propagate the path jail beyond `ragfs-fuse` (`ragfs-python`, `ragfs-mcp`).
       Issue #50. `resolve_under_root` is in `ragfs-core`; `SafetyManager` jails
       `soft_delete` / `restore` / `undo` so the PyO3 and MCP entry points inherit it.

@@ -66,7 +66,7 @@ candle-core = "0.11"
 candle-nn = "0.11"
 candle-transformers = "0.11"
 hf-hub = { version = "0.5.0", features = ["tokio"] }
-tokenizers = "0.22"
+tokenizers = "0.23"
 
 # PDF parsing (>=0.42 patches RUSTSEC-2026-0187 nesting-depth DoS)
 pdf-extract = "0.12"

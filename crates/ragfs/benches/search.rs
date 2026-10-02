@@ -3,11 +3,11 @@
 //! Measures search latency (p50, p95, p99) across different index sizes.
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use std::hint::black_box;
 use ragfs_core::{
     Chunk, ChunkMetadata, ContentType, DirectoryScope, DistanceMetric, SearchQuery, VectorStore,
 };
 use ragfs_store::LanceStore;
+use std::hint::black_box;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::tempdir;

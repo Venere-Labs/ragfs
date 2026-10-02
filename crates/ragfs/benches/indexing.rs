@@ -3,11 +3,11 @@
 //! Measures throughput of extraction, chunking, and the full pipeline.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use std::hint::black_box;
 use ragfs_chunker::{ChunkerRegistry, FixedSizeChunker};
 use ragfs_core::{ChunkConfig, ContentMetadataInfo, ContentType, ExtractedContent};
 use ragfs_extract::ExtractorRegistry;
 use std::fs::File;
+use std::hint::black_box;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;

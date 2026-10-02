@@ -1216,6 +1216,7 @@ async def ragfs_batch_operations(
                 "error": r.error,
             })
 
+        batch_id = getattr(result, "rollback_id", None) or result.id
         return json.dumps({
             "success": result.success,
             "atomic": atomic,
@@ -1223,7 +1224,7 @@ async def ragfs_batch_operations(
             "successful": sum(1 for r in results if r["success"]),
             "failed": sum(1 for r in results if not r["success"]),
             "results": results,
-            "rollback_id": result.rollback_id,
+            "rollback_id": batch_id,
             "hint": "Use ragfs_undo with rollback_id to undo the entire batch, or individual undo_ids for specific operations",
         }, indent=2)
 

@@ -307,6 +307,12 @@ pub struct PyBatchResult {
 
 #[pymethods]
 impl PyBatchResult {
+    /// Alias of `id`. MCP `ragfs_batch_operations` documents this as `rollback_id`.
+    #[getter]
+    fn rollback_id(&self) -> &str {
+        &self.id
+    }
+
     fn __repr__(&self) -> String {
         if self.success {
             format!(
@@ -326,6 +332,7 @@ impl PyBatchResult {
         use pyo3::types::PyDict;
         let dict = PyDict::new(py);
         dict.set_item("id", &self.id)?;
+        dict.set_item("rollback_id", &self.id)?;
         dict.set_item("success", self.success)?;
         dict.set_item("total", self.total)?;
         dict.set_item("succeeded", self.succeeded)?;

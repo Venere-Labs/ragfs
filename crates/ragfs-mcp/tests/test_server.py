@@ -90,8 +90,9 @@ class TestPathJail:
             )
         )
         assert not (source_path.parent / "jailbreak.txt").exists()
+        blob = json.dumps(result)
+        assert "escapes" in blob
         assert result.get("success") is False
-        assert "escapes" in json.dumps(result)
 
 
 class TestSafetyTools:

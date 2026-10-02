@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Revert Dependabot `lancedb` 0.39.0 (#72): `Error::Http` is `cfg(feature = "remote")` while `job.rs` uses it with default features. Pin stays 0.37.1; cargo Dependabot ignores `lancedb >=0.38` and Arrow 59+.
+- MCP `ragfs_batch_operations` serializes a failed atomic batch: `BatchResult.rollback_id` aliases the batch `id` (the previous attribute miss turned a jail reject into `{"error": "... no attribute 'rollback_id'"}`).
 - Align `candle-core` and `candle-nn` with `candle-transformers` 0.11 so `ragfs-embed` compiles (one `Tensor` type, not 0.9 + 0.11).
 - Pin the MSRV job to rustc 1.91 via `dtolnay/rust-toolchain@stable` + `toolchain: "1.91"` (Dependabot #67 had moved the action tag to 1.120).
 

@@ -164,7 +164,7 @@ impl RagFs {
 
     /// Resolve a `.reindex` path and reject anything that escapes the source root.
     fn jail_reindex_path(&self, path: &Path) -> Result<PathBuf, String> {
-        crate::path_jail::resolve_under_root(&self.source, path)
+        ragfs_core::resolve_under_root(&self.source, path)
     }
 
     /// Convert a real path to a FUSE inode.

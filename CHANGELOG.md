@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Path jail (`resolve_under_root`) now lives in `ragfs-core` and is enforced by `SafetyManager` (`soft_delete` / `restore` / `undo`), so Python `RagfsSafetyManager` and MCP `ragfs_delete_to_trash` cannot escape the source root.
+
 ### Changed
 - Agent docs (`CLAUDE.md`, `AGENTS.md`) list all 10 Cargo workspace crates plus `ragfs-mcp`. `docs/PERFORMANCE.md` documents `[embedding].model`, CLI-only `--force`, and `--hybrid` vs `[query].hybrid`.
 

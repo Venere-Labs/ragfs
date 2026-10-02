@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
@@ -125,6 +125,8 @@ impl Default for SafetyConfig {
 
 /// Safety manager for protecting file operations.
 pub struct SafetyManager {
+    /// Source root; agent paths must stay inside this tree.
+    source: PathBuf,
     /// Configuration
     config: SafetyConfig,
     /// Index hash (used for separating trash/history by index)
@@ -169,12 +171,18 @@ impl SafetyManager {
         let entries = Self::load_trash_entries(&trash_dir).unwrap_or_default();
 
         Self {
+            source: source.clone(),
             config,
             index_hash,
             trash_dir,
             history_file,
             trash_cache: Arc::new(RwLock::new(entries)),
         }
+    }
+
+    /// Resolve `path` so it stays inside the source root.
+    fn jail(&self, path: &Path) -> Result<PathBuf, String> {
+        ragfs_core::resolve_under_root(&self.source, path)
     }
 
     /// Get the index hash.
@@ -206,6 +214,7 @@ impl SafetyManager {
 
     /// Move a file to trash (soft delete).
     pub async fn soft_delete(&self, path: &PathBuf) -> Result<TrashEntry, String> {
+        let path = self.jail(path)?;
         if !path.exists() {
             return Err("File not found".into());
         }
@@ -215,7 +224,7 @@ impl SafetyManager {
         }
 
         // Read file content for hash
-        let content = fs::read(path).map_err(|e| format!("Failed to read file: {e}"))?;
+        let content = fs::read(&path).map_err(|e| format!("Failed to read file: {e}"))?;
         let content_hash = blake3::hash(&content).to_hex().to_string();
         let size = content.len() as u64;
 
@@ -229,11 +238,11 @@ impl SafetyManager {
         let trash_meta_path = trash_entry_dir.join("meta.json");
 
         // Move content to trash
-        fs::rename(path, &trash_content_path)
+        fs::rename(&path, &trash_content_path)
             .or_else(|_| {
                 // If rename fails (cross-device), copy and delete
-                fs::copy(path, &trash_content_path)?;
-                fs::remove_file(path)
+                fs::copy(&path, &trash_content_path)?;
+                fs::remove_file(&path)
             })
             .map_err(|e| format!("Failed to move file to trash: {e}"))?;
 
@@ -284,8 +293,8 @@ impl SafetyManager {
             return Err("Trash content not found".into());
         }
 
-        // Restore to original path
-        let restore_path = &entry.original_path;
+        // Restore only inside the source root (rejects a tampered original_path).
+        let restore_path = self.jail(&entry.original_path)?;
 
         // Ensure parent directory exists
         if let Some(parent) = restore_path.parent() {
@@ -299,9 +308,9 @@ impl SafetyManager {
         }
 
         // Move content back
-        fs::rename(&entry.trash_path, restore_path)
+        fs::rename(&entry.trash_path, &restore_path)
             .or_else(|_| {
-                fs::copy(&entry.trash_path, restore_path)?;
+                fs::copy(&entry.trash_path, &restore_path)?;
                 fs::remove_file(&entry.trash_path)
             })
             .map_err(|e| format!("Failed to restore file: {e}"))?;
@@ -324,7 +333,7 @@ impl SafetyManager {
         }
 
         info!("Restored {:?} from trash/{}", restore_path, trash_id);
-        Ok(restore_path.clone())
+        Ok(restore_path)
     }
 
     /// List all trash entries.
@@ -517,6 +526,8 @@ impl SafetyManager {
                 Ok(format!("Undone: restored {}", restored.display()))
             }
             UndoData::Move { src, dst } => {
+                let src = self.jail(&src)?;
+                let dst = self.jail(&dst)?;
                 // Undo move by moving back
                 if dst.exists() {
                     fs::rename(&dst, &src).map_err(|e| format!("Failed to undo move: {e}"))?;
@@ -536,6 +547,7 @@ impl SafetyManager {
                 }
             }
             UndoData::Copy { path } => {
+                let path = self.jail(&path)?;
                 // Undo copy by deleting the copy
                 if path.exists() {
                     fs::remove_file(&path).map_err(|e| format!("Failed to undo copy: {e}"))?;
@@ -605,9 +617,9 @@ mod tests {
         assert_eq!(trash.len(), 1);
         assert_eq!(trash[0].id, entry.id);
 
-        // Restore
+        // Restore (jail returns a canonical path)
         let restored = manager.restore(entry.id).await.unwrap();
-        assert_eq!(restored, test_file);
+        assert_eq!(restored, test_file.canonicalize().unwrap());
         assert!(test_file.exists());
 
         // Verify content
@@ -621,13 +633,57 @@ mod tests {
 
     #[tokio::test]
     async fn test_soft_delete_nonexistent() {
-        let (manager, _source_dir, _data_dir) = create_test_manager();
+        let (manager, source_dir, _data_dir) = create_test_manager();
 
         let result = manager
-            .soft_delete(&PathBuf::from("/nonexistent.txt"))
+            .soft_delete(&source_dir.path().join("missing.txt"))
             .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_soft_delete_rejects_parent_escape() {
+        let (manager, source_dir, _data_dir) = create_test_manager();
+        let outside = source_dir.path().parent().unwrap().join("jailbreak.txt");
+        fs::write(&outside, "secret").unwrap();
+
+        let err = manager
+            .soft_delete(&PathBuf::from("../jailbreak.txt"))
+            .await
+            .unwrap_err();
+        assert!(err.contains("escapes"), "{err}");
+        assert!(outside.exists());
+        let _ = fs::remove_file(&outside);
+    }
+
+    #[tokio::test]
+    async fn test_soft_delete_rejects_absolute_outside_root() {
+        let (manager, _source_dir, _data_dir) = create_test_manager();
+        let outside = TempDir::new().unwrap();
+        let secret = outside.path().join("secret.txt");
+        fs::write(&secret, "secret").unwrap();
+
+        let err = manager.soft_delete(&secret).await.unwrap_err();
+        assert!(err.contains("escapes"), "{err}");
+        assert!(secret.exists());
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn test_soft_delete_rejects_symlink_escape() {
+        let (manager, source_dir, _data_dir) = create_test_manager();
+        let outside = TempDir::new().unwrap();
+        let secret = outside.path().join("secret.txt");
+        fs::write(&secret, "secret").unwrap();
+        std::os::unix::fs::symlink(outside.path(), source_dir.path().join("out")).unwrap();
+
+        let err = manager
+            .soft_delete(&PathBuf::from("out/secret.txt"))
+            .await
+            .unwrap_err();
+        assert!(err.contains("escapes"), "{err}");
+        assert!(secret.exists());
     }
 
     #[tokio::test]

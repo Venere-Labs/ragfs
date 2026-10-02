@@ -50,6 +50,50 @@ class TestSearchTools:
         assert data["exists"] is False
 
 
+class TestPathJail:
+    """MCP destructive tools must stay inside the source root."""
+
+    @pytest.mark.asyncio
+    async def test_delete_to_trash_rejects_absolute_outside_root(
+        self, source_path: Path, env_vars, tmp_path: Path
+    ):
+        pytest.importorskip("ragfs")
+        from ragfs_mcp.server import ragfs_delete_to_trash
+
+        secret = tmp_path / "secret.txt"
+        secret.write_text("secret")
+
+        result = json.loads(
+            await ragfs_delete_to_trash(path=str(secret), index=str(source_path))
+        )
+        assert "error" in result
+        assert "escapes" in result["error"]
+        assert secret.exists()
+
+    @pytest.mark.asyncio
+    async def test_batch_rejects_parent_escape(self, source_path: Path, env_vars):
+        pytest.importorskip("ragfs")
+        from ragfs_mcp.server import ragfs_batch_operations
+
+        result = json.loads(
+            await ragfs_batch_operations(
+                operations=[
+                    {
+                        "action": "create",
+                        "target": "../jailbreak.txt",
+                        "content": "nope",
+                    }
+                ],
+                atomic=True,
+                dry_run=False,
+                index=str(source_path),
+            )
+        )
+        assert not (source_path.parent / "jailbreak.txt").exists()
+        assert result.get("success") is False
+        assert "escapes" in json.dumps(result)
+
+
 class TestSafetyTools:
     """Tests for safety layer tools."""
 

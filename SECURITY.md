@@ -51,7 +51,7 @@ RAGFS operates entirely locally by default:
 - Dependencies checked via `cargo deny` / `cargo audit` in CI
 - Public traits avoid `unsafe`; the embedder uses `unsafe` mmap for safetensors
 - Content-addressed storage using blake3 hashes
-- Path validation is enforced at the FUSE ops/semantic boundary when path jail is enabled
+- Path validation (`ragfs_core::resolve_under_root`) is enforced on FUSE ops/semantic writes and on `SafetyManager` soft-delete / restore / undo
 
 ### FUSE / agent surface
 

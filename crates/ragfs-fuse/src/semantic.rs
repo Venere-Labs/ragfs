@@ -480,7 +480,7 @@ impl SemanticManager {
 
     /// Resolve a path and reject anything that escapes the source root.
     fn resolve_path(&self, path: &Path) -> Result<PathBuf, String> {
-        crate::path_jail::resolve_under_root(&self.source, path)
+        ragfs_core::resolve_under_root(&self.source, path)
     }
 
     /// Canonicalize for comparison; keep the original path if it is gone.

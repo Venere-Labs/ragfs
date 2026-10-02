@@ -146,8 +146,8 @@ recommended. Merge order: **#42 → #40 → #41 → #38 → #39**.
 - [x] Empty the `deny.toml` ignore list. `wildcards = "allow"` stays: workspace
       members use `version.workspace = true`, which cargo-deny treats as a
       wildcard. Issue #45.
-- [ ] Unblock and land the merge order in §2, then re-run release PR #13. Issue #46.
-- [ ] Triage the 18 Dependabot PRs as one grouped change. Issue #47.
+- [x] Unblock and land the merge order in §2, then re-run release PR #13. Issue #46.
+- [x] Triage the 18 Dependabot PRs as one grouped change. Issue #47.
 - [ ] Report the `lancedb` 0.38.0 build failure upstream (`job.rs` uses
       `Error::Http` without the `remote` feature) so the pin can be lifted.
 
@@ -160,8 +160,9 @@ recommended. Merge order: **#42 → #40 → #41 → #38 → #39**.
       Guard: `docs_drift` unit test in `crates/ragfs`. Issue #48.
 - [ ] Single source of truth for the embedding model; fail fast on a store/model
       dimension mismatch. Issue #49.
-- [ ] Propagate the path jail beyond `ragfs-fuse` (`ragfs-python`, `ragfs-mcp`).
-      Issue #50.
+- [x] Propagate the path jail beyond `ragfs-fuse` (`ragfs-python`, `ragfs-mcp`).
+      Issue #50. `resolve_under_root` is in `ragfs-core`; `SafetyManager` jails
+      `soft_delete` / `restore` / `undo` so the PyO3 and MCP entry points inherit it.
 - [ ] CLI integration tests for config precedence, `--force`, `--hybrid`. Issue #51.
 - [ ] Split `crates/ragfs-fuse/src/filesystem.rs` (2 189 lines). Issue #52.
 - [ ] Decide the fate of the `pdf_oxide` feature (§1.2). Issue #58.

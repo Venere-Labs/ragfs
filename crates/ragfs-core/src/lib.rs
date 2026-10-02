@@ -84,9 +84,11 @@
 //! - `ragfs-query`: Query parsing and execution
 
 pub mod error;
+pub mod path_jail;
 pub mod traits;
 pub mod types;
 
 pub use error::{ChunkError, EmbedError, Error, ExtractError, Result, StoreError};
+pub use path_jail::resolve_under_root;
 pub use traits::*;
 pub use types::*;

@@ -133,6 +133,50 @@ class TestOrganizeTypes:
         assert request.similarity_threshold == pytest.approx(0.8)
 
 
+class TestPathJail:
+    """Path jail on SafetyManager and OpsManager (no model download)."""
+
+    @pytest.mark.asyncio
+    async def test_safety_rejects_absolute_outside_root(
+        self, source_path: Path, temp_dir: Path
+    ):
+        import tempfile
+
+        from ragfs import RagfsSafetyManager
+
+        safety = RagfsSafetyManager(str(source_path), str(temp_dir / "safety-data"))
+        outside = Path(tempfile.mkdtemp()) / "secret.txt"
+        outside.write_text("secret")
+
+        with pytest.raises(RuntimeError, match="escapes"):
+            await safety.delete_to_trash(str(outside))
+        assert outside.exists()
+
+    @pytest.mark.asyncio
+    async def test_safety_rejects_parent_escape(self, source_path: Path, temp_dir: Path):
+        from ragfs import RagfsSafetyManager
+
+        safety = RagfsSafetyManager(str(source_path), str(temp_dir / "safety-data"))
+        outside = source_path.parent / "jailbreak.txt"
+        outside.write_text("secret")
+        try:
+            with pytest.raises(RuntimeError, match="escapes"):
+                await safety.delete_to_trash("../jailbreak.txt")
+            assert outside.exists()
+        finally:
+            outside.unlink(missing_ok=True)
+
+    @pytest.mark.asyncio
+    async def test_ops_rejects_parent_escape(self, source_path: Path):
+        from ragfs import RagfsOpsManager
+
+        ops = RagfsOpsManager(str(source_path))
+        result = await ops.create_file("../jailbreak.txt", "nope")
+        assert not result.success
+        assert "escapes" in (result.error or "")
+        assert not (source_path.parent / "jailbreak.txt").exists()
+
+
 @pytest.mark.requires_model
 class TestSafetyManager:
     """Tests for RagfsSafetyManager (requires model for some operations)."""

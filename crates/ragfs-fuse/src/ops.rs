@@ -270,7 +270,7 @@ impl OpsManager {
     /// Resolve a path relative to the source directory.
     /// Rejects paths that escape the source root (absolute, `..`, symlink).
     fn resolve_path(&self, path: &PathBuf) -> Result<PathBuf, String> {
-        crate::path_jail::resolve_under_root(&self.source, path)
+        ragfs_core::resolve_under_root(&self.source, path)
     }
 
     /// Jail-check a symlink target the way Unix will resolve it: relative

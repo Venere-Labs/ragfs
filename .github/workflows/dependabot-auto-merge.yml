@@ -28,6 +28,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPENDENCY_NAMES: ${{ steps.metadata.outputs.dependency-names }}
           UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          NEW_VERSION: ${{ steps.metadata.outputs.new-version }}
         run: |
           set -euo pipefail
           # Skip megagroups (>20 deps) — keep majors/groups manual
@@ -45,4 +46,28 @@ jobs:
             echo "Skip auto-merge: semver-major"
             exit 0
           fi
-          gh pr merge --auto --squash "$PR_URL"
+          # Cargo 0.x treats a minor as breaking (tokenizers 0.22→0.23).
+          case "${NEW_VERSION:-}" in
+            0.*)
+              if [ "${UPDATE_TYPE:-}" = "version-update:semver-minor" ]; then
+                echo "Skip auto-merge: 0.x minor ${NEW_VERSION}"
+                exit 0
+              fi
+              ;;
+          esac
+          set +e
+          out=$(gh pr merge --auto --squash "$PR_URL" 2>&1)
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "$out"
+            exit 0
+          fi
+          echo "$out"
+          case "$out" in
+            *"already enabled"*|*"Protected branch rules not configured"*)
+              echo "auto-merge enable non-fatal"
+              exit 0
+              ;;
+          esac
+          exit "$rc"

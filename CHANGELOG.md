@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agent docs (`CLAUDE.md`, `AGENTS.md`) list all 10 Cargo workspace crates plus `ragfs-mcp`. `docs/PERFORMANCE.md` documents `[embedding].model`, CLI-only `--force`, and `--hybrid` vs `[query].hybrid`.
 - Embedding dimension and model id for `LanceStore` come from `Embedder::dimension()` / `model_name()`. Opening an index whose `vector` width differs from the embedder fails with `StoreError::Schema`.
 - Split `ragfs-fuse` FUSE handler `filesystem.rs` into `filesystem/` modules by virtual-directory family (query, ops, safety, semantic, passthrough). Issue #52.
-- CI: `Swatinem/rust-cache` uses a shared key across Check/Clippy/Test/Docs/Python; pull requests run Python 3.12 only (3.10–3.13 stays on `main`); coverage and Python integration run on `main` only. Dependabot ignores 0.x minor bumps of `criterion` and `notify-debouncer-full`.
+- CI: `Swatinem/rust-cache` uses a shared key across Check/Clippy/Test/Docs/Python; pull requests run Python 3.12 only (3.10–3.13 stays on `main`); coverage and Python integration run on `main` only. Dependabot ignores 0.x minor bumps of `criterion`, `notify-debouncer-full`, and `tokenizers`; auto-merge skips Cargo 0.x minors.
 - Project hygiene: MSRV docs 1.91, `Makefile` / `rust-toolchain.toml`, `CODEOWNERS`, GitHub private advisory as the security channel, `contents: read` on CI/coverage, pinned `ruff==0.15.9`.
 
 ### Added

@@ -99,7 +99,7 @@ the reason and what would have to change upstream.
 
 | Advisory | Crate | Pulled by | Why it stays |
 |---|---|---|---|
-| RUSTSEC-2024-0436 | paste 1.0.15 | `ragfs-embed → tokenizers` | `tokenizers` 0.23.2 still requires `paste ^1.0.14`; no newer tokenizers exists |
+| RUSTSEC-2024-0436 | paste 1.0.15 | `ragfs-embed → tokenizers` | Pin stays `tokenizers` 0.22; 0.23 is a Cargo 0.x minor (Dependabot ignore + auto-merge skip). Both lines still require `paste ^1.0.14` |
 | RUSTSEC-2025-0119 | number_prefix 0.4.0 | `ragfs-embed → hf-hub → indicatif` | `hf-hub` 0.4.3 pulls `indicatif` unconditionally through **both** its `tokio` and `ureq` features, so it cannot be switched off; `hf-hub` 1.0 drops it but is a breaking rewrite of the model-download path |
 | RUSTSEC-2026-0105 | core2 0.4.0 | `ragfs-extract → image → ravif → rav1e → bitstream-io` | Yanked/unmaintained; remains after retiring `pdf_oxide` because `image` 0.25 still uses rav1e for AVIF |
 | RUSTSEC-2026-0192 | ttf-parser 0.25.1 | `ragfs-extract → lopdf 0.42` | `lopdf` 0.45 replaced `ttf-parser` with `skrifa`, but moving to it re-introduces a second lopdf unless `pdf-extract` is also dropped |

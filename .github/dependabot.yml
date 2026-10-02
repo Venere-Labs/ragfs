@@ -6,6 +6,16 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "deps"
+    ignore:
+      # lancedb 0.38+ (and 0.39.0) does not compile with default features:
+      # src/job.rs uses Error::Http while that variant is cfg(feature="remote").
+      # Arrow 60 is coupled to a future lancedb bump; keep 58 until then.
+      - dependency-name: "lancedb"
+        versions: [">=0.38.0"]
+      - dependency-name: "arrow-array"
+        versions: [">=59"]
+      - dependency-name: "arrow-schema"
+        versions: [">=59"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

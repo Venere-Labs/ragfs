@@ -58,7 +58,7 @@ notify-debouncer-full = "0.6"
 # dependency generation (arrow 58, lance 10, object_store 0.13) without the bug.
 lancedb = "0.39.0"
 arrow-array = "58"
-arrow-schema = "58"
+arrow-schema = "60"
 
 # Embeddings
 # embed_anything = "0.5"

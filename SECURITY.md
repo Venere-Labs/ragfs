@@ -77,11 +77,57 @@ When using RAGFS:
 4. **Backup Data**: Maintain regular backups of important files
 5. **Secure Indices**: Protect the `~/.local/share/ragfs/` directory
 
+## Advisory response
+
+CI runs `cargo deny check` and `cargo audit` on every PR and on a schedule
+(`security.yml`). `unmaintained` is informational for transitive crates
+(`deny.toml`: `unmaintained = "workspace"`). There is **no** `ignore:` list
+today (`ignore = []` in `deny.toml` and in the workflows).
+
+### Severity ladder
+
+| Kind (RustSec) | Merge rule | Tracker |
+|---|---|---|
+| **vulnerability** | Blocker. Do not merge until the ID is gone from the default-feature graph, or the change that introduced it is reverted. | `security` issue, P0 |
+| **unsound** | Fix in this repo, **or** write a reachability justification in `docs/AUDIT.md` §1.2 with a review date. Unjustified unsound is a blocker. | `security` issue |
+| **unmaintained** | Not a merge blocker. Open or reuse a `security` issue and keep a row in `docs/AUDIT.md` §1.2 naming the crate, who pulls it, and what would have to change upstream. | `security` + `backlog` |
+| **yanked** | Warn. Prefer `cargo update -p <crate>` when a replacement exists; otherwise treat like unmaintained. | comment on the PR |
+
+A GitHub Dependabot **alert** is triaged with the same ladder using the
+advisory ID, not the Dependabot severity label.
+
+### `ignore:` list
+
+- **Owner:** Lab (Venere Labs maintainers of this repository).
+- **Default:** `ignore = []`. An empty list is a feature, not an omission.
+- **Adding an ID** requires all of: (1) a reachability analysis (the crate is
+  not in the default-feature graph, or the vulnerable function is unreachable),
+  (2) a row in `docs/AUDIT.md` §1.2 with the ID, path, and a review date,
+  (3) a PR that changes `deny.toml` / workflow `ignore` **and** AUDIT.md in the
+  same commit. Expiry of the review date re-opens the ID as a vulnerability
+  blocker.
+
+### Cadence
+
+Re-read `docs/AUDIT.md` §1.2 at every minor release, and in any case no later
+than **2026-12-31**. The date in §1.3 is the source of truth; move it forward
+when the review happens.
+
+### Issues opened by `rustsec/audit-check`
+
+1. Label `security`. Add `rust` or `python` to match the ecosystem.
+2. Search for the same advisory ID. Close duplicates (`#81` of `#82` is the
+   model: same RUSTSEC, different versions).
+3. If the crate is only pulled by a feature or PR already in flight, comment
+   `blocked-by #<n>` and leave the issue open until that PR lands.
+4. If the ID is already a §1.2 row (accepted unmaintained), label `backlog`
+   and point at the row. Do not re-open a second issue.
+
 ## Third-Party Dependencies
 
 We regularly audit our dependencies:
 
-- Rust: `cargo audit` run on every release
+- Rust: `cargo deny` / `cargo audit` on every PR and on a schedule (see ladder above)
 - Python: Security scanners in CI/CD
 - Workspace crate versions are pinned; some transitive crates may have multiple versions (see `deny.toml`)
 

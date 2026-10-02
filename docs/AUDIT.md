@@ -110,8 +110,14 @@ The optional `pdf_oxide` extractor was retired (issue #58), which dropped
 
 ### 1.3 Review
 
-Nothing here needs a review date any more, because nothing is suppressed. Re-run
-§5 periodically; the corpus is clean, so any new ID is a genuine regression.
+Policy lives in `SECURITY.md` (advisory ladder, `ignore:` ownership, cadence).
+
+§1.2 is **not** a suppression list — `ignore = []` stays empty. It is the
+justification log for unmaintained/yanked crates we still pull. Re-read it at
+every minor release, and no later than **2026-12-31**. Any new vulnerability
+or unjustified unsound ID is a merge blocker.
+
+Last §1.2 review: 2026-10-02 (pdf_oxide retired; four unmaintained rows remain).
 
 ---
 
@@ -172,7 +178,7 @@ recommended. Merge order: **#42 → #40 → #41 → #38 → #39**.
 
 - [ ] Nightly `cargo bench` smoke run — `benches/` exists but never executes.
 - [ ] Add a `patch` coverage gate in `codecov.yml` for PRs.
-- [ ] Document an advisory-response policy in `SECURITY.md` with a review cadence.
+- [x] Document an advisory-response policy in `SECURITY.md` with a review cadence. Issue #53.
 
 ---
 

@@ -128,9 +128,10 @@ overlap = 64
 
 ```toml
 [embedding]
-batch_size = 32       # Texts per batch
-max_concurrent = 4    # Parallel embedding jobs
-use_gpu = true        # Use GPU if available
+model = "thenlper/gte-small"  # only implemented model (alias: gte-small)
+batch_size = 32               # Texts per batch
+max_concurrent = 4            # Parallel embedding jobs
+use_gpu = true                # Use GPU if available
 ```
 
 | Setting | Effect |
@@ -166,6 +167,9 @@ debounce_ms = 500         # File watcher debounce
 | `max_file_size` | Limits memory per file |
 | `debounce_ms` | Batches rapid file changes |
 
+`force` is **not** a TOML key. `ragfs index --force` skips the content-hash
+short-circuit and re-embeds every file; it is CLI-only (`IndexerConfig.force`).
+
 ### Query Configuration
 
 ```toml
@@ -176,6 +180,7 @@ hybrid = true         # Vector + full-text
 ```
 
 Hybrid search adds ~50% latency but improves recall for keyword-heavy queries.
+`ragfs query --hybrid` forces hybrid on even when `[query].hybrid = false`.
 
 ---
 

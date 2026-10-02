@@ -5,7 +5,7 @@ inside pull-request descriptions. **Update it in the same PR that changes the
 underlying fact.** If a row here disagrees with the code, the code wins and the
 row is a bug.
 
-Last updated: 2026-09-15.
+Last updated: 2026-10-02.
 
 ---
 
@@ -154,10 +154,10 @@ recommended. Merge order: **#42 → #40 → #41 → #38 → #39**.
 ### P1
 
 - [x] Create GitHub issues for the must-fixes — #44–#53; the repository had zero.
-- [ ] Align stale documentation with the code: `README.md` claims "270+ tests"
-      and `CHANGELOG.md` "291", while the tree contains 390 test functions;
-      `CLAUDE.md` says "9 crates" while there are 10 Rust crates plus the Python
-      `ragfs-mcp` crate and the framework adapters. Issue #48.
+- [x] Align stale documentation with the code: crate list in `CLAUDE.md` /
+      `AGENTS.md` (10 Cargo members + `ragfs-mcp`); no hard-coded test counts;
+      `docs/PERFORMANCE.md` matches `[embedding]` / `--force` / `--hybrid`.
+      Guard: `docs_drift` unit test in `crates/ragfs`. Issue #48.
 - [ ] Single source of truth for the embedding model; fail fast on a store/model
       dimension mismatch. Issue #49.
 - [ ] Propagate the path jail beyond `ragfs-fuse` (`ragfs-python`, `ragfs-mcp`).

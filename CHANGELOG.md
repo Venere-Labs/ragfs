@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Agent docs (`CLAUDE.md`, `AGENTS.md`) list all 10 Cargo workspace crates plus `ragfs-mcp`. `docs/PERFORMANCE.md` documents `[embedding].model`, CLI-only `--force`, and `--hybrid` vs `[query].hybrid`.
+
 ### Fixed
 - Revert Dependabot `lancedb` 0.39.0 (#72): `Error::Http` is `cfg(feature = "remote")` while `job.rs` uses it with default features. Pin stays 0.37.1; cargo Dependabot ignores `lancedb >=0.38` and Arrow 59+.
-
-
-### Fixed
 - Align `candle-core` and `candle-nn` with `candle-transformers` 0.11 so `ragfs-embed` compiles (one `Tensor` type, not 0.9 + 0.11).
 - Pin the MSRV job to rustc 1.91 via `dtolnay/rust-toolchain@stable` + `toolchain: "1.91"` (Dependabot #67 had moved the action tag to 1.120).
 

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <rect width="1280" height="640" fill="#121212"/>
+  <text x="72" y="290" fill="#f4f4f4" font-family="Inter, Helvetica, Arial, sans-serif" font-size="84" font-weight="700">RAGFS</text>
+  <text x="72" y="344" fill="#b7b7b7" font-family="Inter, Helvetica, Arial, sans-serif" font-size="24">Agentic FUSE filesystem for LLM agents</text>
+  <g fill="none" stroke="#e0a15a" stroke-width="2">
+    <rect x="860" y="180" width="150" height="36" rx="4"/>
+    <rect x="860" y="230" width="150" height="36" rx="4"/>
+    <rect x="860" y="280" width="150" height="36" rx="4"/>
+    <rect x="860" y="330" width="150" height="36" rx="4"/>
+    <path d="M1010 198 C1100 198 1100 250 1160 250"/>
+    <path d="M1010 248 C1100 248 1100 270 1160 270"/>
+    <path d="M1010 298 C1100 298 1100 290 1160 290"/>
+    <path d="M1010 348 C1100 348 1100 310 1160 310"/>
+  </g>
+  <g fill="#2f8f92">
+    <circle cx="1168" cy="250" r="3"/><circle cx="1184" cy="266" r="3"/><circle cx="1168" cy="282" r="3"/><circle cx="1184" cy="298" r="3"/>
+  </g>
+</svg>

@@ -91,7 +91,7 @@ jobs:
       name: pypi
       url: https://pypi.org/project/ragfs/
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -112,7 +112,7 @@ jobs:
       name: pypi
       url: https://pypi.org/project/ragfs-mcp/
     steps:
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: mcp-package
           path: dist

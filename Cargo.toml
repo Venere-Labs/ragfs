@@ -48,7 +48,7 @@ fuser = "0.16"
 
 # File watching
 notify = "8.2"
-notify-debouncer-full = "0.6"
+notify-debouncer-full = "0.7"
 
 # Vector store.
 #

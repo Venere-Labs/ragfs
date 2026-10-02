@@ -17,7 +17,7 @@ pub const SCHEMA_SIDECAR_FILENAME: &str = "ragfs-schema.json";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SchemaSidecar {
     pub chunks_schema_version: u32,
-    /// Embedding width of the `vector` FixedSizeList, when known.
+    /// Embedding width of the `vector` `FixedSizeList`, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embedding_dim: Option<usize>,
     /// Embedder model id that wrote this index, when known.

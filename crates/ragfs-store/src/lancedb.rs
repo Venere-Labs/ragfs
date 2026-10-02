@@ -86,7 +86,7 @@ impl LanceStore {
         self.embedding_dim
     }
 
-    /// Width of the chunks `vector` FixedSizeList.
+    /// Width of the chunks `vector` `FixedSizeList`.
     fn stored_embedding_dim(schema: &Schema) -> Result<usize, StoreError> {
         let field = schema.field_with_name("vector").map_err(|_| {
             StoreError::Schema("chunks table is missing the 'vector' column".into())

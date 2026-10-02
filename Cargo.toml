@@ -173,3 +173,5 @@ unnecessary_literal_bound = "allow"
 # New pedantic lints on Clippy 1.98; existing tests use assert!(x == y).
 # `assert_is_empty` is not on current stable clippy (unknown_lints).
 manual_assert_eq = "allow"
+# Clippy 1.99: `#[async_trait]` methods returning Result look like double must_use.
+double_must_use = "allow"

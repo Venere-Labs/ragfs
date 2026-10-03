@@ -267,7 +267,7 @@ jobs:
       - name: Install MCP dependencies
         run: |
           source .venv/bin/activate
-          pip install mcp
+          pip install 'mcp>=2,<3'
           cd crates/ragfs-mcp
           pip install -e .
       - name: Run MCP tests

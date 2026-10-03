@@ -1,0 +1,4 @@
+# Copied to .cargo/config.toml on CI runners (see ci.yml).
+# Local builds keep Cargo.toml [profile.dev.package."*"] opt-level = 3.
+[profile.dev.package."*"]
+opt-level = 0

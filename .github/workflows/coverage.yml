@@ -4,9 +4,13 @@ permissions:
   contents: read
 
 on:
-  push:
-    branches: [main]
+  schedule:
+    - cron: '0 3 * * 1'
   workflow_dispatch:
+
+concurrency:
+  group: coverage
+  cancel-in-progress: true
 
 jobs:
   coverage:
@@ -18,6 +22,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: workspace
+      - name: CI dep profile
+        run: mkdir -p .cargo && cp .github/ci-dep-profile.toml .cargo/config.toml
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
       - uses: taiki-e/install-action@v2
@@ -36,6 +42,9 @@ jobs:
             --ignore-tests \
             --exclude-files "*/benches/*" \
             --exclude-files "*/tests/*"
+        env:
+          CARGO_INCREMENTAL: "0"
+          CARGO_PROFILE_DEV_DEBUG: "0"
       - uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

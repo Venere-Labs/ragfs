@@ -85,7 +85,7 @@ cargo doc --no-deps --open
 ## Running Tests
 
 ```bash
-# Same gates as CI
+# Same gates as CI (local Cargo.toml still opts deps at 3; CI forces 0)
 make ci
 
 # Tests only

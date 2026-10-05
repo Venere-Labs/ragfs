@@ -50,10 +50,14 @@ from pathlib import Path
 from typing import Any
 
 import blake3
-from mcp.server.fastmcp import FastMCP
+
+try:
+    from mcp.server.mcpserver import MCPServer
+except ImportError:  # mcp 1.x
+    from mcp.server.fastmcp import FastMCP as MCPServer
 
 # Create the MCP server
-mcp = FastMCP(
+mcp = MCPServer(
     "ragfs",
     instructions="Semantic search filesystem for AI assistants. Provides tools for searching, organizing, and managing files with AI-powered features.",
 )
@@ -1232,7 +1236,7 @@ async def ragfs_batch_operations(
         return json.dumps({"error": str(e)})
 
 
-def create_server() -> FastMCP:
+def create_server() -> MCPServer:
     """Create and return the MCP server instance.
 
     This is the entry point used by MCP clients.

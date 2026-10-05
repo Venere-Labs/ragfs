@@ -19,10 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Embedding dimension and model id for `LanceStore` come from `Embedder::dimension()` / `model_name()`. Opening an index whose `vector` width differs from the embedder fails with `StoreError::Schema`.
 - Split `ragfs-fuse` FUSE handler `filesystem.rs` into `filesystem/` modules by virtual-directory family (query, ops, safety, semantic, passthrough). Issue #52.
 - CI: `Swatinem/rust-cache` uses a shared key across Check/Clippy/Test/Docs/Python; pull requests run Python 3.12 only (3.10–3.13 stays on `main`); coverage and Python integration run on `main` only. Dependabot ignores 0.x minor bumps of `criterion`, `notify-debouncer-full`, and `tokenizers`; auto-merge skips Cargo 0.x minors.
+- CI cost: deps compile at `opt-level=0` on runners; PRs drop `--all-features` (keep `ragfs/test-backends`); Python jobs skip when Python paths are unchanged; Coverage is weekly; `docs.yml` uses `cargo +nightly` so `rust-toolchain.toml` cannot pin it to stable. A `CI` aggregator treats skipped rust jobs as success on docs-only PRs.
 - Project hygiene: MSRV docs 1.91, `Makefile` / `rust-toolchain.toml`, `CODEOWNERS`, GitHub private advisory as the security channel, `contents: read` on CI/coverage, pinned `ruff==0.15.9`.
 
 ### Added
 - CLI integration tests (`assert_cmd`) for config/`--force`/`--hybrid`/`max_file_size` and unsupported models, using `RAGFS_TEST_EMBEDDER=noop`.
+- Repo social card (`docs/assets/social.svg` source, `docs/assets/social.png` 1280×640) as the README header. README is a front page (quick start, feature matrix, grouped docs); the CLI manpage stays in `docs/USER_GUIDE.md`.
 
 ### Fixed
 - Revert Dependabot `lancedb` 0.39.0 (#72): `Error::Http` is `cfg(feature = "remote")` while `job.rs` uses it with default features. Pin stays 0.37.1; cargo Dependabot ignores `lancedb >=0.38` and Arrow 59+.

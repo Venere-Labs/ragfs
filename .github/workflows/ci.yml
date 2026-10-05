@@ -8,7 +8,7 @@ on:
     branches: [main]
     # Docs-only pushes do not need the Rust/Python matrix. Deliberately NOT set
     # on pull_request: skipping a required check there leaves docs-only PRs
-    # stuck in "pending" forever.
+    # stuck in "pending" forever (ruleset). See ci/faster-cheaper follow-up.
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
@@ -16,35 +16,73 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# A new push to the same ref makes the in-flight run obsolete. Without this,
-# draft PRs pile up runs and every job sits in "queued" for tens of minutes.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-  # NOTE: `-Dwarnings` is intentionally no longer global. It used to live here,
-  # which made `check`, `test`, `msrv` and `doc` fail in lockstep on every new
-  # rustc warning. Warnings stay gated by the `clippy` job (and `doc` for
-  # rustdoc), which is where they belong.
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  # PRs: default candle+lancedb plus CLI noop tests. main: vision too.
+  CARGO_FEATURES: ${{ github.event_name == 'pull_request' && '--features=ragfs/test-backends' || '--all-features' }}
 
 jobs:
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.out.outputs.rust }}
+      python: ${{ steps.out.outputs.python }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        if: github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            rust:
+              - '**/*.rs'
+              - '**/Cargo.toml'
+              - '**/Cargo.lock'
+              - '.github/workflows/ci.yml'
+              - '.github/ci-dep-profile.toml'
+              - 'rustfmt.toml'
+              - 'deny.toml'
+              - 'rust-toolchain.toml'
+              - 'Makefile'
+            python:
+              - 'crates/ragfs-python/**'
+              - 'crates/ragfs-mcp/**'
+              - 'ruff.toml'
+              - '.github/workflows/ci.yml'
+      - id: out
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            echo "python=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust=${{ steps.filter.outputs.rust }}" >> "$GITHUB_OUTPUT"
+            echo "python=${{ steps.filter.outputs.python }}" >> "$GITHUB_OUTPUT"
+          fi
+
   check:
     name: Check
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.rust == 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          # Share compiled deps across Check/Clippy/Test/Docs/Python.
-          # MSRV still keys separately via rustc 1.91.
           shared-key: workspace
+      - name: CI dep profile
+        run: mkdir -p .cargo && cp .github/ci-dep-profile.toml .cargo/config.toml
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
       - name: Check
-        run: cargo check --all-targets --all-features
+        run: cargo check --locked --all-targets ${{ env.CARGO_FEATURES }}
 
   fmt:
     name: Format
@@ -67,6 +105,8 @@ jobs:
   python-lint:
     name: Python Lint
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.python == 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -80,7 +120,8 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
-    # Warnings are a hard error here (and only here) for Rust code quality.
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.rust == 'true'
     env:
       RUSTFLAGS: -Dwarnings
     steps:
@@ -90,43 +131,44 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          # Share compiled deps across Check/Clippy/Test/Docs/Python.
-          # MSRV still keys separately via rustc 1.91.
           shared-key: workspace
+      - name: CI dep profile
+        run: mkdir -p .cargo && cp .github/ci-dep-profile.toml .cargo/config.toml
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets ${{ env.CARGO_FEATURES }} -- -D warnings
 
   test:
     name: Test
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: github.event_name != 'pull_request' || needs.changes.outputs.rust == 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          # Share compiled deps across Check/Clippy/Test/Docs/Python.
-          # MSRV still keys separately via rustc 1.91.
           shared-key: workspace
+      - name: CI dep profile
+        run: mkdir -p .cargo && cp .github/ci-dep-profile.toml .cargo/config.toml
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
       - name: Test
-        run: cargo test --all --all-features
+        run: cargo test --locked --workspace ${{ env.CARGO_FEATURES }}
 
   test-with-models:
     name: Test with Models
     runs-on: ubuntu-latest
-    # Only run on push to main to reduce CI costs (model download is ~67MB)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          # Share compiled deps across Check/Clippy/Test/Docs/Python.
-          # MSRV still keys separately via rustc 1.91.
           shared-key: workspace
+      - name: CI dep profile
+        run: mkdir -p .cargo && cp .github/ci-dep-profile.toml .cargo/config.toml
       - name: Cache HuggingFace models
         uses: actions/cache@v6
         with:
@@ -136,59 +178,60 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
       - name: Run ignored tests (require model download)
-        run: cargo test -p ragfs-embed -- --ignored
+        run: cargo test --locked -p ragfs-embed -- --ignored
         env:
           HF_HOME: ~/.cache/huggingface
 
   doc:
     name: Documentation
     runs-on: ubuntu-latest
-    # Full validation runs on main and on ready-for-review PRs only.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: [changes]
+    if: >
+      (github.event_name != 'pull_request' || needs.changes.outputs.rust == 'true')
+      && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          # Share compiled deps across Check/Clippy/Test/Docs/Python.
-          # MSRV still keys separately via rustc 1.91.
           shared-key: workspace
+      - name: CI dep profile
+        run: mkdir -p .cargo && cp .github/ci-dep-profile.toml .cargo/config.toml
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
       - name: Build docs
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --locked --no-deps ${{ env.CARGO_FEATURES }}
         env:
           RUSTDOCFLAGS: -D warnings
 
   msrv:
     name: MSRV (1.91)
     runs-on: ubuntu-latest
-    # Full validation runs on main and on ready-for-review PRs only.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs: [changes]
+    if: >
+      (github.event_name != 'pull_request' || needs.changes.outputs.rust == 'true')
+      && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     steps:
       - uses: actions/checkout@v7
-      # `@stable` is the action tag; `toolchain` is the rustc version (MSRV).
-      # Dependabot #67 bumped `dtolnay/rust-toolchain@1.91` → `@1.120` because
-      # those tags are rustc versions, not action releases.
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.91"
       - uses: Swatinem/rust-cache@v2
         with:
-          # Share compiled deps across Check/Clippy/Test/Docs/Python.
-          # MSRV still keys separately via rustc 1.91.
           shared-key: workspace
+      - name: CI dep profile
+        run: mkdir -p .cargo && cp .github/ci-dep-profile.toml .cargo/config.toml
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
       - name: Check MSRV
-        run: cargo check --all-targets
+        run: cargo check --locked --all-targets
 
   python-test:
     name: Python Tests
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.python == 'true'
     strategy:
-      # PRs: one interpreter (maturin+candle is ~10 min each). Full 3.10–3.13
-      # matrix runs on main (and workflow_dispatch).
       fail-fast: false
       matrix:
         python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.12"]') || fromJSON('["3.10","3.11","3.12","3.13"]') }}
@@ -197,17 +240,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          # Share compiled deps across Check/Clippy/Test/Docs/Python.
-          # MSRV still keys separately via rustc 1.91.
           shared-key: workspace
+      - name: CI dep profile
+        run: mkdir -p .cargo && cp .github/ci-dep-profile.toml .cargo/config.toml
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
       - name: Create virtual environment
-        run: |
-          python -m venv .venv
+        run: python -m venv .venv
       - name: Install Python dependencies
         run: |
           source .venv/bin/activate
@@ -225,7 +267,7 @@ jobs:
       - name: Install MCP dependencies
         run: |
           source .venv/bin/activate
-          pip install mcp
+          pip install 'mcp>=2,<3'
           cd crates/ragfs-mcp
           pip install -e .
       - name: Run MCP tests
@@ -238,25 +280,22 @@ jobs:
     name: Python Integration Tests
     runs-on: ubuntu-latest
     needs: [python-test]
-    # LlamaIndex/Haystack compile is another maturin+candle cycle. PR merge
-    # gate is python-test (3.12); the adapters run on main.
     if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          # Share compiled deps across Check/Clippy/Test/Docs/Python.
-          # MSRV still keys separately via rustc 1.91.
           shared-key: workspace
+      - name: CI dep profile
+        run: mkdir -p .cargo && cp .github/ci-dep-profile.toml .cargo/config.toml
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libfuse-dev protobuf-compiler
       - name: Create virtual environment
-        run: |
-          python -m venv .venv
+        run: python -m venv .venv
       - name: Install Python dependencies
         run: |
           source .venv/bin/activate
@@ -277,3 +316,31 @@ jobs:
           source .venv/bin/activate
           cd crates/ragfs-python
           pytest tests/test_haystack/ -v -m "not slow"
+
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    needs: [fmt, cargo-deny, check, clippy, test, doc, msrv]
+    if: always()
+    steps:
+      - name: Required jobs passed or skipped
+        env:
+          FMT: ${{ needs.fmt.result }}
+          DENY: ${{ needs.cargo-deny.result }}
+          CHECK: ${{ needs.check.result }}
+          CLIPPY: ${{ needs.clippy.result }}
+          TEST: ${{ needs.test.result }}
+          DOC: ${{ needs.doc.result }}
+          MSRV: ${{ needs.msrv.result }}
+        run: |
+          set -euo pipefail
+          ok() { [ "$1" = success ] || [ "$1" = skipped ]; }
+          rc=0
+          ok "$FMT"    || { echo "Format: $FMT"; rc=1; }
+          ok "$DENY"   || { echo "Cargo Deny: $DENY"; rc=1; }
+          ok "$CHECK"  || { echo "Check: $CHECK"; rc=1; }
+          ok "$CLIPPY" || { echo "Clippy: $CLIPPY"; rc=1; }
+          ok "$TEST"   || { echo "Test: $TEST"; rc=1; }
+          ok "$DOC"    || { echo "Documentation: $DOC"; rc=1; }
+          ok "$MSRV"   || { echo "MSRV (1.91): $MSRV"; rc=1; }
+          exit "$rc"

@@ -240,8 +240,8 @@ fn extract_xlsx(bytes: &[u8]) -> Result<String, ExtractError> {
     Ok(parts.join("\n"))
 }
 
-fn read_xml_part(
-    file: &mut zip::read::ZipFile<'_>,
+fn read_xml_part<R: Read + ?Sized>(
+    file: &mut zip::read::ZipFile<'_, R>,
     remaining: &mut u64,
     max_entry: u64,
 ) -> Result<String, ExtractError> {
@@ -249,8 +249,8 @@ fn read_xml_part(
     decode_xml_part(&bytes)
 }
 
-fn read_entry_bytes(
-    file: &mut zip::read::ZipFile<'_>,
+fn read_entry_bytes<R: Read + ?Sized>(
+    file: &mut zip::read::ZipFile<'_, R>,
     remaining: &mut u64,
     max_entry: u64,
 ) -> Result<Vec<u8>, ExtractError> {

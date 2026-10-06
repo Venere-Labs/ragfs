@@ -30,12 +30,10 @@ footer = """
     {% if release.version -%}
         {% if release.previous.version -%}
             [{{ release.version | trim_start_matches(pat="v") }}]: \
-                https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}\
-                    /compare/{{ release.previous.version }}...{{ release.version }}
+                {{ remote.link }}/compare/{{ release.previous.version }}...{{ release.version }}
         {% endif -%}
     {% else -%}
-        [Unreleased]: https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}\
-            /compare/{{ release.previous.version }}...HEAD
+        [Unreleased]: {{ remote.link }}/compare/{{ release.previous.version }}...HEAD
     {% endif -%}
 {% endfor %}
 """

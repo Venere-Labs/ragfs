@@ -51,6 +51,9 @@ name = "ragfs-fuse"
 publish = false
 
 # Python bindings ship on PyPI, not crates.io (cdylib; tag v0.2.0 already exists).
+# publish=false alone still queries crates.io for the latest version; git_only uses
+# git tags instead (release-plz.dev/docs/config — The git_only field).
 [[package]]
 name = "ragfs-python"
 publish = false
+git_only = true

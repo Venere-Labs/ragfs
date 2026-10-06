@@ -5901,7 +5901,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "ragfs"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -5935,7 +5935,7 @@ dependencies = [
 
 [[package]]
 name = "ragfs-chunker"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "ragfs-core",
@@ -5949,7 +5949,7 @@ dependencies = [
 
 [[package]]
 name = "ragfs-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5962,7 +5962,7 @@ dependencies = [
 
 [[package]]
 name = "ragfs-embed"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "blake3",
@@ -5983,7 +5983,7 @@ dependencies = [
 
 [[package]]
 name = "ragfs-extract"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "candle-core",
@@ -6008,7 +6008,7 @@ dependencies = [
 
 [[package]]
 name = "ragfs-fuse"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "blake3",
@@ -6031,7 +6031,7 @@ dependencies = [
 
 [[package]]
 name = "ragfs-index"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "blake3",
@@ -6056,7 +6056,7 @@ dependencies = [
 
 [[package]]
 name = "ragfs-python"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6082,7 +6082,7 @@ dependencies = [
 
 [[package]]
 name = "ragfs-query"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "async-trait",
  "ragfs-core",
@@ -6099,7 +6099,7 @@ dependencies = [
 
 [[package]]
 name = "ragfs-store"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arrow-array",
  "arrow-schema",

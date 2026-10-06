@@ -12,6 +12,23 @@ This file documents the existing workspace version `0.2.0` for `ragfs-python`
 and no GitHub Release for this version. Root `CHANGELOG.md` still uses
 `[Unreleased]` for work after the dated `[0.2.0] - 2026-01-11` entry.
 
+## [0.2.1] - 2026-10-06
+
+### Fixed
+
+- **core**: Share path jail across fuse, python and mcp ([#90](https://github.com/Venere-Labs/ragfs/pull/90))
+- **store**: Derive embedding dim from the embedder ([#92](https://github.com/Venere-Labs/ragfs/pull/92))
+
+### Deps
+
+- **python**: Update langchain-anthropic requirement ([#34](https://github.com/Venere-Labs/ragfs/pull/34))
+- **python**: Update langchain-openai requirement ([#31](https://github.com/Venere-Labs/ragfs/pull/31))
+- **python**: Update langchain-ollama requirement ([#32](https://github.com/Venere-Labs/ragfs/pull/32))
+- **python**: Update haystack-ai requirement in /crates/ragfs-python ([#33](https://github.com/Venere-Labs/ragfs/pull/33))
+- **python**: Update pytest-asyncio requirement in /crates/ragfs-python ([#35](https://github.com/Venere-Labs/ragfs/pull/35))
+[0.2.1]: https://github.com/Venere-Labs/ragfs/compare/0.2.0...0.2.1
+
+
 ## [0.2.0] - workspace (unpublished)
 
 First changelog for the Python bindings at workspace `0.2.0`. Entries below

@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 description = "Python bindings for RAGFS - semantic search and RAG pipeline"
+publish = false  # PyPI channel; not crates.io
 
 [lib]
 name = "ragfs"

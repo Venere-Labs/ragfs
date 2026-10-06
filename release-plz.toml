@@ -49,3 +49,8 @@ publish = false
 [[package]]
 name = "ragfs-fuse"
 publish = false
+
+# Python bindings ship on PyPI, not crates.io (cdylib; tag v0.2.0 already exists).
+[[package]]
+name = "ragfs-python"
+publish = false

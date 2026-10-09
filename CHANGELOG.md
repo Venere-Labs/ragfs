@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI cost: deps compile at `opt-level=0` on runners; PRs drop `--all-features` (keep `ragfs/test-backends`); Python jobs skip when Python paths are unchanged; Coverage is weekly; `docs.yml` uses `cargo +nightly` so `rust-toolchain.toml` cannot pin it to stable. A `CI` aggregator treats skipped rust jobs as success on docs-only PRs.
 - Project hygiene: MSRV docs 1.91, `Makefile` / `rust-toolchain.toml`, `CODEOWNERS`, GitHub private advisory as the security channel, `contents: read` on CI/coverage, pinned `ruff==0.15.9`.
 - `docs/AUDIT.md`: RUSTSEC-2025-0119 (`number_prefix`) is resolved. `hf-hub` 0.5 pulls `indicatif` 0.18, which uses `unit-prefix` (issue #79). Three unmaintained rows remain (`paste` #80, `core2` #77, `ttf-parser` #82). `paste` also stays via `gemm`, `rav1e`, and `lance-bitpacking`, so a `tokenizers` bump alone does not clear it.
+- Drop `core2` (RUSTSEC-2026-0105, issue #77): `bitstream-io` 4.10 uses `no_std_io2`. `image` no longer enables `avif` (the unused ravif/rav1e encoder); PNG and JPEG writes are unchanged. `paste` (#80) and `ttf-parser` (#82) stay.
 
 ### Added
 - CLI integration tests (`assert_cmd`) for config/`--force`/`--hybrid`/`max_file_size` and unsupported models, using `RAGFS_TEST_EMBEDDER=noop`.

@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI: `Swatinem/rust-cache` uses a shared key across Check/Clippy/Test/Docs/Python; pull requests run Python 3.12 only (3.10–3.13 stays on `main`); coverage and Python integration run on `main` only. Dependabot ignores 0.x minor bumps of `criterion`, `notify-debouncer-full`, and `tokenizers`; auto-merge skips Cargo 0.x minors.
 - CI cost: deps compile at `opt-level=0` on runners; PRs drop `--all-features` (keep `ragfs/test-backends`); Python jobs skip when Python paths are unchanged; Coverage is weekly; `docs.yml` uses `cargo +nightly` so `rust-toolchain.toml` cannot pin it to stable. A `CI` aggregator treats skipped rust jobs as success on docs-only PRs.
 - Project hygiene: MSRV docs 1.91, `Makefile` / `rust-toolchain.toml`, `CODEOWNERS`, GitHub private advisory as the security channel, `contents: read` on CI/coverage, pinned `ruff==0.15.9`.
+- `docs/AUDIT.md`: RUSTSEC-2025-0119 (`number_prefix`) is resolved. `hf-hub` 0.5 pulls `indicatif` 0.18, which uses `unit-prefix` (issue #79). Three unmaintained rows remain (`paste` #80, `core2` #77, `ttf-parser` #82). `paste` also stays via `gemm`, `rav1e`, and `lance-bitpacking`, so a `tokenizers` bump alone does not clear it.
 
 ### Added
 - CLI integration tests (`assert_cmd`) for config/`--force`/`--hybrid`/`max_file_size` and unsupported models, using `RAGFS_TEST_EMBEDDER=noop`.

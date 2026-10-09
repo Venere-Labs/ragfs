@@ -5,7 +5,7 @@ inside pull-request descriptions. **Update it in the same PR that changes the
 underlying fact.** If a row here disagrees with the code, the code wins and the
 row is a bug.
 
-Last updated: 2026-10-02.
+Last updated: 2026-10-10.
 
 ---
 
@@ -19,7 +19,7 @@ report a slightly different set of IDs than the numbers below.
 |---|---:|---:|
 | Vulnerabilities | 28 | **0** |
 | Unsound (entries) | 8 | **0** |
-| Unmaintained (entries) | 8 | 4 (all upstream-pinned) |
+| Unmaintained (entries) | 8 | 3 (all upstream-pinned) |
 
 **There is no `ignore:` list anywhere.** The workflow that used to carry one now
 runs with no suppressions at all.
@@ -54,6 +54,7 @@ actionable report at all. See §4.
 | RUSTSEC-2026-0187 | lopdf | 0.38.0 → 0.42.0 | code + manifest |
 | RUSTSEC-2026-0176, -0177 | pyo3 | 0.27.2 → 0.29.2 | code + manifest |
 | RUSTSEC-2025-0069 | daemonize | 0.5.0 → removed | code + manifest |
+| RUSTSEC-2025-0119 | number_prefix | 0.4.0 → removed | lock (`hf-hub` 0.4.3 → 0.5.0, #100). `indicatif` 0.18.3 uses `unit-prefix`. Issue #79. |
 | RUSTSEC-2026-0258, -0194, -0195, -2023-0071, -0098, -0099, -0104 | h2 0.3, quick-xml, rsa, rustls-webpki 0.101 | removed from the graph | `lancedb` 0.23 → 0.37.1 |
 | (build blocker) | ethnum | 1.5.2 → 1.5.3 | lock |
 
@@ -99,10 +100,9 @@ the reason and what would have to change upstream.
 
 | Advisory | Crate | Pulled by | Why it stays |
 |---|---|---|---|
-| RUSTSEC-2024-0436 | paste 1.0.15 | `ragfs-embed → tokenizers` | Pin stays `tokenizers` 0.22; 0.23 is a Cargo 0.x minor (Dependabot ignore + auto-merge skip). Both lines still require `paste ^1.0.14` |
-| RUSTSEC-2025-0119 | number_prefix 0.4.0 | `ragfs-embed → hf-hub → indicatif` | `hf-hub` 0.4.3 pulls `indicatif` unconditionally through **both** its `tokio` and `ureq` features, so it cannot be switched off; `hf-hub` 1.0 drops it but is a breaking rewrite of the model-download path |
-| RUSTSEC-2026-0105 | core2 0.4.0 | `ragfs-extract → image → ravif → rav1e → bitstream-io` | Yanked/unmaintained; remains after retiring `pdf_oxide` because `image` 0.25 still uses rav1e for AVIF |
-| RUSTSEC-2026-0192 | ttf-parser 0.25.1 | `ragfs-extract → lopdf 0.42` | `lopdf` 0.45 replaced `ttf-parser` with `skrifa`, but moving to it re-introduces a second lopdf unless `pdf-extract` is also dropped |
+| RUSTSEC-2024-0436 | paste 1.0.15 | `ragfs-embed → tokenizers` 0.22.2 and `candle-core → gemm`; `ragfs-store → lancedb → lance-bitpacking`; `ragfs-extract → image → ravif → rav1e` | Each of those still depends on `paste` 1.0.15, so moving `tokenizers` alone does not clear it. Issue #80. |
+| RUSTSEC-2026-0105 | core2 0.4.0 | `ragfs-extract → image 0.25.10 → ravif → rav1e → bitstream-io` | Yanked/unmaintained; remains after retiring `pdf_oxide` because `image` 0.25 still uses rav1e for AVIF. Issue #77. |
+| RUSTSEC-2026-0192 | ttf-parser 0.25.1 | `ragfs-extract → lopdf` 0.42 | `lopdf` 0.45 replaced `ttf-parser` with `skrifa`, but moving to it re-introduces a second lopdf unless `pdf-extract` is also dropped. Issue #82. |
 
 The optional `pdf_oxide` extractor was retired (issue #58), which dropped
 `lzw` (RUSTSEC-2020-0144) and `ttf-parser` 0.24.1 (RUSTSEC-2026-0192).
@@ -117,7 +117,7 @@ justification log for unmaintained/yanked crates we still pull. Re-read it at
 every minor release, and no later than **2026-12-31**. Any new vulnerability
 or unjustified unsound ID is a merge blocker.
 
-Last §1.2 review: 2026-10-02 (pdf_oxide retired; four unmaintained rows remain).
+Last §1.2 review: 2026-10-10 (`number_prefix` left the graph with `hf-hub` 0.5, issue #79; three unmaintained rows remain: `paste` #80, `core2` #77, `ttf-parser` #82).
 
 ---
 

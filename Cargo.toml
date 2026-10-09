@@ -75,8 +75,31 @@ lopdf = "0.42"
 # Compression
 flate2 = "1.1"
 
-# Image processing
-image = "0.25"
+# Image processing.
+#
+# Default `image` features include `avif`, the ravif/rav1e encoder. We never
+# encode AVIF (PNG and JPEG only) and do not enable `avif-native`, so the
+# build does not compile that encoder. `default-formats` cannot drop `avif`
+# on its own; list the other defaults. Cargo still locks the optional
+# closure; `core2` leaves because `bitstream-io` 4.10 uses `no_std_io2`
+# (RUSTSEC-2026-0105).
+image = { version = "0.25", default-features = false, features = [
+    "rayon",
+    "bmp",
+    "dds",
+    "exr",
+    "ff",
+    "gif",
+    "hdr",
+    "ico",
+    "jpeg",
+    "png",
+    "pnm",
+    "qoi",
+    "tga",
+    "tiff",
+    "webp",
+] }
 
 # Office (OOXML / ODT) zip+xml
 zip = "8.6"

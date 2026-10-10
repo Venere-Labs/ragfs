@@ -21,12 +21,12 @@ release.
 - **python**: Add PyO3 bindings for RAGFS
 - **python**: Extend bindings with safety, semantic, and ops modules
 - **examples**: Add LlamaIndex and Haystack RAG pipeline examples
-- **extract**: Extract text from Office OOXML and ODT ([#55](https://github.com/Venere-Labs/ragfs/pull/55))
-- Directory-scoped search and dedicated FUSE mount thread ([#60](https://github.com/Venere-Labs/ragfs/pull/60))
+- **extract**: Extract text from Office OOXML and ODT ([#55](https://github.com/gianlucamazza/ragfs/pull/55))
+- Directory-scoped search and dedicated FUSE mount thread ([#60](https://github.com/gianlucamazza/ragfs/pull/60))
 
 ### CI/CD
 
-- Unblock inherited rustc, cargo-deny, and maturin failures ([#42](https://github.com/Venere-Labs/ragfs/pull/42))
+- Unblock inherited rustc, cargo-deny, and maturin failures ([#42](https://github.com/gianlucamazza/ragfs/pull/42))
 
 ### Changed
 
@@ -38,7 +38,7 @@ release.
 - **deps**: Update fuser 0.16 and pyo3 0.27 for security fixes
 - Resolve CI failures while the workspace version was 0.2.0
 - Align docs and FUSE help with real behavior
-- **security**: Clear P0 direct-dep advisories for #44 ([#62](https://github.com/Venere-Labs/ragfs/pull/62))
+- **security**: Clear P0 direct-dep advisories for #44 ([#62](https://github.com/gianlucamazza/ragfs/pull/62))
 
 ### Miscellaneous
 

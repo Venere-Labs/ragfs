@@ -79,7 +79,7 @@ RAGFS converts your files into **vector embeddings** (numerical representations 
 
 ```bash
 # Clone the repository
-git clone https://github.com/Venere-Labs/ragfs.git
+git clone https://github.com/gianlucamazza/ragfs.git
 cd ragfs
 
 # Build in release mode
@@ -346,6 +346,6 @@ You're ready to use RAGFS. Here's where to go next:
 
 ## Getting Help
 
-- **Issues**: [github.com/Venere-Labs/ragfs/issues](https://github.com/Venere-Labs/ragfs/issues)
+- **Issues**: [github.com/gianlucamazza/ragfs/issues](https://github.com/gianlucamazza/ragfs/issues)
 - **Verbose mode**: `ragfs -v index ~/path` for debug output
 - **Logs**: `~/.cache/ragfs/logs/`

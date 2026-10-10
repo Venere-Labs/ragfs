@@ -43,9 +43,10 @@ ragfs-mcp = "ragfs_mcp:run"
 ragfs = "ragfs_mcp:create_server"
 
 [project.urls]
-Homepage = "https://github.com/Venere-Labs/ragfs"
-Documentation = "https://venere-labs.github.io/ragfs/"
-Repository = "https://github.com/Venere-Labs/ragfs"
+Homepage = "https://github.com/gianlucamazza/ragfs"
+Documentation = "https://gianlucamazza.github.io/ragfs/"
+Repository = "https://github.com/gianlucamazza/ragfs"
+Issues = "https://github.com/gianlucamazza/ragfs/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ragfs_mcp"]

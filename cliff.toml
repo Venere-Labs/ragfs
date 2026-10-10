@@ -69,5 +69,5 @@ topo_order = false
 sort_commits = "oldest"
 
 [remote.github]
-owner = "Venere-Labs"
+owner = "gianlucamazza"
 repo = "ragfs"

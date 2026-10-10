@@ -16,7 +16,7 @@ pip install ./crates/ragfs-python
 cd crates/ragfs-python && maturin develop --release
 
 # Without cloning (same: builds the Rust extension; Rust toolchain + maturin)
-pip install 'git+https://github.com/Venere-Labs/ragfs#subdirectory=crates/ragfs-python'
+pip install 'git+https://github.com/gianlucamazza/ragfs#subdirectory=crates/ragfs-python'
 ```
 
 ## Quick Start

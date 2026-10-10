@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-10-10
+
+
+### Changed
+
+- **fuse**: Split filesystem.rs by virtual-directory family ([#94](https://github.com/gianlucamazza/ragfs/pull/94))
+
+### Documentation
+
+- Point repo metadata and links at gianlucamazza/ragfs ([#145](https://github.com/gianlucamazza/ragfs/pull/145))
+
+### Fixed
+
+- **core**: Share path jail across fuse, python and mcp ([#90](https://github.com/gianlucamazza/ragfs/pull/90))
+
+### Deps
+
+- Bump dirs from 5.0.1 to 6.0.0 ([#104](https://github.com/gianlucamazza/ragfs/pull/104))
+- Bump dirs from 6.0.0 to 7.0.0 ([#124](https://github.com/gianlucamazza/ragfs/pull/124))
+[0.2.1]: https://github.com/gianlucamazza/ragfs/compare/v0.2.0...v0.2.1
+
+
 ## [0.2.0] - 2026-01-12
 
 ### Added

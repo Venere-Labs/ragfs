@@ -14,7 +14,7 @@ Features demonstrated:
 - Streaming responses
 
 Requirements:
-    pip install ragfs[langchain] langchain-openai  # or langchain-anthropic, langchain-ollama
+    pip install './crates/ragfs-python[langchain]' langchain-openai  # from a clone; not on PyPI yet
 
 Usage:
     # Index a directory of documents

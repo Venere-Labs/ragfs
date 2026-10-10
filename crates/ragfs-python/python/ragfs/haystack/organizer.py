@@ -19,7 +19,7 @@ try:
 except ImportError:
     raise ImportError(
         "haystack-ai is required for Haystack integration. "
-        "Install with: pip install ragfs[haystack]"
+        "Install with: pip install './crates/ragfs-python[haystack]' (not yet on PyPI)"
     )
 
 

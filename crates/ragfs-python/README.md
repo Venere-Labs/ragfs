@@ -12,15 +12,27 @@ Python bindings for RAGFS - a high-performance local semantic search and RAG pip
 
 ## Installation
 
-```bash
-# Base package
-pip install ragfs
+`ragfs` is **not yet published on PyPI**. Do not install packages with this
+name (or `ragfs-python`) from PyPI — the names are unclaimed and could be
+registered by anyone.
 
-# With framework support
-pip install ragfs[langchain]      # LangChain
-pip install ragfs[llamaindex]     # LlamaIndex
-pip install ragfs[haystack]       # Haystack
-pip install ragfs[all]            # All frameworks
+Install from source (requires a Rust toolchain and [maturin](https://github.com/PyO3/maturin)):
+
+```bash
+# From a clone of this repository
+pip install maturin
+pip install ./crates/ragfs-python
+# or, for an editable build:
+cd crates/ragfs-python && maturin develop --release
+
+# Optional extras (also from the clone; not from PyPI)
+pip install './crates/ragfs-python[langchain]'      # LangChain
+pip install './crates/ragfs-python[llamaindex]'     # LlamaIndex
+pip install './crates/ragfs-python[haystack]'       # Haystack
+pip install './crates/ragfs-python[all]'            # All frameworks
+
+# Without cloning
+pip install 'git+https://github.com/Venere-Labs/ragfs#subdirectory=crates/ragfs-python'
 ```
 
 ## Quick Start

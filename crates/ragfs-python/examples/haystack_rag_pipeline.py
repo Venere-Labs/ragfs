@@ -16,7 +16,7 @@ Features demonstrated:
 - AI-Powered Organization (Propose-Review-Apply pattern)
 
 Requirements:
-    pip install ragfs[haystack] haystack-ai[openai]  # or [anthropic], [ollama]
+    pip install './crates/ragfs-python[haystack]' haystack-ai[openai]  # from a clone; not on PyPI yet
 
 Usage:
     # Index a directory of documents
@@ -86,7 +86,7 @@ try:
     from haystack.components.builders import PromptBuilder
 except ImportError:
     raise ImportError(
-        "haystack-ai is required. Install with: pip install ragfs[haystack]"
+        "haystack-ai is required. Install with: pip install './crates/ragfs-python[haystack]' (not yet on PyPI)"
     )
 
 

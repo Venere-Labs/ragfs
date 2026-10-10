@@ -5,13 +5,17 @@ This guide covers the Python bindings for RAGFS, enabling semantic search and RA
 ## Installation
 
 ```bash
-# From PyPI (when published)
-pip install ragfs
+# ragfs is not yet published on PyPI. Do not install a package with this
+# name from PyPI — the name is unclaimed and could be registered by anyone.
 
-# From source
-cd crates/ragfs-python
+# From a clone of this repository
 pip install maturin
-maturin develop --release
+pip install ./crates/ragfs-python
+# or, for an editable build:
+cd crates/ragfs-python && maturin develop --release
+
+# Without cloning
+pip install 'git+https://github.com/Venere-Labs/ragfs#subdirectory=crates/ragfs-python'
 ```
 
 ## Quick Start

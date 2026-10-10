@@ -4,8 +4,22 @@ MCP (Model Context Protocol) server that exposes RAGFS semantic filesystem capab
 
 ## Installation
 
+`ragfs-mcp` is **not yet published on PyPI**. Do not install a package with
+this name from PyPI — the name is unclaimed and could be registered by anyone.
+
+Install from source. The server depends on the `ragfs` bindings, which must
+also be installed from this repository (not from PyPI):
+
 ```bash
-pip install ragfs-mcp
+# From a clone of this repository
+pip install ./crates/ragfs-python
+pip install ./crates/ragfs-mcp
+# or
+pip install -e ./crates/ragfs-mcp
+
+# Without cloning
+pip install 'git+https://github.com/Venere-Labs/ragfs#subdirectory=crates/ragfs-python'
+pip install 'git+https://github.com/Venere-Labs/ragfs#subdirectory=crates/ragfs-mcp'
 ```
 
 ## Usage

@@ -14,7 +14,7 @@ try:
 except ImportError:
     raise ImportError(
         "llama-index-core is required for LlamaIndex integration. "
-        "Install with: pip install ragfs[llamaindex]"
+        "Install with: pip install './crates/ragfs-python[llamaindex]' (not yet on PyPI)"
     )
 
 

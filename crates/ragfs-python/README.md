@@ -16,7 +16,8 @@ Python bindings for RAGFS - a high-performance local semantic search and RAG pip
 name (or `ragfs-python`) from PyPI — the names are unclaimed and could be
 registered by anyone.
 
-Install from source (requires a Rust toolchain and [maturin](https://github.com/PyO3/maturin)):
+Install from source. The git/source install builds the Rust extension and
+needs a Rust toolchain plus [maturin](https://github.com/PyO3/maturin):
 
 ```bash
 # From a clone of this repository
@@ -31,7 +32,7 @@ pip install './crates/ragfs-python[llamaindex]'     # LlamaIndex
 pip install './crates/ragfs-python[haystack]'       # Haystack
 pip install './crates/ragfs-python[all]'            # All frameworks
 
-# Without cloning
+# Without cloning (same: builds the Rust extension; Rust toolchain + maturin)
 pip install 'git+https://github.com/Venere-Labs/ragfs#subdirectory=crates/ragfs-python'
 ```
 

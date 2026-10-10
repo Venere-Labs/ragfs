@@ -12,14 +12,15 @@ RAGFS is NOT just a vector database - it's a **FILESYSTEM for AI agents** with:
 ```bash
 # ragfs-mcp is not yet published on PyPI. Do not install a package with this
 # name from PyPI — the name is unclaimed and could be registered by anyone.
+# ragfs is not on PyPI; install ragfs-python first so pip doesn't look for it there.
 
-# From a clone (install the ragfs bindings from this repo first, not PyPI)
+# From a clone
 pip install ./crates/ragfs-python
 pip install ./crates/ragfs-mcp
-# or
-cd crates/ragfs-mcp && pip install -e .
+# or editable (ragfs-python first, same command):
+pip install -e ./crates/ragfs-python -e ./crates/ragfs-mcp
 
-# Without cloning
+# Without cloning (ragfs-python first)
 pip install 'git+https://github.com/Venere-Labs/ragfs#subdirectory=crates/ragfs-python'
 pip install 'git+https://github.com/Venere-Labs/ragfs#subdirectory=crates/ragfs-mcp'
 ```

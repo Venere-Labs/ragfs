@@ -10,6 +10,29 @@ This file tracks `ragfs-python` workspace versions. The crate is listed in
 on PyPI yet. Git tag `v0.2.0` is dated 2026-09-25 (the crate heading below
 keeps the earlier workspace date).
 
+## [0.2.1] - 2026-10-10
+
+
+### Documentation
+
+- Prepare 0.2.1 changelog, metadata, and source installs ([#139](https://github.com/gianlucamazza/ragfs/pull/139))
+- Point repo metadata and links at gianlucamazza/ragfs ([#145](https://github.com/gianlucamazza/ragfs/pull/145))
+
+### Fixed
+
+- **core**: Share path jail across fuse, python and mcp ([#90](https://github.com/gianlucamazza/ragfs/pull/90))
+- **store**: Derive embedding dim from the embedder ([#92](https://github.com/gianlucamazza/ragfs/pull/92))
+
+### Deps
+
+- **python**: Update langchain-anthropic requirement ([#34](https://github.com/gianlucamazza/ragfs/pull/34))
+- **python**: Update langchain-openai requirement ([#31](https://github.com/gianlucamazza/ragfs/pull/31))
+- **python**: Update langchain-ollama requirement ([#32](https://github.com/gianlucamazza/ragfs/pull/32))
+- **python**: Update haystack-ai requirement in /crates/ragfs-python ([#33](https://github.com/gianlucamazza/ragfs/pull/33))
+- **python**: Update pytest-asyncio requirement in /crates/ragfs-python ([#35](https://github.com/gianlucamazza/ragfs/pull/35))
+[0.2.1]: https://github.com/gianlucamazza/ragfs/compare/v0.2.0...v0.2.1
+
+
 ## [0.2.0] - workspace (unpublished)
 
 First changelog for the Python bindings at workspace `0.2.0`. Entries below

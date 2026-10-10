@@ -21,7 +21,7 @@ File → Extract → Chunk → Embed (gte-small, 384-d) → LanceDB → Query
 
 All processing stays on the machine. The first run downloads [`thenlper/gte-small`](https://huggingface.co/thenlper/gte-small) (~67–100 MB) unless `HF_HUB_OFFLINE=1` and a cache is already present.
 
-[Models used in my projects](https://huggingface.co/collections/homen3/models-used-in-my-projects-6aca0b3201f38f4c264ac9bf)
+[Models used in my projects](https://huggingface.co/collections/gianlucamazza/models-used-in-my-projects-6aca0b3201f38f4c264ac9bf)
 
 ## Quick start
 

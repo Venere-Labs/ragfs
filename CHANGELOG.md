@@ -7,12 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-10
+
 ### Security
 - Path jail (`resolve_under_root`) now lives in `ragfs-core` and is enforced by `SafetyManager` (`soft_delete` / `restore` / `undo`), so Python `RagfsSafetyManager` and MCP `ragfs_delete_to_trash` cannot escape the source root.
 - Documented the advisory-response ladder, `ignore:` ownership, and §1.2 review cadence (next review by 2026-12-31) in `SECURITY.md`.
 
 ### Removed
-- Optional `pdf_oxide` extractor feature. PDF text and images continue to use `PdfExtractor` (`pdf-extract` + `lopdf`). `--features pdf_oxide` is no longer valid.
+- **BREAKING**: Optional `pdf_oxide` extractor feature. PDF text and images continue to use `PdfExtractor` (`pdf-extract` + `lopdf`). `--features pdf_oxide` is no longer valid.
 
 ### Changed
 - Agent docs (`CLAUDE.md`, `AGENTS.md`) list all 10 Cargo workspace crates plus `ragfs-mcp`. `docs/PERFORMANCE.md` documents `[embedding].model`, CLI-only `--force`, and `--hybrid` vs `[query].hybrid`.
@@ -156,6 +158,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Content-addressed storage with blake3 hashing
 - Registry pattern for extensible extractors and chunkers
 
-[Unreleased]: https://github.com/Venere-Labs/ragfs/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Venere-Labs/ragfs/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Venere-Labs/ragfs/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Venere-Labs/ragfs/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Venere-Labs/ragfs/releases/tag/v0.1.0

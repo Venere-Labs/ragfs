@@ -17,7 +17,7 @@ except ImportError:
     except ImportError:
         raise ImportError(
             "langchain-core or langchain-text-splitters is required. "
-            "Install with: pip install ragfs[langchain]"
+            "Install with: pip install './crates/ragfs-python[langchain]' (not yet on PyPI)"
         )
 
 

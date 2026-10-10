@@ -99,7 +99,7 @@ advisory ID, not the Dependabot severity label.
 
 ### `ignore:` list
 
-- **Owner:** Lab (Venere Labs maintainers of this repository).
+- **Owner:** Lab (the maintainers of this repository).
 - **Default:** `ignore = []`. An empty list is a feature, not an omission.
 - **Adding an ID** requires all of: (1) a reachability analysis (the crate is
   not in the default-feature graph, or the vulnerable function is unreachable),

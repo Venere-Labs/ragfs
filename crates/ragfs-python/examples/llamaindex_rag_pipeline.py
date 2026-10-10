@@ -16,7 +16,7 @@ Features demonstrated:
 - AI-Powered Organization (Propose-Review-Apply pattern)
 
 Requirements:
-    pip install ragfs[llamaindex] llama-index-llms-openai  # or llama-index-llms-anthropic, llama-index-llms-ollama
+    pip install './crates/ragfs-python[llamaindex]' llama-index-llms-openai  # from a clone; not on PyPI yet
 
 Usage:
     # Index a directory of documents
@@ -84,7 +84,7 @@ try:
     from llama_index.core.response_synthesizers import get_response_synthesizer
 except ImportError:
     raise ImportError(
-        "llama-index-core is required. Install with: pip install ragfs[llamaindex]"
+        "llama-index-core is required. Install with: pip install './crates/ragfs-python[llamaindex]' (not yet on PyPI)"
     )
 
 

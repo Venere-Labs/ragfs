@@ -5,12 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-This file documents the existing workspace version `0.2.0` for `ragfs-python`
-(`version.workspace = true` / `pyproject.toml` `version = "0.2.0"` already on
-`main`). It is **not** a crates.io or PyPI publication record.
-`ragfs-python` is **not** listed in `release-plz.toml`. There is no git tag
-and no GitHub Release for this version. Root `CHANGELOG.md` still uses
-`[Unreleased]` for work after the dated `[0.2.0] - 2026-01-11` entry.
+This file tracks `ragfs-python` workspace versions. The crate is listed in
+`release-plz.toml` (`publish = false`, `git_only = true`). Bindings are not
+on PyPI yet. Git tag `v0.2.0` is dated 2026-09-25 (the crate heading below
+keeps the earlier workspace date).
 
 ## [0.2.0] - workspace (unpublished)
 

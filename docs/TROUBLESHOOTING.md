@@ -321,11 +321,14 @@ ImportError: No module named 'ragfs'
 
 **Solutions:**
 
-1. **Install the Python package:**
+1. **Install the Python package from source** (`ragfs` is not yet published
+   on PyPI; do not install a package with that name from PyPI):
    ```bash
-   pip install ragfs
+   pip install ./crates/ragfs-python
    # or
    pip install -e ./crates/ragfs-python
+   # or
+   cd crates/ragfs-python && maturin develop
    ```
 
 2. **Check virtual environment:**

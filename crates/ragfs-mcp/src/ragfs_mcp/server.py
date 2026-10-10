@@ -173,7 +173,7 @@ async def ragfs_search(
     try:
         from ragfs import RagfsRetriever
     except ImportError:
-        return '{"error": "ragfs package not installed. Install with: pip install ragfs"}'
+        return '{"error": "ragfs package not installed. Install from source (not PyPI): pip install ./crates/ragfs-python"}'
 
     import json
 

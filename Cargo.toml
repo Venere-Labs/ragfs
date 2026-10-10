@@ -44,7 +44,7 @@ async-trait = "0.1"
 futures = "0.3"
 
 # FUSE
-fuser = "0.16"
+fuser = "0.18"
 
 # File watching
 notify = "8.2"

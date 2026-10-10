@@ -53,4 +53,4 @@ Let AI help organize your files:
 
 ---
 
-*Powered by [RAGFS](https://github.com/Venere-Labs/ragfs), [Chainlit](https://chainlit.io), and [Ollama](https://ollama.ai)*
+*Powered by [RAGFS](https://github.com/gianlucamazza/ragfs), [Chainlit](https://chainlit.io), and [Ollama](https://ollama.ai)*

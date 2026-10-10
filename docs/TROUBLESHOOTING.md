@@ -590,7 +590,7 @@ df -h ~/.local/share/ragfs/
 
 ### Report Issues
 
-- **GitHub Issues**: [github.com/Venere-Labs/ragfs/issues](https://github.com/Venere-Labs/ragfs/issues)
+- **GitHub Issues**: [github.com/gianlucamazza/ragfs/issues](https://github.com/gianlucamazza/ragfs/issues)
 - Include: Error message, steps to reproduce, diagnostic info above
 
 ### Resources

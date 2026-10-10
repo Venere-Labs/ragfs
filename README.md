@@ -5,10 +5,10 @@
 # RAGFS
 
 <p align="center">
-  <a href="https://github.com/Venere-Labs/ragfs/actions/workflows/ci.yml"><img src="https://github.com/Venere-Labs/ragfs/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/Venere-Labs/ragfs/actions/workflows/security.yml"><img src="https://github.com/Venere-Labs/ragfs/actions/workflows/security.yml/badge.svg" alt="Security Audit"></a>
-  <a href="https://codecov.io/gh/Venere-Labs/ragfs"><img src="https://codecov.io/gh/Venere-Labs/ragfs/branch/main/graph/badge.svg" alt="codecov"></a>
-  <a href="https://Venere-Labs.github.io/ragfs/ragfs/"><img src="https://img.shields.io/badge/docs-GitHub%20Pages-blue" alt="Documentation"></a>
+  <a href="https://github.com/gianlucamazza/ragfs/actions/workflows/ci.yml"><img src="https://github.com/gianlucamazza/ragfs/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/gianlucamazza/ragfs/actions/workflows/security.yml"><img src="https://github.com/gianlucamazza/ragfs/actions/workflows/security.yml/badge.svg" alt="Security Audit"></a>
+  <a href="https://codecov.io/gh/gianlucamazza/ragfs"><img src="https://codecov.io/gh/gianlucamazza/ragfs/branch/main/graph/badge.svg" alt="codecov"></a>
+  <a href="https://gianlucamazza.github.io/ragfs/ragfs/"><img src="https://img.shields.io/badge/docs-GitHub%20Pages-blue" alt="Documentation"></a>
   <a href="LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg" alt="License"></a>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.91%2B-orange.svg" alt="Rust 1.91+"></a>
 </p>

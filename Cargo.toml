@@ -18,7 +18,9 @@ version = "0.2.0"
 authors = ["Gianluca Mazza"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/Venere-Labs/ragfs"
+repository = "https://github.com/gianlucamazza/ragfs"
+homepage = "https://github.com/gianlucamazza/ragfs"
+documentation = "https://gianlucamazza.github.io/ragfs/"
 rust-version = "1.91"
 
 [workspace.dependencies]

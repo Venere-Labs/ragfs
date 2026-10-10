@@ -17,8 +17,8 @@ pip install ./crates/ragfs-mcp
 pip install -e ./crates/ragfs-python -e ./crates/ragfs-mcp
 
 # Without cloning (ragfs-python first)
-pip install 'git+https://github.com/Venere-Labs/ragfs#subdirectory=crates/ragfs-python'
-pip install 'git+https://github.com/Venere-Labs/ragfs#subdirectory=crates/ragfs-mcp'
+pip install 'git+https://github.com/gianlucamazza/ragfs#subdirectory=crates/ragfs-python'
+pip install 'git+https://github.com/gianlucamazza/ragfs#subdirectory=crates/ragfs-mcp'
 ```
 
 ## Usage

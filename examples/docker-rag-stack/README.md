@@ -218,7 +218,7 @@ OLLAMA_MODEL=phi3 docker compose up
 
 ## Resources
 
-- [RAGFS Documentation](https://github.com/Venere-Labs/ragfs)
+- [RAGFS Documentation](https://github.com/gianlucamazza/ragfs)
 - [Chainlit Documentation](https://docs.chainlit.io)
 - [Ollama Models](https://ollama.ai/library)
 - [LangChain Documentation](https://python.langchain.com)
